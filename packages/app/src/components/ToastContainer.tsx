@@ -16,6 +16,7 @@ import {
   type ToastItem,
   type NotificationType,
 } from '../store/notificationStore'
+import { layoutStore } from '../store/layoutStore'
 import { hasUpdateAvailable, shouldShowUpdateToast, updateStore, useUpdateStore } from '../store/updateStore'
 import { CloseIcon, HandIcon, QuestionIcon, CheckIcon, AlertCircleIcon, DownloadIcon } from './Icons'
 
@@ -177,12 +178,17 @@ export function ToastContainer({ onOpenAbout }: { onOpenAbout: () => void }) {
   if (!showUpdateToast && toasts.length === 0) return null
 
   const handleClick = (item: ToastItem) => {
-    const { id, sessionId, directory } = item.notification
+    const { id, sessionId, directory, target } = item.notification
     notificationStore.dismissToast(id)
     notificationStore.markRead(id)
     if (sessionId) {
       const dir = directory ? `?dir=${directory}` : ''
       window.location.assign(`#/session/${sessionId}${dir}`)
+      // 扩展类通知（ctx.ui.notify）：内容在右侧扩展面板的命令反馈区，
+      // 跳转 session 后顺带把扩展面板带出来
+      if (target === 'extensions') {
+        layoutStore.addExtensionsTab('right')
+      }
     }
   }
 

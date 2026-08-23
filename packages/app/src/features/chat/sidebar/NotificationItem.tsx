@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CheckIcon, AlertCircleIcon, CloseIcon, HandIcon, QuestionIcon } from '../../../components/Icons'
 import { notificationStore } from '../../../store/notificationStore'
+import { layoutStore } from '../../../store/layoutStore'
 import { useInputCapabilities } from '../../../hooks/useInputCapabilities'
 import { formatNotificationTime } from './sidebarUtils'
 import type { NotificationEntry } from '../../../store/notificationStore'
@@ -103,6 +104,11 @@ export function NotificationItem({ entry, resolvedSession, onSelect }: Notificat
     } else {
       const dir = entry.directory ? `?dir=${entry.directory}` : ''
       window.location.hash = `#/session/${entry.sessionId}${dir}`
+    }
+    // 扩展类通知（ctx.ui.notify）：内容在右侧扩展面板的命令反馈区，
+    // 跳转 session 后顺带把扩展面板带出来
+    if (entry.target === 'extensions' && entry.sessionId) {
+      layoutStore.addExtensionsTab('right')
     }
   }
 

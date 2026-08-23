@@ -16,6 +16,9 @@ import { useSyncExternalStore } from 'react'
 
 export type NotificationType = 'permission' | 'question' | 'completed' | 'error'
 
+/** 点击通知后的跳转目标：session 页面（默认）或该 session 右侧边栏的扩展面板 */
+export type NotificationTarget = 'session' | 'extensions'
+
 /** push 后的回调，用于声音播放等扩展 */
 export type NotificationPushListener = (type: NotificationType) => void
 
@@ -28,6 +31,8 @@ export interface NotificationEntry {
   directory?: string
   timestamp: number
   read: boolean
+  /** 点击后的跳转目标；缺省为 'session'。扩展通知（ctx.ui.notify）为 'extensions' */
+  target?: NotificationTarget
 }
 
 export interface ToastItem {
@@ -137,7 +142,7 @@ class NotificationStore {
   // 推送通知（加历史 + 弹 toast）
   // ============================================
 
-  push(type: NotificationType, title: string, body: string, sessionId: string, directory?: string) {
+  push(type: NotificationType, title: string, body: string, sessionId: string, directory?: string, options?: { target?: NotificationTarget }) {
     const entry: NotificationEntry = {
       id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       type,
@@ -147,6 +152,7 @@ class NotificationStore {
       directory,
       timestamp: Date.now(),
       read: false,
+      target: options?.target,
     }
 
     // 加到历史
