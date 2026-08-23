@@ -725,7 +725,7 @@ export const SessionTreePanel = memo(function SessionTreePanel({
               className={`group/sep relative flex h-2.5 shrink-0 cursor-row-resize items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-main-100 ${
                 isResizing ? 'bg-accent-main-100/20' : 'hover:bg-bg-200/60'
               }`}
-              onMouseDown={handleResizeStart}
+              onPointerDown={handleResizeStart}
               onTouchStart={handleTouchResizeStart}
               onKeyDown={event => {
                 if (event.key === 'ArrowUp') { event.preventDefault(); adjustSplitHeight(-24) }

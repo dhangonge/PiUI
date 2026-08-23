@@ -650,7 +650,7 @@ export const FileExplorer = memo(function FileExplorer({
             hover:bg-accent-main-100/50 active:bg-accent-main-100 transition-colors
             ${isResizing ? 'bg-accent-main-100' : 'bg-bg-200/60'}
           `}
-          onMouseDown={handleResizeStart}
+          onPointerDown={handleResizeStart}
           onTouchStart={handleTouchResizeStart}
         />
       )}

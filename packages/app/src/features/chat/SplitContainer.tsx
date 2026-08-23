@@ -85,6 +85,14 @@ function SplitNode({ split, renderLeaf, fullscreenPaneId }: SplitNodeProps) {
       const container = containerRef.current
       if (!container) return
 
+      // 指针捕获：即使指针在窗口外释放，pointerup 也会送达（事件照常冒泡到
+      // document 监听），防止 panel-resize-end 丢失导致全局 isPanelResizing 卡死
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId)
+      } catch {
+        // jsdom 等不支持的环境忽略
+      }
+
       const rect = container.getBoundingClientRect()
       let pendingRatio: number | null = null
       let rafId: number | null = null

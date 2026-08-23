@@ -112,19 +112,28 @@ export function useDynamicVirtualScroll({
     return { startIndex: start, endIndex: end, offsetY: offsets[start] || 0 }
   }, [scrollTop, containerHeight, findIndex, offsets, lineCount])
 
+  // isResizing 只推迟尺寸同步，不能跳过 ResizeObserver 的挂载——否则在拖拽中
+  // 挂载/显示的容器会永久丢失尺寸同步（containerHeight 卡在 0，只渲染 overscan
+  // 的几行）。isResizing 结束（effect 重跑）或 lineCount 变化时立即补一次同步。
+  const isResizingRef = useRef(isResizing)
+  useEffect(() => {
+    isResizingRef.current = isResizing
+  }, [isResizing])
+
   // 监听容器高度
   useEffect(() => {
     const container = containerRef.current
-    if (!container || isResizing) return
-    setContainerHeight(container.clientHeight)
-    setContainerWidth(container.clientWidth)
-    const ro = new ResizeObserver(() => {
+    if (!container) return
+    const syncSize = () => {
+      if (isResizingRef.current) return
       setContainerHeight(container.clientHeight)
       setContainerWidth(container.clientWidth)
-    })
+    }
+    syncSize()
+    const ro = new ResizeObserver(syncSize)
     ro.observe(container)
     return () => ro.disconnect()
-  }, [isResizing])
+  }, [isResizing, lineCount])
 
   // 监听容器宽度变化 → 清空测量值
   // 阈值 20px：滚动条出现/消失约 15-17px，不应触发全部重测

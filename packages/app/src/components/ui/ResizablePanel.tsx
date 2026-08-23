@@ -79,6 +79,14 @@ export const ResizablePanel = memo(function ResizablePanel({
       const content = contentRef.current
       if (!panel || !content) return
 
+      // 指针捕获：即使指针在窗口外释放，pointerup 也会送达 handle（事件照常冒泡到
+      // document 监听），防止 panel-resize-end 丢失导致全局 isPanelResizing 永久卡死
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId)
+      } catch {
+        // jsdom 等不支持的环境忽略
+      }
+
       setIsResizing(true)
       document.body.style.cursor = position === 'right' ? 'col-resize' : 'row-resize'
       document.body.style.userSelect = 'none'
@@ -174,11 +182,17 @@ export const ResizablePanel = memo(function ResizablePanel({
       if (pointerUp) {
         document.removeEventListener('pointerup', pointerUp)
         document.removeEventListener('pointercancel', pointerUp)
+        // 拖拽中被卸载：补发 end，否则全局 isPanelResizing 会永久卡在 true
+        // （依赖它的 DiffViewer 虚拟滚动会停止同步容器尺寸）
+        window.dispatchEvent(new CustomEvent('panel-resize-end'))
       }
 
       const { move: touchMove, end: touchEnd } = touchHandlersRef.current
       if (touchMove) document.removeEventListener('touchmove', touchMove)
-      if (touchEnd) document.removeEventListener('touchend', touchEnd)
+      if (touchEnd) {
+        document.removeEventListener('touchend', touchEnd)
+        window.dispatchEvent(new CustomEvent('panel-resize-end'))
+      }
 
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
 

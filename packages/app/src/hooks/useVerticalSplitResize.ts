@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
   type TouchEvent as ReactTouchEvent,
 } from 'react'
@@ -22,7 +23,7 @@ interface UseVerticalSplitResizeResult {
   splitHeight: number | null
   isResizing: boolean
   resetSplitHeight: () => void
-  handleResizeStart: (event: ReactMouseEvent) => void
+  handleResizeStart: (event: ReactMouseEvent<HTMLElement> | ReactPointerEvent<HTMLElement>) => void
   handleTouchResizeStart: (event: ReactTouchEvent) => void
   adjustSplitHeight: (delta: number) => void
 }
@@ -92,11 +93,24 @@ export function useVerticalSplitResize({
   }, [])
 
   const handleResizeStart = useCallback(
-    (event: ReactMouseEvent) => {
+    (event: ReactMouseEvent<HTMLElement> | ReactPointerEvent<HTMLElement>) => {
       event.preventDefault()
 
       const container = containerRef.current
       if (!container || !primaryRef.current) return
+
+      // 触摸走 handleTouchResizeStart，避免 pointerdown + touchstart 双重启动
+      if ('pointerType' in event && event.pointerType === 'touch') return
+
+      // 指针捕获：即使指针在窗口外释放，pointerup 也会送达分隔条（事件照常冒泡到
+      // document 监听），防止 isResizing 永久卡死
+      if ('pointerId' in event) {
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId)
+        } catch {
+          // jsdom 等不支持的环境忽略
+        }
+      }
 
       setIsResizing(true)
 
@@ -104,7 +118,7 @@ export function useVerticalSplitResize({
       const startY = event.clientY
       const startHeight = currentHeightRef.current ?? containerRect.height * defaultPrimaryHeightRatio
 
-      const handleMouseMove = (moveEvent: MouseEvent) => {
+      const handlePointerMove = (moveEvent: PointerEvent) => {
         if (rafRef.current) {
           cancelAnimationFrame(rafRef.current)
         }
@@ -114,16 +128,18 @@ export function useVerticalSplitResize({
         })
       }
 
-      const handleMouseUp = () => {
+      const handlePointerUp = () => {
         finishResize()
-        document.removeEventListener('mousemove', handleMouseMove)
-        document.removeEventListener('mouseup', handleMouseUp)
+        document.removeEventListener('pointermove', handlePointerMove)
+        document.removeEventListener('pointerup', handlePointerUp)
+        document.removeEventListener('pointercancel', handlePointerUp)
       }
 
       document.body.style.cursor = 'row-resize'
       document.body.style.userSelect = 'none'
-      document.addEventListener('mousemove', handleMouseMove)
-      document.addEventListener('mouseup', handleMouseUp)
+      document.addEventListener('pointermove', handlePointerMove)
+      document.addEventListener('pointerup', handlePointerUp)
+      document.addEventListener('pointercancel', handlePointerUp)
     },
     [applyHeight, containerRef, defaultPrimaryHeightRatio, finishResize, primaryRef],
   )
