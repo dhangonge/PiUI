@@ -1,6 +1,10 @@
-# PiUI
+# PiUI（Android 客户端）
 
-PiUI 是 Pi 原生 coding agent 的 Web/桌面客户端。界面、session 浏览和扩展 UI 由 PiUI 提供，agent 执行由 Pi SDK 提供。
+PiUI 是 Pi 原生 coding agent 的 Android 客户端。界面、session 浏览和扩展 UI 由 PiUI 提供，agent 执行由 Pi SDK 提供。
+
+> 本仓是从上游 PiUI 剔除非安卓部分后的二次开发分支：仅保留 `packages/{app,protocol,server,pi-worker}` 与 Tauri Android 构建链路，已移除桌面打包（NSIS/DMG/DEB）、便携包（bun `--compile`）、内嵌本地服务进程、单实例、窗口装饰条、iOS 与 Docker 相关内容。
+>
+> **APK 内不包含 agent runtime**：手机端必须连一个远端 PiUI server（局域网或反向代理）。本地开发时才需要自己起 server。
 
 ## 要求
 
@@ -8,6 +12,7 @@ PiUI 是 Pi 原生 coding agent 的 Web/桌面客户端。界面、session 浏�
 - npm
 - 已安装并可访问的 Pi SDK，或使用 PiUI 随附的 SDK
 - 对话需要配置 Pi 的 provider 凭据；测试和类型检查默认不会调用真实 LLM
+- 构建 APK 另需：JDK 17+、Android SDK（含 NDK `29.0.14206865`）、Rust 稳定版并带 `aarch64-linux-android` / `armv7-linux-androideabi` target
 
 ## 快速开始
 
@@ -138,6 +143,26 @@ npm run pi-worker -- web --api-only
 
 监听配置和环境变量保存到本地服务设置中。修改监听地址或端口后需要重启 server；已运行的外部 server 不会被浏览器强行修改。
 
+Android 端不管理本地服务（`isTauriMobile()` 会跳过自动启动），只作为远端 server 的客户端：在登录/连接界面填入 server 地址与 `~/.piui/auth-token` 对应的 token，或使用 `piui://connect?url=...&token=...` 链接导入。
+
+## Android 构建
+
+```bash
+# 一次性：生成 Android 图标资源占位（不放桌面 runtime 进 APK）
+npm run prepare:tauri-mobile-resources
+
+# 开发（连接本机 8787 的 server；需先另开 npm run dev:server:pi）
+npm run tauri:android:dev
+
+# 打包 APK（arm64）
+npm run tauri:android:build -- --apk --target aarch64
+```
+
+- `gen/android` 已提交进仓库（含自定义 `MainActivity.kt` 与沉浸式主题），**不要重新 `tauri android init`**，否则会覆盖自定义文件。
+- 构建产物在 `packages/app/src-tauri/gen/android/app/build/outputs/apk/`。
+- 发布签名走 CI（`.github/workflows/android-release.yml`），需配置 `ANDROID_KEYSTORE_BASE64` / `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` 三个 secret。
+- 本机需安装 Android SDK（`ANDROID_HOME` 指向 SDK 根目录，NDK `29.0.14206865` 装在 `$ANDROID_HOME/ndk/` 下即可被 tauri CLI 找到）。
+
 ## 架构概览
 
 PiUI 将 session 浏览和 agent 执行分开：
@@ -185,7 +210,7 @@ npm run install:test-extension
 
 ## 相关目录
 
-- `packages/app`：React Web/桌面客户端
+- `packages/app`：React 客户端（Tauri Android 壳 + Web）
 - `packages/server`：HTTP、WebSocket、session host、PTY 和静态托管
 - `packages/pi-worker`：Pi SDK worker 和 runtime adapter
 - `packages/protocol`：前后端协议与命令定义
@@ -201,7 +226,7 @@ npm run install:test-extension
 修改 SVG 后重新生成图标：
 
 ```bash
-# 1. 重新生成桌面/Windows/macOS/iOS 全套（写 src-tauri/icons）
+# 1. 重新生成通用图标全套（写 src-tauri/icons，同时是下一步的输入源）
 npm run icons:tauri -w @piui/app
 
 # 2. 重新生成 Android mipmap 全套（tauri 的 Android 输出比例不可控，必须用脚本覆盖）
@@ -239,7 +264,7 @@ git tag v0.x.x
 git push origin main
 git push origin v0.x.x
 
-# 5. GitHub Actions 自动构建并发布桌面端
+# 5. GitHub Actions 自动构建并发布 Android APK
 
 # 6. 把 main 同步回 dev
 git switch dev

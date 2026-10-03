@@ -1,4 +1,4 @@
-name: Desktop And Mobile Release
+name: Android Release
 
 on:
   push:
@@ -14,137 +14,10 @@ permissions:
   contents: write
 
 concurrency:
-  group: desktop-release-${{ github.ref }}-${{ github.event.inputs.tag }}
+  group: android-release-${{ github.ref }}-${{ github.event.inputs.tag }}
   cancel-in-progress: true
 
 jobs:
-  portable:
-    name: portable ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { name: windows-x64, os: windows-latest, target: bun-windows-x64 }
-          - { name: linux-x64, os: ubuntu-latest, target: bun-linux-x64 }
-          - { name: macos-arm64, os: macos-latest, target: bun-darwin-arm64 }
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-
-      - uses: oven-sh/setup-bun@v2
-
-      # win32 专属补丁在非 Windows 上会让 patch-package 直接报错（包不存在）
-      - name: drop windows-only patch
-        if: runner.os != 'Windows'
-        run: rm -f patches/@lydell+node-pty-win32-x64+*.patch
-
-      - run: npm ci
-
-      # 构建 worker 产物（SDK 内联所需）；全量 validate 由 ci.yml 在
-      # tag push 时独立执行（带 timeout），不再阻塞 portable 打包。
-      - run: npm run build
-
-      - name: package desktop bundle
-        run: node scripts/package-desktop.mjs --skip-build --target ${{ matrix.target }}
-
-      - name: archive bundle
-        shell: bash
-        run: |
-          cd dist-desktop
-          if [ "${{ matrix.name }}" = "windows-x64" ]; then
-            7z a -tzip "../piui-${{ matrix.name }}.zip" .
-          else
-            tar -czf "../piui-${{ matrix.name }}.tar.gz" .
-          fi
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: piui-${{ matrix.name }}
-          path: |
-            piui-${{ matrix.name }}.zip
-            piui-${{ matrix.name }}.tar.gz
-          if-no-files-found: ignore
-
-  desktop:
-    name: desktop ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { name: windows-x64, os: windows-latest, target: bun-windows-x64 }
-          - { name: macos-arm64, os: macos-latest, target: bun-darwin-arm64 }
-          - { name: linux-x64, os: ubuntu-24.04, target: bun-linux-x64 }
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-
-      - uses: oven-sh/setup-bun@v2
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './packages/app/src-tauri -> target'
-          key: desktop-${{ matrix.name }}
-
-      - name: Drop Windows-only patch on Unix
-        if: runner.os != 'Windows'
-        run: rm -f patches/@lydell+node-pty-win32-x64+*.patch
-
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - run: npm ci
-      - run: npm run build
-
-      - name: Build bundled PiUI server
-        run: node scripts/package-desktop.mjs --skip-build --target ${{ matrix.target }}
-
-      - name: Prepare Tauri resources
-        run: node scripts/prepare-tauri-resources.mjs
-
-      - name: Build Tauri desktop bundle
-        run: npm run tauri:build -w @piui/app
-
-      - name: Collect desktop artifacts
-        shell: bash
-        run: |
-          mkdir -p release-artifacts
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            find packages/app/src-tauri/target/release/bundle/nsis -name '*.exe' -exec cp {} release-artifacts/ \;
-          elif [ "${{ runner.os }}" = "macOS" ]; then
-            find packages/app/src-tauri/target/release/bundle/dmg -name '*.dmg' -exec cp {} release-artifacts/ \;
-          else
-            find packages/app/src-tauri/target/release/bundle/deb -name '*.deb' -exec cp {} release-artifacts/ \;
-            if [ -d packages/app/src-tauri/target/release/bundle/appimage ]; then
-              find packages/app/src-tauri/target/release/bundle/appimage -name '*.AppImage' -exec cp {} release-artifacts/ \;
-            fi
-          fi
-          ls -la release-artifacts
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: piui-desktop-${{ matrix.name }}
-          path: release-artifacts/*
-          if-no-files-found: error
-
   android:
     name: android ${{ matrix.name }}
     runs-on: ubuntu-latest
@@ -243,7 +116,7 @@ jobs:
 
   publish:
     name: publish release assets
-    needs: [portable, desktop, android]
+    needs: [android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -282,7 +155,7 @@ jobs:
             BODY="No changelog entry found for ${TAG}."
           fi
           echo "$BODY" > /tmp/release-body.md
-          printf '\n---\n\n**Portable:** Windows (.zip), Linux (.tar.gz), macOS (.tar.gz)\n**Desktop:** Windows (.exe), macOS (.dmg), Linux (.deb, .AppImage)\n**Mobile:** Android (.apk) — arm64, armeabi-v7a\n' >> /tmp/release-body.md
+          printf '\n---\n\n**Android:** (.apk) — arm64, armeabi-v7a\n' >> /tmp/release-body.md
 
       - uses: softprops/action-gh-release@v2
         with:

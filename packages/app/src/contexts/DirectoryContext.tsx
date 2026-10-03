@@ -7,7 +7,7 @@ import i18n from '../i18n'
 import { useRouter } from '../hooks/useRouter'
 import { normalizeToForwardSlash, getDirectoryName, isSameDirectory, serverStorage } from '../utils'
 import { layoutStore, useLayoutStore } from '../store/layoutStore'
-import { isTauri } from '../utils/tauri'
+import { isTauri, isTauriMobile } from '../utils/tauri'
 import { DirectoryContext, type DirectoryContextValue, type SavedDirectory } from './DirectoryContext.shared'
 import { hasUnsavedFileChanges } from '../store/unsavedFileStore'
 
@@ -157,7 +157,9 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
   }, [addDirectory])
 
   useEffect(() => {
-    if (!isTauri()) return
+    // 桌面专属：CLI 启动参数目录 + single-instance / macOS open 事件；
+    // 安卓端既无命令行参数也无二次实例，直接跳过。
+    if (!isTauri() || isTauriMobile()) return
 
     let unlisten: (() => void) | undefined
 
