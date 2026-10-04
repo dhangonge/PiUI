@@ -161,7 +161,7 @@ npm run tauri:android:build -- --apk --target aarch64
 - `gen/android` 已提交进仓库（含自定义 `MainActivity.kt` 与沉浸式主题），**不要重新 `tauri android init`**，否则会覆盖自定义文件。
 - 构建产物在 `packages/app/src-tauri/gen/android/app/build/outputs/apk/`。
 - 发布签名走 CI（`.github/workflows/android-release.yml`），需配置 `ANDROID_KEYSTORE_BASE64` / `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` 三个 secret。
-- 本机需安装 Android SDK（`ANDROID_HOME` 指向 SDK 根目录，NDK `29.0.14206865` 装在 `$ANDROID_HOME/ndk/` 下即可被 tauri CLI 找到）。
+- 本机需安装 Android SDK（`ANDROID_HOME` 指向 SDK 根目录，NDK 装在 `$ANDROID_HOME/ndk/` 下即可被 tauri CLI 找到，CI 固定用 `29.0.14206865`，本机 r28 亦验证可构建）。
 
 ## 架构概览
 
