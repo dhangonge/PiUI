@@ -148,6 +148,11 @@ export function buildPiHistoryItems(branch: PiBranchPage): PiTimelineItem[] {
       } as PiBranchSummaryItem)
       lastBashGroup = undefined
     } else if (entry.type === 'custom_message') {
+      // display=false：注入模型上下文、不进对话流（与 TUI 一致）。
+      // 若把它当条目渲染，它会成为壳/turn 的分隔符，把助手消息挤出壳并排到
+      // 所有用户消息之前。不重置 lastBashGroup：它对用户不可见，不该断开
+      // 相邻 bash 工具组。
+      if (entry.display !== true) continue
       items.push({
         kind: 'custom_message',
         entryId: entry.id,

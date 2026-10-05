@@ -88,6 +88,35 @@ describe('selectPiTimelineItems bash grouping', () => {
   })
 })
 
+describe('selectPiTimelineItems custom messages', () => {
+  const customEntry = (id: string, display: boolean) => ({
+    type: 'custom_message',
+    id,
+    parentId: null,
+    timestamp: '2026-01-01T00:00:00Z',
+    customType: 'plannotator-framing',
+    content: '[PLANNOTATOR - PLANNING PHASE] model-only context',
+    display,
+  } as unknown as SessionEntry)
+
+  it('skips hook messages hidden from the conversation (display=false)', () => {
+    const items = selectPiTimelineItems(page([userEntry('u1', 'hi'), customEntry('c1', false)]))
+    expect(items.map(item => item.kind)).toEqual(['user_message'])
+  })
+
+  it('keeps hook messages that opt into display', () => {
+    const items = selectPiTimelineItems(page([userEntry('u1', 'hi'), customEntry('c1', true)]))
+    expect(items.map(item => item.kind)).toEqual(['user_message', 'custom_message'])
+  })
+
+  it('does not split a bash tool group around a hidden hook message', () => {
+    const items = selectPiTimelineItems(page([bashEntry('b1', 'ls'), customEntry('c1', false), bashEntry('b2', 'pwd')]))
+    const groups = items.filter(item => item.kind === 'bash_execution_group') as PiBashExecutionGroupItem[]
+    expect(groups).toHaveLength(1)
+    expect(groups[0].items.map(item => item.entryId)).toEqual(['b1', 'b2'])
+  })
+})
+
 describe('selectPiTimelineItems live/persisted key handover', () => {
   const assistantEntry = (id: string, text: string) => ({
     type: 'message',

@@ -17,6 +17,9 @@ import {
 
 const MOCK_SDK_VERSION = "mock"
 
+/** Prompt prefix that makes the mock stream a slow thinking + tool turn (UI smoke). */
+export const MOCK_SLOW_TOOL_PREFIX = "mock-slow:"
+
 function mockHome(): string {
   return process.env.PIUI_MOCK_DIR?.trim() || path.join(tmpdir(), "piui-mock")
 }
@@ -573,6 +576,10 @@ export class MockPiSession implements SessionRuntime {
   }
 
   private runMockTurn(userText: string): void {
+    if (userText.startsWith(MOCK_SLOW_TOOL_PREFIX)) {
+      this.runMockToolTurn(userText)
+      return
+    }
     const full = `Mock reply to: ${userText}`
     const chunks = [full.slice(0, Math.ceil(full.length / 2)), full]
     const messageId = randomUUID()
@@ -625,6 +632,66 @@ export class MockPiSession implements SessionRuntime {
       this.emitEvent({ type: "agent_end" })
       this.drainQueue()
     }, 25)
+  }
+
+  /**
+   * UI-smoke turn: streams thinking + a tool call + text over ~2.6s so tests can
+   * observe the live process shell before it settles.
+   */
+  private runMockToolTurn(userText: string): void {
+    const callId = `mock-call-${randomUUID()}`
+    const messageId = randomUUID()
+    const thinking = { type: "thinking", thinking: "Checking the workspace before answering" }
+    const call = { type: "toolCall", id: callId, name: "mock-tool", arguments: { echo: userText } }
+    const answer = `Mock tool reply to: ${userText}`
+    const build = (content: JsonValue[]): JsonObject => ({
+      role: "assistant",
+      timestamp: Date.now(),
+      provider: "mock",
+      model: "mock",
+      stopReason: "stop",
+      content,
+    })
+    const stream = (content: JsonValue[], revision: number, type: "message_start" | "message_update") => {
+      const message = build(content)
+      this.liveMessage = { id: messageId, revision, phase: "streaming", message }
+      this.emitEvent({ type, message })
+    }
+    this.streaming = true
+    this.emitEvent({ type: "agent_start" })
+    this.schedule(() => stream([thinking], 1, "message_start"), 5)
+    this.schedule(() => stream([thinking, call], 2, "message_update"), 700)
+    this.schedule(() => stream([thinking, call, { type: "text", text: answer }], 3, "message_update"), 1400)
+    this.schedule(() => {
+      const message = build([thinking, call, { type: "text", text: answer }])
+      this.liveMessage = { id: messageId, revision: 4, phase: "persisting", message }
+      this.persist({
+        type: "message",
+        id: `mock-assistant-${randomUUID()}`,
+        parentId: this.leafId,
+        timestamp: nowIso(),
+        message,
+      })
+      this.persist({
+        type: "message",
+        id: `mock-tool-result-${randomUUID()}`,
+        parentId: this.leafId,
+        timestamp: nowIso(),
+        message: {
+          role: "toolResult",
+          toolName: "mock-tool",
+          toolCallId: callId,
+          isError: false,
+          timestamp: Date.now(),
+          content: [{ type: "text", text: `mock-tool echo: ${userText}` }],
+        },
+      })
+      this.emitEvent({ type: "message_end", message })
+      this.liveMessage = undefined
+      this.streaming = false
+      this.emitEvent({ type: "agent_end" })
+      this.drainQueue()
+    }, 2600)
   }
 
   private drainQueue(): void {

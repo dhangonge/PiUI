@@ -20,7 +20,7 @@ import { buildVisibleTimelineEntries, getVisibleTimelineForkTargetId, clearVisib
 import type { Message, MessageError, Part } from '../../types/message'
 import type { SessionMessageEntry } from '@earendil-works/pi-coding-agent'
 import type { ToolCall, ToolResultMessage } from '@earendil-works/pi-ai'
-import type { PiAssistantMessageItem, PiUserMessageItem } from '../../pi/domain/index.js'
+import type { PiAssistantMessageItem, PiTimelineItem, PiUserMessageItem } from '../../pi/domain/index.js'
 
 function createUserMessage(id: string, created: number): Message {
   return {
@@ -706,6 +706,50 @@ describe('buildProcessTimeline', () => {
     expect(active.map(item => item.key)).toEqual(['live-user', 'process-shell:live-user'])
     expect(completed.map(item => item.key)).toEqual(active.map(item => item.key))
     expect(completed[1]).toMatchObject({ kind: 'message', item: { entryId: 'assistant-1' } })
+  })
+
+  // 回归：系统条目（compaction / custom_message / bash 组）曾把后续助手踢出壳，
+  // 且被整体提前到所有用户消息之前——过程内容于是显示在用户气泡上方且不折叠。
+  it('keeps a system entry in place and keeps its turn inside the shell', () => {
+    const compaction = {
+      kind: 'compaction' as const,
+      entryId: 'compaction-1',
+      timestamp: 1001,
+      summary: 'sum',
+      rawEntry: rawEntry('compaction-1', 1001),
+    } as unknown as PiTimelineItem
+    const timeline = buildProcessTimeline(
+      [createUserItem('user-1', 1000), compaction, createAssistantItem('assistant-1', [createToolCall('tool-1'), createTextBlock('answer')], 1002, 1200)],
+      {
+        turnDurationMap: new Map(),
+        sessionIsStreaming: false,
+        messageHasProcess: hasProcess,
+        messageHasFinal: hasFinal,
+      },
+    )
+    expect(timeline.map(item => item.key)).toEqual([
+      'user-1',
+      'process-shell:user-1',
+      'compaction-1',
+    ])
+    expect(timeline[1]).toMatchObject({
+      kind: 'process-shell',
+      isActive: false,
+      children: [{ item: { entryId: 'assistant-1' } }],
+    })
+  })
+
+  it('keeps a flat assistant at the page head in position instead of hoisting it', () => {
+    const timeline = buildProcessTimeline(
+      [createAssistantItem('assistant-leading', [createTextBlock('continued')], 500, 600), createUserItem('user-1', 1000), createAssistantItem('assistant-1', [createTextBlock('answer')], 1001, 1200)],
+      {
+        turnDurationMap: new Map(),
+        sessionIsStreaming: false,
+        messageHasProcess: hasProcess,
+        messageHasFinal: hasFinal,
+      },
+    )
+    expect(timeline.map(item => item.key)).toEqual(['assistant-leading', 'user-1', 'process-shell:user-1'])
   })
 })
 

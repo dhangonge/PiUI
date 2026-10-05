@@ -885,56 +885,53 @@ export function buildProcessTimeline(
   const items: ProcessTimelineItem[] = []
 
   type TurnBag = {
-    user: PiTimelineItem | null
+    user: PiTimelineItem
     assistants: PiAssistantMessageItem[]
   }
 
+  // 单趟收集：输出顺序必须与输入一致。系统条目与页首孤立助手只能就地平铺；
+  // 一旦推到第二趟再输出，它们会跑到所有用户消息之前（顺序错乱、助手脱离壳）。
+  const slots: Array<{ kind: 'flat'; item: PiTimelineItem } | { kind: 'turn'; turn: TurnBag }> = []
   const turns: TurnBag[] = []
   let current: TurnBag | null = null
 
   for (const item of visibleItems) {
     if (item.kind === 'user_message') {
-      if (current) turns.push(current)
       current = { user: item, assistants: [] }
+      turns.push(current)
+      slots.push({ kind: 'turn', turn: current })
       continue
     }
-    // 系统条目（bash/compaction/summary/custom/label/unknown）独立平铺，不进壳
+    // 系统条目（bash/compaction/summary/custom/label/unknown）就地平铺，不进壳。
+    // 不清空 current：紧跟其后的助手仍属于同一用户回合，否则会被踢出壳。
     if (item.kind !== 'assistant_message') {
-      if (current) {
-        turns.push(current)
-        current = null
-      }
-      items.push({ kind: 'message', key: itemRenderKey(item), item })
+      slots.push({ kind: 'flat', item })
       continue
     }
     if (!current) {
       // 历史续段 / 页首无 user：直接平铺，不挂壳
-      items.push({ kind: 'message', key: itemRenderKey(item), item })
+      slots.push({ kind: 'flat', item })
       continue
     }
     current.assistants.push(item)
   }
-  if (current) turns.push(current)
-
-  // 只关心带 user 的回合（过程壳的锚点）
-  const userTurns = turns.filter((t): t is TurnBag & { user: PiTimelineItem } => t.user != null)
 
   const laterHasAssistant = (fromIndex: number) => {
-    for (let j = fromIndex + 1; j < userTurns.length; j++) {
-      if (userTurns[j].assistants.length > 0) return true
+    for (let j = fromIndex + 1; j < turns.length; j++) {
+      if (turns[j].assistants.length > 0) return true
     }
     return false
   }
 
   /** 更晚回合是否已有 live 助手——SSE 挂 Working 的绝对条件 */
   const laterHasLive = (fromIndex: number) => {
-    for (let j = fromIndex + 1; j < userTurns.length; j++) {
-      if (userTurns[j].assistants.some(assistantHasLiveWork)) return true
+    for (let j = fromIndex + 1; j < turns.length; j++) {
+      if (turns[j].assistants.some(assistantHasLiveWork)) return true
     }
     return false
   }
 
-  const isTurnSettled = (turn: TurnBag & { user: PiTimelineItem }, index: number): boolean => {
+  const isTurnSettled = (turn: TurnBag, index: number): boolean => {
     const assistants = turn.assistants
     // 后面 SSE live → 前面 Worked（须最先判断；前轮 completed 常晚到）
     if (laterHasLive(index)) return true
@@ -949,7 +946,7 @@ export function buildProcessTimeline(
     return assistants.every(m => !m.isStreaming)
   }
 
-  const isTurnPending = (turn: TurnBag & { user: PiTimelineItem }, index: number): boolean => {
+  const isTurnPending = (turn: TurnBag, index: number): boolean => {
     if (isTurnSettled(turn, index)) return false
     if (turn.assistants.length > 0) return true
     return sessionIsStreaming && isUserEntryReady(turn.user.entryId)
@@ -957,28 +954,23 @@ export function buildProcessTimeline(
 
   // 唯一 Working：最早 pending 的用户回合
   let activeUserId: string | null = null
-  for (let i = 0; i < userTurns.length; i++) {
-    if (isTurnPending(userTurns[i], i)) {
-      activeUserId = userTurns[i].user.renderKey ?? userTurns[i].user.entryId
+  for (let i = 0; i < turns.length; i++) {
+    if (isTurnPending(turns[i], i)) {
+      activeUserId = turns[i].user.renderKey ?? turns[i].user.entryId
       break
     }
   }
 
-  for (const turn of turns) {
-    if (turn.user) {
-      items.push({ kind: 'message', key: itemRenderKey(turn.user), item: turn.user })
-    }
-
-    const assistants = turn.assistants
-    if (!turn.user && assistants.length === 0) continue
-
-    // 无 user 的续段：平铺
-    if (!turn.user) {
-      for (const m of assistants) {
-        items.push({ kind: 'message', key: itemRenderKey(m), item: m })
-      }
+  for (const slot of slots) {
+    if (slot.kind === 'flat') {
+      items.push({ kind: 'message', key: itemRenderKey(slot.item), item: slot.item })
       continue
     }
+
+    const turn = slot.turn
+    const assistants = turn.assistants
+
+    items.push({ kind: 'message', key: itemRenderKey(turn.user), item: turn.user })
 
     const userId = turn.user.renderKey ?? turn.user.entryId
     const turnIsActive = activeUserId != null && userId === activeUserId
