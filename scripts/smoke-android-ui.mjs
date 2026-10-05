@@ -52,7 +52,7 @@ async function startServer(id, name) {
     return response.json()
   }
   await post('/api/v1/pi/commands/session.open', { cwd: home, sessionFile })
-  return { id, name, url, token, home, post }
+  return { id, name, url, token, home, post, publishUi: event => app.eventHub.publish({ kind: 'session', id: 'shared' }, 'extension.ui', event) }
 }
 
 async function openBrowser() {
@@ -153,6 +153,34 @@ try {
   assert.ok(!JSON.stringify(alphaBranch).includes('browser-beta-marker'))
   console.log('PASS: browser prompt reaches Beta only; Alpha has no Beta message')
   if (process.env.PIUI_SMOKE_DEBUG) console.log('Before split:', await inspectBrowser())
+  for (const [owner, foreign] of [[a, b], [b, a]]) {
+    const paths = await evaluate(`JSON.parse(localStorage.getItem(${JSON.stringify(`srv:${owner.id}:piui-saved-directories`)}) || '[]').map(item => item.path)`)
+    assert.ok(!paths.includes(foreign.home), 'selecting a foreign session must not copy its project')
+  }
+  console.log('PASS: project records remain in their owning server after cross-server navigation')
+
+  a.publishUi({ type: 'state', sessionId: 'shared', patch: { kind: 'widget', key: 'todo', placement: 'aboveEditor', lines: ['Alpha-only task'] } })
+  b.publishUi({ type: 'state', sessionId: 'shared', patch: { kind: 'widget', key: 'todo', placement: 'aboveEditor', lines: ['Beta-only task'] } })
+  await waitFor(() => evaluate(`document.querySelector('[data-chat-pane-root]').innerText.includes('Beta-only task')`), 'composer widget')
+  assert.equal(await evaluate(`document.querySelector('[data-chat-pane-root]').innerText.includes('Alpha-only task')`), false)
+  console.log('PASS: widget snapshot is visible beside the composer and isolated by owner')
+
+  const longOption = 'A long option that is displayed once. '.repeat(15)
+  b.publishUi({ type: 'requested', request: { requestId: 'browser-question', sessionId: 'shared', kind: 'select', title: 'Browser question', options: ['Short option', longOption], createdAt: new Date().toISOString() } })
+  await waitFor(() => evaluate(`!!document.querySelector('button[aria-label="Fullscreen"]')`), 'question fullscreen control')
+  await evaluate(`document.querySelector('button[aria-label="Fullscreen"]').click()`)
+  await waitFor(() => evaluate(`!!document.querySelector('[role="dialog"][aria-label="Browser question"]')`), 'question fullscreen')
+  await waitFor(() => evaluate(`(() => { const r = document.querySelector('[role="dialog"][aria-label="Browser question"]').getBoundingClientRect(); return r.width >= 410 && r.height >= 850; })()`), 'fullscreen animation fills the safe mobile viewport', 5_000)
+  assert.equal(await evaluate(`[...document.querySelectorAll('[role="dialog"] span')].filter(e => e.textContent === ${JSON.stringify(longOption)}).length`), 1)
+  const questionScreenshot = await call('Page.captureScreenshot', { format: 'png' })
+  const questionScreenshotPath = path.join(tmpdir(), `piui-question-fullscreen-${Date.now()}.png`)
+  writeFileSync(questionScreenshotPath, Buffer.from(questionScreenshot.data, 'base64'), { flag: 'wx' })
+  console.log(`Question screenshot: ${questionScreenshotPath}`)
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+  await waitFor(() => evaluate(`!document.querySelector('[role="dialog"][aria-label="Browser question"]')`), 'exit question fullscreen')
+  assert.ok(await evaluate(`document.body.innerText.includes('Browser question')`), 'exiting fullscreen must not cancel the question')
+  b.publishUi({ type: 'settled', sessionId: 'shared', requestId: 'browser-question', reason: 'user_cancelled' })
+  console.log('PASS: mobile questionnaire fills the screen, has one option copy, and preserves the request on Escape')
 
   await call('Emulation.setDeviceMetricsOverride', { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false })
   await waitFor(() => evaluate(`!!document.querySelector('[aria-label="Split pane"]')`), 'split control')

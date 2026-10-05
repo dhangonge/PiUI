@@ -410,11 +410,11 @@ export default function (pi) {
       assert.deepEqual(notifications, ["started", "finished"])
       // 全部应答后 pending 清空（settled）
       assert.deepEqual(session.getState().pendingExtensionUiRequests, [])
-      // 状态镜像完整：Planning -> Done
+      // Reconnect restores the latest value; the event stream above retains both transitions.
       const doneState = session.getState().extensionUiState as { patches?: Array<{ kind: string; key?: string; text?: string }> }
       assert.deepEqual(
         (doneState.patches ?? []).filter(patch => patch.kind === "status").map(patch => patch.text),
-        ["Planning", "Done"],
+        ["Done"],
       )
       off()
     } finally {
