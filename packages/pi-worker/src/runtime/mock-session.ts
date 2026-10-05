@@ -140,6 +140,21 @@ function textFromContent(content: JsonValue | undefined): string {
     .join("")
 }
 
+function mockBranch(entries: JsonObject[], leafId: string | null): JsonObject[] {
+  const byId = new Map(entries.map(entry => [String(entry.id), entry]))
+  const branch: JsonObject[] = []
+  const visited = new Set<string>()
+  let id = leafId
+  while (id && !visited.has(id)) {
+    visited.add(id)
+    const entry = byId.get(id)
+    if (!entry) break
+    branch.unshift(entry)
+    id = typeof entry.parentId === "string" ? entry.parentId : null
+  }
+  return branch
+}
+
 export class MockCatalog implements CatalogProvider, PackagesGateway {
   private readonly store = new MockStore()
 
@@ -159,14 +174,16 @@ export class MockCatalog implements CatalogProvider, PackagesGateway {
     const info = this.store.list().find(item => item.path === sessionFile)
     if (!info) throw Object.assign(new Error("session file not found"), { code: "SESSION_NOT_FOUND" })
     const sessionId = typeof info.id === "string" ? info.id : "mock-session"
+    const { header, entries } = this.store.open(sessionFile)
+    const leafId = typeof entries.at(-1)?.id === "string" ? String(entries.at(-1)!.id) : null
     const head = sessionHeadFromParts({
       sdkVersion: MOCK_SDK_VERSION,
-      revision: 0,
-      header: null,
-      leafId: null,
-      entryCount: 0,
+      revision: entries.length,
+      header,
+      leafId,
+      entryCount: entries.length,
     }, sessionId)
-    const branch = entriesPageFromEntries(head, [], {
+    const branch = entriesPageFromEntries(head, mockBranch(entries, leafId), {
       cursor: params.cursor,
       limit: params.limit ?? 100,
       maxBytes: params.maxBytes ?? 2 * 1024 * 1024,
@@ -175,7 +192,7 @@ export class MockCatalog implements CatalogProvider, PackagesGateway {
       state: {
         sessionId,
         sessionFile,
-        sessionName: null,
+        sessionName: header?.name ?? null,
         cwd,
         model: null,
         thinkingLevel: "off",
@@ -185,7 +202,7 @@ export class MockCatalog implements CatalogProvider, PackagesGateway {
         followUpMode: "one-at-a-time",
         autoCompactionEnabled: true,
         autoRetryEnabled: true,
-        messageCount: 0,
+        messageCount: entries.length,
         pendingMessageCount: 0,
         availableThinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
         isIdle: true,
@@ -200,11 +217,11 @@ export class MockCatalog implements CatalogProvider, PackagesGateway {
         sessionStats: {
           sessionFile: sessionFile,
           sessionId,
-          userMessages: 0,
-          assistantMessages: 0,
+          userMessages: entries.filter(entry => isJsonObject(entry.message) && entry.message.role === "user").length,
+          assistantMessages: entries.filter(entry => isJsonObject(entry.message) && entry.message.role === "assistant").length,
           toolCalls: 0,
           toolResults: 0,
-          totalMessages: 0,
+          totalMessages: entries.length,
           tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
           cost: 0,
         },
@@ -415,17 +432,7 @@ export class MockPiSession implements SessionRuntime {
   }
 
   getBranchPage(cursor: string | undefined, limit: number, maxBytes: number): EntriesPage {
-    const byId = new Map(this.entries.map(entry => [String(entry.id), entry]))
-    const branch: MockEntry[] = []
-    const visited = new Set<string>()
-    let id: string | null = this.leafId
-    while (id && !visited.has(id)) {
-      visited.add(id)
-      const entry = byId.get(id)
-      if (!entry) break
-      branch.unshift(entry)
-      id = typeof entry.parentId === "string" ? entry.parentId : null
-    }
+    const branch = mockBranch(this.entries, this.leafId)
     const checkpoint = cursor ? undefined : {
       position: { epoch: this.eventEpoch, sequence: this.eventSequence },
       liveMessage: this.liveMessage,

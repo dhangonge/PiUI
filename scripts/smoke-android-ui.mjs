@@ -20,6 +20,7 @@ const eventServers = []
 let browser
 let browserClosed
 let cdp
+let inspectBrowser
 
 async function waitFor(check, label, timeout = 45_000) {
   const deadline = Date.now() + timeout
@@ -120,6 +121,14 @@ try {
     assert.ok(!result.exceptionDetails, result.exceptionDetails?.exception?.description?.split('\n')[0] || 'Browser evaluation failed')
     return result.result.value
   }
+  inspectBrowser = () => evaluate(`(() => {
+    const panes = [...document.querySelectorAll('[data-chat-pane-root]')];
+    const props = [];
+    const seen = new Set();
+    const walk = f => { if (!f || seen.has(f)) return; seen.add(f); const p = f.memoizedProps; if (p && Array.isArray(p.items)) props.push({ session: p.sessionId, count: p.items.length, kinds: p.items.map(i => i.kind || i.type), load: p.loadState }); walk(f.child); walk(f.sibling); };
+    for (const pane of panes) walk(pane[Object.keys(pane).find(k => k.startsWith('__reactFiber'))]);
+    return JSON.stringify({ hash: location.hash, active: localStorage.getItem('piui-active-server'), panes: panes.map(p => ({ text: p.innerText.slice(-500), height: p.clientHeight })), props });
+  })()`)
   await call('Page.navigate', { url: a.url + '/#/session/alpha%3A%3Ashared' })
   await waitFor(() => evaluate('!!document.querySelector("[data-chat-pane-root]")'), 'mobile chat mount')
   await waitFor(() => evaluate(`!!document.querySelector('[aria-label="Open sidebar"]')`), 'sidebar toggle')
@@ -138,11 +147,12 @@ try {
   await evaluate(`document.querySelector('[aria-label="Send message"]').click()`)
   await waitFor(async () => {
     const result = await b.post('/api/v1/pi/sessions/shared/commands/branch.get', {})
-    return JSON.stringify(result).includes('browser-beta-marker')
-  }, 'Beta prompt delivered')
+    return !result.data?.checkpoint?.liveMessage && result.data?.items?.some(entry => entry.message?.role === 'assistant' && JSON.stringify(entry).includes('browser-beta-marker'))
+  }, 'Beta prompt persisted')
   const alphaBranch = await a.post('/api/v1/pi/sessions/shared/commands/branch.get', {})
   assert.ok(!JSON.stringify(alphaBranch).includes('browser-beta-marker'))
   console.log('PASS: browser prompt reaches Beta only; Alpha has no Beta message')
+  if (process.env.PIUI_SMOKE_DEBUG) console.log('Before split:', await inspectBrowser())
 
   await call('Emulation.setDeviceMetricsOverride', { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false })
   await waitFor(() => evaluate(`!!document.querySelector('[aria-label="Split pane"]')`), 'split control')
@@ -166,6 +176,9 @@ try {
   writeFileSync(screenshotPath, Buffer.from(screenshot.data, 'base64'))
   console.log('PASS: split-pane first click selects its server before child handlers; no uncaught exceptions')
   console.log(`Screenshot: ${screenshotPath}`)
+} catch (error) {
+  if (process.env.PIUI_SMOKE_DEBUG && inspectBrowser) console.log('Browser state:', await inspectBrowser())
+  throw error
 } finally {
   cdp?.terminate()
   browser?.kill('SIGTERM')

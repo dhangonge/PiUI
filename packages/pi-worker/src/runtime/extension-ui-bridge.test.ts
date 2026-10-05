@@ -136,14 +136,17 @@ describe("ExtensionUiBridge", () => {
       return container
     }, { placement: "aboveEditor" })
 
-    await new Promise(resolve => setTimeout(resolve, 30))
-    assert.ok(events.some(event =>
-      event.type === "tuiAttach" && event.attach.key === "panel" && event.attach.kind === "widget"))
-    assert.ok(events.some(event => event.type === "tuiFrame" && event.data.includes("hello panel")))
-
-    // clearing the widget unmounts the component and emits detach
-    bridge.context.setWidget("panel", undefined)
-    assert.ok(events.some(event => event.type === "tuiDetach" && event.key === "panel"))
+    try {
+      const deadline = Date.now() + 3000
+      while (!events.some(event => event.type === "tuiFrame" && event.data.includes("hello panel"))) {
+        assert.ok(Date.now() < deadline, "timed out waiting for widget content")
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      assert.ok(events.some(event =>
+        event.type === "tuiAttach" && event.attach.key === "panel" && event.attach.kind === "widget"))
+      bridge.context.setWidget("panel", undefined)
+      assert.ok(events.some(event => event.type === "tuiDetach" && event.key === "panel"))
+    } finally { bridge.resetTui() }
   })
 
   it("runs custom() components offscreen and resolves through done()", async () => {
@@ -159,9 +162,8 @@ describe("ExtensionUiBridge", () => {
       return container
     })
 
-    await new Promise(resolve => setTimeout(resolve, 30))
-    assert.ok(events.some(event => event.type === "tuiAttach" && event.attach.key === "custom" && event.attach.kind === "custom"))
     assert.equal(await result, 42)
+    assert.ok(events.some(event => event.type === "tuiAttach" && event.attach.key === "custom" && event.attach.kind === "custom"))
     assert.ok(events.some(event => event.type === "tuiDetach" && event.key === "custom"))
   })
 })
