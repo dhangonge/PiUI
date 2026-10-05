@@ -361,16 +361,19 @@ function useEntryGrowAnimation(
     el.style.height = '0px'
     el.style.clipPath = 'inset(0 -100% 0 -100%)'
     let cancelled = false
-    animate(el, { height: `${targetHeight}px` }, { duration: ENTRY_GROW_DURATION_MS / 1000, ease: 'easeOut' }).then(
+    const controls = animate(el, { height: `${targetHeight}px` }, { duration: ENTRY_GROW_DURATION_MS / 1000, ease: 'easeOut' })
+    void Promise.resolve(controls).then(
       () => {
         if (cancelled) return
         el.style.height = ''
         el.style.clipPath = ''
         finish()
       },
+      () => { /* Cleanup handles cancelled animations. */ },
     )
     return () => {
       cancelled = true
+      controls.stop()
       // 虚拟行中途卸载也放行，避免 Working 壳永远等不到入场完成
       el.style.height = ''
       el.style.clipPath = ''

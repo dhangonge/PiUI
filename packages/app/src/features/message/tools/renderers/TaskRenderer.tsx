@@ -5,6 +5,7 @@ import { ChevronRightIcon, ExternalLinkIcon, StopIcon } from '../../../../compon
 import { useDisclosureScrollLock } from '../../../../hooks'
 import { useSessionNavigation } from '../../../../contexts/SessionNavigationContext'
 import { abortPiOperation } from '../../../../pi/controllers/index.js'
+import { isScopedSessionKey, makeSessionKey, sessionKeyToServerId, sessionKeyToSessionId } from '../../../../utils/sessionKey'
 import { useUiDisclosureState } from '../../../../utils/uiDisclosureState'
 import type { ToolRendererProps } from '../types'
 import { MessageExpandPanel, useMessageExpandRender } from '../../messageExpand'
@@ -18,6 +19,11 @@ import { MessageExpandPanel, useMessageExpandRender } from '../../messageExpand'
 // 3. 状态优先 - 运行中/完成/错误状态一目了然
 // 4. 按需交互 - 输入框只在需要时显示
 // ============================================
+
+function scopeChildSession(sessionId: string | undefined, parentId: string | null | undefined): string | undefined {
+  if (!sessionId || !parentId || !isScopedSessionKey(parentId)) return sessionId
+  return makeSessionKey(sessionKeyToServerId(parentId), sessionKeyToSessionId(sessionId))
+}
 
 export const TaskRenderer = memo(function TaskRenderer({ execution, partKey, onFullscreenChange }: ToolRendererProps) {
   const { t } = useTranslation('message')
@@ -43,7 +49,8 @@ export const TaskRenderer = memo(function TaskRenderer({ execution, partKey, onF
   const metadata = execution.result?.details && typeof execution.result.details === 'object' && !Array.isArray(execution.result.details)
     ? execution.result.details as Record<string, unknown>
     : undefined
-  const targetSessionId = metadata?.sessionId as string | undefined
+  const { currentSessionId } = useSessionNavigation()
+  const targetSessionId = scopeChildSession(typeof metadata?.sessionId === 'string' ? metadata.sessionId : undefined, currentSessionId)
 
   const resultOutput = execution.result
     ? execution.result.content
@@ -176,14 +183,15 @@ export const TaskHeader = memo(function TaskHeader({
   onStop,
 }: TaskHeaderProps) {
   const { t } = useTranslation('message')
-  const { navigateToSession, currentDirectory } = useSessionNavigation()
+  const { navigateToSession, currentDirectory, currentSessionId } = useSessionNavigation()
+  const targetSessionId = scopeChildSession(sessionId, currentSessionId)
   const handleOpenSession = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      if (!sessionId) return
-      navigateToSession(sessionId, currentDirectory || undefined)
+      if (!targetSessionId) return
+      navigateToSession(targetSessionId, currentDirectory || undefined)
     },
-    [sessionId, navigateToSession, currentDirectory],
+    [targetSessionId, navigateToSession, currentDirectory],
   )
 
   const isRunning = status === 'running' || status === 'pending'

@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react'
-import { render, screen } from '@testing-library/react'
+import { StrictMode, type ReactNode } from 'react'
+import { act, render, screen } from '@testing-library/react'
+import { isEntryGrowComplete, resetEntryGrowCompletionsForTests } from '../../utils/entryGrow'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   MessageRenderer,
@@ -13,9 +14,8 @@ import type { PiAssistantMessageItem, PiUserMessageItem } from '../../pi/domain/
 let mockRenderUserMarkdown = false
 let mockCollapseUserMessages = false
 
-vi.mock('motion/mini', () => ({
-  animate: () => Promise.resolve(),
-}))
+const animation = vi.hoisted(() => ({ animate: vi.fn(() => Object.assign(Promise.resolve(), { stop: vi.fn() })) }))
+vi.mock('motion/mini', () => animation)
 
 vi.mock('../../hooks', () => ({
   useDelayedRender: (show: boolean) => show,
@@ -159,6 +159,33 @@ describe('MessageRenderer assistant fork', () => {
     const container = screen.getByTestId('user-markdown').parentElement!
     expect(container.style.maxHeight).not.toBe('')
     expect(container.style.contain).toBe('layout paint')
+  })
+})
+
+describe('entry animation lifecycle', () => {
+  beforeEach(() => {
+    resetEntryGrowCompletionsForTests()
+    animation.animate.mockClear()
+  })
+
+  it('finishes on normal completion and clears fixed styles', async () => {
+    const item = { ...createUserTextItem('animated'), timestamp: Date.now() }
+    const complete = vi.fn()
+    render(<MessageRenderer item={item} onEntryGrowComplete={complete} />)
+    await act(async () => { await Promise.resolve() })
+    expect(isEntryGrowComplete(item.entryId)).toBe(true)
+    expect(complete).toHaveBeenCalledWith(item.entryId)
+  })
+
+  it('stops the first animation during StrictMode replay', async () => {
+    const item = { ...createUserTextItem('strict animation'), timestamp: Date.now() }
+    const { container, unmount } = render(<StrictMode><MessageRenderer item={item} /></StrictMode>)
+    const controls = animation.animate.mock.results[0]?.value
+    expect(controls?.stop).toHaveBeenCalledOnce()
+    await act(async () => { await Promise.resolve() })
+    expect(container.querySelector('[style*="clip-path"]')).toBeNull()
+    unmount()
+    expect(isEntryGrowComplete(item.entryId)).toBe(true)
   })
 })
 

@@ -7,14 +7,14 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }))
 
-function renderHeader(options: { sessionId?: string } = { sessionId: 'child-session' }) {
+function renderHeader(options: { sessionId?: string; parentId?: string } = { sessionId: 'child-session' }) {
   const sessionId = options.sessionId
   const navigateToSession = vi.fn()
   const onToggle = vi.fn()
 
   render(
     <SessionNavigationContext.Provider
-      value={{ navigateToSession, currentSessionId: 'parent-session', currentDirectory: 'E:\\workspace' }}
+      value={{ navigateToSession, currentSessionId: options.parentId ?? 'parent-session', currentDirectory: 'E:\\workspace' }}
     >
       <TaskHeader
         agentType="explore"
@@ -58,6 +58,12 @@ describe('TaskHeader', () => {
 
     expect(onToggle).toHaveBeenCalledOnce()
     expect(navigateToSession).not.toHaveBeenCalled()
+  })
+
+  it('routes raw child IDs to the parent server rather than the focused server', () => {
+    const { navigateToSession } = renderHeader({ sessionId: 'child', parentId: 'owner::parent' })
+    fireEvent.click(screen.getByRole('button', { name: 'task.openSession' }))
+    expect(navigateToSession).toHaveBeenCalledWith('owner::child', 'E:\\workspace')
   })
 
   it('hides the jump button until a child session exists', () => {
