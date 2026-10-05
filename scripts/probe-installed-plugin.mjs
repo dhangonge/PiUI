@@ -45,8 +45,9 @@ try {
       const deadline = Date.now() + 3000
       while (!rendered && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20))
       if (!session.extensionUi.listTuiPanels().some(panel => panel.kind === 'widget') || !rendered) throw new Error('Todo widget did not render its task')
+      if (!session.extensionUi.getStateMirror().patches.some(patch => patch.kind === 'widget' && patch.lines?.some(line => line.includes('Sandbox task')))) throw new Error('Todo widget has no mobile snapshot')
     } finally { stopFrames() }
-    report.exercise = 'created one isolated task and observed its rendered widget frame'
+    report.exercise = 'created one isolated task; verified TUI frame and persistent mobile widget snapshot'
   }
   if (name === '@juicesharp/rpiv-ask-user-question') {
     const unsubscribe = session.extensionUi.onEvent(event => {

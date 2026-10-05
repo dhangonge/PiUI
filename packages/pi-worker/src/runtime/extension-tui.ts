@@ -125,6 +125,7 @@ export type ExtensionTuiHostEvent =
   | { type: "attach"; attach: ExtensionTuiAttach }
   | { type: "detach"; key: string }
   | { type: "frame"; data: string }
+  | { type: "widget"; key: string; lines: string[]; placement: "aboveEditor" | "belowEditor" }
   | { type: "error"; key: string; phase: ComponentPhase }
 
 interface MountedPanel {
@@ -212,7 +213,15 @@ export class ExtensionTuiHost {
     const container = kind === "header" ? this.header
       : kind === "footer" ? this.footer
         : placement === "belowEditor" ? this.widgetsBelow : this.widgetsAbove
-    const guarded = this.guard(key, component)
+    let previous = ""
+    const guarded = this.guard(key, component, undefined, kind === "widget" ? lines => {
+      // Persist a bounded display snapshot even when no terminal view is open.
+      const snapshot = lines.slice(0, 200).map(line => line.slice(0, 2048))
+      const encoded = JSON.stringify(snapshot)
+      if (encoded === previous || this.mounts.get(key)?.component !== guarded) return
+      previous = encoded
+      this.emit({ type: "widget", key, lines: snapshot, placement: placement ?? "aboveEditor" })
+    } : undefined)
     container.addChild(guarded)
     this.mounts.set(key, { key, kind, component: guarded, container })
     this.ensureStarted()
@@ -325,7 +334,7 @@ export class ExtensionTuiHost {
     this.stop()
   }
 
-  private guard(key: string, component: DisposableComponent, onFailure?: () => void): GuardedComponent {
+  private guard(key: string, component: DisposableComponent, onFailure?: () => void, onRender?: (lines: string[]) => void): GuardedComponent {
     const generation = this.generation
     const guarded = new GuardedComponent(component, phase => {
       // Do not mutate Container children during their current render pass.
@@ -338,7 +347,7 @@ export class ExtensionTuiHost {
         this.emit({ type: "error", key, phase })
         if (custom) onFailure?.()
       })
-    })
+    }, onRender)
     return guarded
   }
 

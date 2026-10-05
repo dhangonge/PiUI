@@ -8,7 +8,7 @@ export class GuardedComponent implements Component {
   private failed = false
   private disposed = false
 
-  constructor(private readonly inner: DisposableComponent, private readonly onFailure: (phase: ComponentPhase) => void) {}
+  constructor(private readonly inner: DisposableComponent, private readonly onFailure: (phase: ComponentPhase) => void, private readonly onRender?: (lines: string[]) => void) {}
 
   render(width: number): string[] {
     return this.call("render", () => {
@@ -17,7 +17,9 @@ export class GuardedComponent implements Component {
         throw new Error("Invalid extension render result")
       }
       // A component can otherwise make pi-tui throw outside its render callback.
-      return lines.map(line => truncateToWidth(line, Math.max(1, width), ""))
+      const rendered = lines.map(line => truncateToWidth(line, Math.max(1, width), ""))
+      this.onRender?.(rendered)
+      return rendered
     }, [])
   }
 

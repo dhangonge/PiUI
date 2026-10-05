@@ -1,4 +1,5 @@
 {
+  "extensionWidgets": { "title": "扩展组件" },
   "commandPalette": {
     "placeholder": "输入命令...",
     "noCommandsFound": "未找到命令"

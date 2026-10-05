@@ -46,7 +46,7 @@ export function ExtensionsPanel({ sessionId }: { sessionId: string | null }) {
   }
 
   const statuses = state ? Object.entries(state.statuses) : []
-  const widgets = state ? Object.entries(state.widgets) : []
+  const widgets = state ? Object.entries(state.widgets).filter(([key]) => !panels.some(panel => panel.kind === 'widget' && panel.key === key)) : []
   const hasWorking = Boolean(state?.workingMessage || state?.workingIndicator || state?.title)
 
   if (!state && pending.length === 0 && panels.length === 0 && feedback.length === 0) {

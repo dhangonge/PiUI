@@ -67,7 +67,10 @@ export class ExtensionUiBridge {
       if (event.type === "attach") {
         this.tuiPanels.set(event.attach.key, event.attach)
         this.emit({ type: "tuiAttach", sessionId, attach: event.attach })
+      } else if (event.type === "widget") {
+        this.state({ kind: "widget", key: event.key, lines: event.lines, placement: event.placement })
       } else if (event.type === "detach") {
+        if (this.tuiPanels.get(event.key)?.kind === "widget") this.state({ kind: "widget", key: event.key })
         this.tuiPanels.delete(event.key)
         this.emit({ type: "tuiDetach", sessionId, key: event.key })
       } else if (event.type === "error") {
@@ -469,7 +472,10 @@ export class ExtensionUiBridge {
   }
 
   private state(patch: ExtensionUiStatePatch): void {
-    this.stateMirror.push(patch)
+    const index = this.stateMirror.findIndex(previous => previous.kind === patch.kind &&
+      (!('key' in previous) || ('key' in patch && previous.key === patch.key)))
+    if (index >= 0) this.stateMirror[index] = patch
+    else this.stateMirror.push(patch)
     if (this.stateMirror.length > MAX_STATE_MIRROR_PATCHES) {
       this.stateMirror.splice(0, this.stateMirror.length - MAX_STATE_MIRROR_PATCHES)
     }
