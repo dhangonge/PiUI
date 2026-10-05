@@ -146,7 +146,9 @@
     "batchDeleteIncludesCurrent": "The currently open session is included. It will switch to a new session after deletion.",
     "batchRemoveProjects": "Remove {{count}} Project(s)",
     "batchRemoveProjectsConfirm": "Remove {{count}} project(s) from the list? This only removes them from the sidebar — no sessions will be deleted and no files on disk will be affected.",
-    "loadFailed": "Failed to load, click to retry"
+    "loadFailed": "Failed to load, click to retry",
+    "moveFolderUp": "Move folder up",
+    "moveFolderDown": "Move folder down"
   },
   "activeSession": {
     "awaitingPermission": "Awaiting Permission",

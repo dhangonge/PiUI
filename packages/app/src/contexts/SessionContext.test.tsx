@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   openPiSession: vi.fn(),
   deletePiSession: vi.fn<(cwd: string, sessionFile: string) => Promise<void>>(),
   currentDirectory: null as string | null,
+  connectServer: vi.fn(),
+  disconnectServer: vi.fn(),
 }))
 
 vi.mock('../pi/controllers/index.js', () => ({
@@ -25,7 +27,7 @@ vi.mock('../pi/controllers/index.js', () => ({
 }))
 
 vi.mock('../pi/eventStream', () => ({
-  getPiEventStream: () => ({ connectServer: vi.fn(), disconnectServer: vi.fn(), connectWorkspace: vi.fn(), disconnectWorkspace: vi.fn() }),
+  getPiEventStream: (id: string) => ({ connectServer: () => mocks.connectServer(id), disconnectServer: () => mocks.disconnectServer(id), connectWorkspace: vi.fn(), disconnectWorkspace: vi.fn() }),
   piEventStream: { disconnect: vi.fn() },
 }))
 
@@ -102,6 +104,26 @@ describe('SessionProvider', () => {
       }),
     ).rejects.toThrow('delete failed')
     expect(result.current?.sessions).toHaveLength(1)
+  })
+
+  it('changes subscriptions incrementally without reconnecting an existing server on focus', async () => {
+    const a = serverStore.addServer({ name: 'A', url: 'https://a.example.test' }).id
+    const b = serverStore.addServer({ name: 'B', url: 'https://b.example.test' }).id
+    added.push(a, b)
+    serverStore.setActiveServer(a)
+    multiServerStore.setSubscribedServerIds([a])
+    multiServerStore.setEnabled(true)
+    const { result } = renderHook(() => useContext(SessionContext), { wrapper: SessionProvider })
+    await waitFor(() => expect(result.current?.isLoading).toBe(false))
+    await act(async () => multiServerStore.setSubscribed(b, true))
+    await act(async () => {
+      serverStore.setActiveServer(b)
+      multiServerStore.setFocusedServerId(b)
+    })
+    expect(mocks.connectServer.mock.calls).toEqual([[a], [b]])
+    expect(mocks.disconnectServer).not.toHaveBeenCalled()
+    await act(async () => multiServerStore.setSubscribed(b, false))
+    expect(mocks.disconnectServer.mock.calls).toEqual([[b]])
   })
 
   it('aggregates equal session IDs and retains the unavailable server on refresh', async () => {

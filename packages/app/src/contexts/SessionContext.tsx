@@ -16,17 +16,37 @@ import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { SessionContext, type SessionContextValue } from './SessionContext.shared'
 import { useMultiServerStore } from '../store/multiServerStore'
 import { serverStore } from '../store/serverStore'
-import { sessionKeyToServerId } from '../utils/sessionKey'
+import { getServerRevision, sessionKeyToServerId } from '../utils/sessionKey'
 import { getPiEventStream } from '../pi/eventStream'
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const { currentDirectory } = useDirectory()
   const { serverIds, connectionRevision } = useMultiServerStore()
+  const serverSubscriptions = useRef(new Map<string, ReturnType<typeof getPiEventStream>>())
   useEffect(() => {
-    const streams = serverIds.map(id => getPiEventStream(id))
-    streams.forEach(stream => stream.connectServer())
-    return () => streams.forEach(stream => stream.disconnectServer())
+    const subscriptions = serverSubscriptions.current
+    const next = new Map(serverIds.map(id => [`${id}:${getServerRevision(id)}`, id]))
+    for (const [key, stream] of subscriptions) {
+      if (!next.has(key)) {
+        stream.disconnectServer()
+        subscriptions.delete(key)
+      }
+    }
+    for (const [key, id] of next) {
+      if (!subscriptions.has(key)) {
+        const stream = getPiEventStream(id)
+        stream.connectServer()
+        subscriptions.set(key, stream)
+      }
+    }
   }, [serverIds, connectionRevision])
+  useEffect(() => {
+    const subscriptions = serverSubscriptions.current
+    return () => {
+      subscriptions.forEach(stream => stream.disconnectServer())
+      subscriptions.clear()
+    }
+  }, [])
   const [sessions, setSessions] = useState<UiSession[]>([])
   const storageVersion = useSyncExternalStore(subscribePerServerStorageVersion, getStorageVersion)
   useEffect(() => {
