@@ -1,5 +1,4 @@
 {
-  "extensionWidgets": { "title": "Extension widgets" },
   "commandPalette": {
     "placeholder": "Type a command...",
     "noCommandsFound": "No commands found"

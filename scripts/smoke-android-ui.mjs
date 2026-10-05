@@ -159,11 +159,13 @@ try {
   }
   console.log('PASS: project records remain in their owning server after cross-server navigation')
 
-  a.publishUi({ type: 'state', sessionId: 'shared', patch: { kind: 'widget', key: 'todo', placement: 'aboveEditor', lines: ['Alpha-only task'] } })
-  b.publishUi({ type: 'state', sessionId: 'shared', patch: { kind: 'widget', key: 'todo', placement: 'aboveEditor', lines: ['Beta-only task'] } })
+  a.publishUi({ type: 'state', sessionId: 'shared', patch: { kind: 'widget', key: 'rpiv-todos', placement: 'aboveEditor', lines: ['● Todos (0/1)', '└─ ○ Alpha-only task', ''] } })
+  b.publishUi({ type: 'state', sessionId: 'shared', patch: { kind: 'widget', key: 'rpiv-todos', placement: 'aboveEditor', lines: ['● Todos (0/1)', '└─ ○ Beta-only task', ''] } })
+  b.publishUi({ type: 'state', sessionId: 'shared', patch: { kind: 'widget', key: 'input-status', placement: 'aboveEditor', lines: ['Model: opus'] } })
   await waitFor(() => evaluate(`document.querySelector('[data-chat-pane-root]').innerText.includes('Beta-only task')`), 'composer widget')
   assert.equal(await evaluate(`document.querySelector('[data-chat-pane-root]').innerText.includes('Alpha-only task')`), false)
-  console.log('PASS: widget snapshot is visible beside the composer and isolated by owner')
+  assert.equal(await evaluate(`document.querySelector('[data-chat-pane-root]').innerText.includes('Model: opus')`), false)
+  console.log('PASS: only the todo widget is mirrored beside the composer; other widgets stay out and owners stay isolated')
 
   const longOption = 'A long option that is displayed once. '.repeat(15)
   b.publishUi({ type: 'requested', request: { requestId: 'browser-question', sessionId: 'shared', kind: 'select', title: 'Browser question', options: ['Short option', longOption], createdAt: new Date().toISOString() } })
