@@ -202,7 +202,7 @@ export async function startPiUiServer(
       : `[piui-server] auth token at ${authTokenPath()}`,
   )
   const lanHost = config.host === "0.0.0.0" || config.host === "::" ? firstLanAddress() ?? config.host : config.host
-  if (config.webRoot) console.info(`[piui-server] web client: http://${lanHost}:${config.port}/?token=${encodeURIComponent(authToken)}`)
+  if (config.webRoot) console.info(`[piui-server] web client: http://${lanHost}:${config.port}/`)
   if (config.host !== "127.0.0.1" && config.host !== "::1" && config.host !== "localhost") {
     console.info(`[piui-server] LAN sharing enabled at http://${lanHost}:${config.port}`)
   }

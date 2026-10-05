@@ -65,6 +65,14 @@ npm run pi-worker -- web --host 127.0.0.1 --port 8787 --api-only
 npm run pi-worker -- web --help
 ```
 
+## ARM64 离线部署
+
+Linux ARM64 和 Android Termux ARM64 可使用自包含包，不需要在目标设备运行 npm install。包内含 Pi 1.0.3、PiUI server/worker/Web、Node、npm、rg/fd 和匹配平台的 PTY。
+
+解压到新目录后运行 `sh deploy.sh`；默认仅监听本机。可信局域网多设备测试需显式使用 `sh deploy.sh --listen 0.0.0.0 --port 8787`。每台设备/每个 PIUI_HOME 分别生成配置、会话和 token；不打包个人配置，不修改系统服务或全局 Node。
+
+Termux 必须解压到 `$HOME` 等私有可执行目录，不能在共享 Downloads 里直接运行。详细使用和回退见 [离线包说明](scripts/offline/README.md)，构建与验证边界见 [部署记录](docs/OFFLINE_DEPLOYMENT.md)。
+
 ## 监听地址和远程访问
 
 默认只监听本机：

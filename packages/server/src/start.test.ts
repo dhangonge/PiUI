@@ -30,7 +30,8 @@ test("server config validates ports and parses web flags", () => {
   assert.throws(() => parseWebArgs(["--unknown"]), /unknown|requires/)
 })
 
-test("one server provides the web app and authenticated API on the same port", async () => {
+test("one server provides the web app and authenticated API on the same port", async t => {
+  const info = t.mock.method(console, "info", () => {})
   process.env.PIUI_DRIVER = "mock"
   const webRoot = mkdtempSync(join(tmpdir(), "piui-start-web-"))
   roots.push(webRoot)
@@ -44,6 +45,8 @@ test("one server provides the web app and authenticated API on the same port", a
     { installSignalHandlers: false },
   )
   try {
+    assert.ok(info.mock.calls.some(call => call.arguments.some(value => String(value).includes("web client:"))))
+    assert.ok(info.mock.calls.every(call => call.arguments.every(value => !String(value).includes("test-token"))))
     const page = await fetch(`http://127.0.0.1:${port}/`)
     assert.equal(page.status, 200)
     assert.match(await page.text(), /piui/)

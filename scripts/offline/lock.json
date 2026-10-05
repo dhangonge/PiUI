@@ -1,0 +1,162 @@
+{
+  "linuxNode": {
+    "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-arm64.tar.xz",
+    "sha256": "6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2",
+    "file": "node-v24.21.0-linux-arm64.tar.xz"
+  },
+  "linuxPty": {
+    "url": "https://registry.npmjs.org/@lydell/node-pty-linux-arm64/-/node-pty-linux-arm64-1.2.0-beta.14.tgz",
+    "sha256": "247af58856c286d10ded526e11016a9bbc900cbdf7ec5f75910801d3a6919d62",
+    "file": "pty-linux-arm64.tgz",
+    "version": "1.2.0-beta.14"
+  },
+  "ptySource": {
+    "url": "https://registry.npmjs.org/node-pty/-/node-pty-1.1.0.tgz",
+    "sha256": "c7517f19083ddcb05f276904680eb2b11a6b5ecab778b8e4e5685a6d645b3f60",
+    "file": "node-pty.tgz",
+    "version": "1.1.0"
+  },
+  "addonHeaders": {
+    "url": "https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.5.0.tgz",
+    "sha256": "d12f07c8162283b6213551855f1da8dac162331374629830b5e640f130f07910",
+    "file": "node-addon-api.tgz",
+    "version": "8.5.0"
+  },
+  "termux": [
+    {
+      "name": "termux-licenses",
+      "version": "2.2",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/t/termux-licenses/termux-licenses_2.2_all.deb",
+      "sha256": "a3265cd1cf7d04754f2fb683eaf5b21918263792fd714457127900c1d6d9bcd9",
+      "file": "termux-licenses_2.2_all.deb"
+    },
+    {
+      "name": "nodejs-lts",
+      "version": "24.18.0-1",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/n/nodejs-lts/nodejs-lts_24.18.0-1_aarch64.deb",
+      "sha256": "490f4d08c45b25a7ea7db6ee466ebb3ee61f07083260b85332704ed018f59a87",
+      "file": "nodejs-lts_24.18.0-1_aarch64.deb"
+    },
+    {
+      "name": "zlib",
+      "version": "1.3.2",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/z/zlib/zlib_1.3.2_aarch64.deb",
+      "sha256": "75e7d0af17fcc3b40004309fdc00a1ddb9ae08346dce5e269902c34ac3966ac9",
+      "file": "zlib_1.3.2_aarch64.deb"
+    },
+    {
+      "name": "libsqlite",
+      "version": "3.53.4",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/libs/libsqlite/libsqlite_3.53.4_aarch64.deb",
+      "sha256": "0e909ce0d50fe123305446cd22e0c5edf535d40344b9b065fbdcdee52f53198d",
+      "file": "libsqlite_3.53.4_aarch64.deb"
+    },
+    {
+      "name": "libicu",
+      "version": "78.3",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/libi/libicu/libicu_78.3_aarch64.deb",
+      "sha256": "f536403f65a08fe0df6e7304184e902d54def77d5c3bd5edfd9109d57601d276",
+      "file": "libicu_78.3_aarch64.deb"
+    },
+    {
+      "name": "libc++",
+      "version": "30",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/libc/libc++/libc++_30_aarch64.deb",
+      "sha256": "53d0b84a7ba7459024257cb94d5b136fe13ef858567f65a8064b35950799f2ca",
+      "file": "libc++_30_aarch64.deb"
+    },
+    {
+      "name": "c-ares",
+      "version": "1.34.8",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/c/c-ares/c-ares_1.34.8_aarch64.deb",
+      "sha256": "7681fc23e822d7988ba8b2adf3468f93ae68f724dda365cff1385096a9fa87e6",
+      "file": "c-ares_1.34.8_aarch64.deb"
+    },
+    {
+      "name": "resolv-conf",
+      "version": "1.3",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/r/resolv-conf/resolv-conf_1.3_aarch64.deb",
+      "sha256": "ab541abac8e0c81709cd7ca4a02bcfa0d60ba1f4bfe7fd6dce4a694a4a9dfffa",
+      "file": "resolv-conf_1.3_aarch64.deb"
+    },
+    {
+      "name": "openssl",
+      "version": "1:3.6.5",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/o/openssl/openssl_1:3.6.5_aarch64.deb",
+      "sha256": "a2fb7856875e63ef6b90442752e05974813372c3ca86d2513a78ea43c67a0f8b",
+      "file": "openssl_1:3.6.5_aarch64.deb"
+    },
+    {
+      "name": "ca-certificates",
+      "version": "1:2026.09.25",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/c/ca-certificates/ca-certificates_1:2026.09.25_all.deb",
+      "sha256": "57fab24bf4561bfdd35afe71bc1929914e51c35458cfd1fca2b15e54bc8df7af",
+      "file": "ca-certificates_1:2026.09.25_all.deb"
+    },
+    {
+      "name": "ripgrep",
+      "version": "15.2.0",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/r/ripgrep/ripgrep_15.2.0_aarch64.deb",
+      "sha256": "38e28bc297000517b24702568a483eca7dc3323eb6bdccc9033f031776bdcc6c",
+      "file": "ripgrep_15.2.0_aarch64.deb"
+    },
+    {
+      "name": "pcre2",
+      "version": "10.49",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/p/pcre2/pcre2_10.49_aarch64.deb",
+      "sha256": "c27995e5f52b8ecc9b8b3e662eb08e49f82a18bfd3f34343936acc7b23964724",
+      "file": "pcre2_10.49_aarch64.deb"
+    },
+    {
+      "name": "fd",
+      "version": "10.5.0",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/f/fd/fd_10.5.0_aarch64.deb",
+      "sha256": "402e0b0b2bc1791414585450ac35541fc646f278bdce2b0145f4085fed54bb04",
+      "file": "fd_10.5.0_aarch64.deb"
+    }
+  ],
+  "linuxLibs": [
+    {
+      "name": "gcc-12-base",
+      "version": "12.2.0-14+deb12u1",
+      "url": "https://deb.debian.org/debian/pool/main/g/gcc-12/gcc-12-base_12.2.0-14+deb12u1_arm64.deb",
+      "sha256": "674cf6cba6d432bd200c45fe866c1652c7a53523cc2e7a613e05bc4abf7b5440",
+      "file": "gcc-12-base_12.2.0-14+deb12u1_arm64.deb"
+    },
+    {
+      "name": "ripgrep",
+      "version": "13.0.0-4+b2",
+      "url": "https://deb.debian.org/debian/pool/main/r/rust-ripgrep/ripgrep_13.0.0-4+b2_arm64.deb",
+      "sha256": "82bd2ff67cedf892c1906d7ecd2831605ec1f8ad74825f576f5519a9c82a02a3",
+      "file": "ripgrep_13.0.0-4+b2_arm64.deb"
+    },
+    {
+      "name": "fd-find",
+      "version": "8.6.0-3",
+      "url": "https://deb.debian.org/debian/pool/main/r/rust-fd-find/fd-find_8.6.0-3_arm64.deb",
+      "sha256": "326ea11994337516704b3374f5c2b8b20f81593355e77a1094d5da20c38193f3",
+      "file": "fd-find_8.6.0-3_arm64.deb"
+    },
+    {
+      "name": "libpcre2-8-0",
+      "version": "10.42-1",
+      "url": "https://deb.debian.org/debian/pool/main/p/pcre2/libpcre2-8-0_10.42-1_arm64.deb",
+      "sha256": "b2448d0a8a3db7fbeac231e7ef93811346c1fb5f96ccf6f631701d8a4eb39206",
+      "file": "libpcre2-8-0_10.42-1_arm64.deb"
+    },
+    {
+      "name": "libstdc++6",
+      "version": "12.2.0-14+deb12u1",
+      "url": "https://deb.debian.org/debian/pool/main/g/gcc-12/libstdc++6_12.2.0-14+deb12u1_arm64.deb",
+      "sha256": "26e138c677a985775331373828a6c286c551ff397cb735d00e2383cb273d1cb2",
+      "file": "libstdc++6_12.2.0-14+deb12u1_arm64.deb"
+    },
+    {
+      "name": "libgcc-s1",
+      "version": "12.2.0-14+deb12u1",
+      "url": "https://deb.debian.org/debian/pool/main/g/gcc-12/libgcc-s1_12.2.0-14+deb12u1_arm64.deb",
+      "sha256": "576926b283613db80168ddf76380a3bd877602778cf0d226caa7bfbfa71eacf3",
+      "file": "libgcc-s1_12.2.0-14+deb12u1_arm64.deb"
+    }
+  ]
+}
