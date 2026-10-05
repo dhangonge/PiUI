@@ -11,6 +11,7 @@ export type PiSdk = typeof PiSdkModule
 
 export interface LoadedSdk {
   sdk: PiSdk
+  builtinThemes?: PiSdkModule.Theme[]
   builtinSlashCommands: Array<{ name: string; description?: string; argumentHint?: string }>
   version: string
   source: "bundled" | "external"
@@ -337,6 +338,23 @@ async function readBuiltinSlashCommands(externalEntry?: string): Promise<Array<{
   }
 }
 
+async function readBuiltinThemes(externalEntry?: string): Promise<PiSdkModule.Theme[]> {
+  try {
+    const entry = externalEntry ?? fileURLToPath(import.meta.resolve(PI_SDK_PACKAGE_NAME))
+    const directory = join(dirname(entry), "modes/interactive/theme")
+    // Version-gated SDK adapter; never search a user's theme directory here.
+    const themes = await import(pathToFileURL(join(directory, "theme.js")).href) as {
+      loadThemeFromPath(path: string, mode: string): PiSdkModule.Theme
+      getThemeByName(name: string): PiSdkModule.Theme | undefined
+    }
+    const defaults = ["dark", "light"].map(name => themes.loadThemeFromPath(join(directory, `${name}.json`), "truecolor"))
+    const system = themes.getThemeByName("system")
+    return system ? [...defaults, system] : defaults
+  } catch {
+    return []
+  }
+}
+
 export async function loadPiSdk(options: LoadSdkOptions = {}): Promise<LoadedSdk> {
   if (cached) return cached
   const external = options.sdkPath?.trim()
@@ -398,7 +416,8 @@ export async function loadPiSdk(options: LoadSdkOptions = {}): Promise<LoadedSdk
     }
     console.warn(`[piui-worker] ${message}; continuing because external SDKs are opt-in`)
   }
-  cached = { sdk, builtinSlashCommands, version, source: external ? "external" : "bundled", verified }
+  const builtinThemes = await readBuiltinThemes(external ? resolveSdkEntry(external) : undefined)
+  cached = { sdk, builtinThemes, builtinSlashCommands, version, source: external ? "external" : "bundled", verified }
   return cached
 }
 

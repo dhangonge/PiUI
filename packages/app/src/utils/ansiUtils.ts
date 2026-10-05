@@ -15,7 +15,9 @@ const ANSI_RE = /\x1b\[[0-9;]*m/g
  * 去掉所有 ANSI escape codes
  */
 export function stripAnsi(text: string): string {
-  return text.replace(ANSI_RE, '')
+  // Strip terminal commands and OSC payloads too; never pass control bytes to React text nodes.
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)|(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]|\x1b[@-_]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, '')
 }
 
 // ============================================

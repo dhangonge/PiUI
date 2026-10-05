@@ -54,6 +54,47 @@ describe("RealPiSession with the Pi SDK", () => {
     }
   })
 
+  it("loads a configured custom theme and keeps SDK-bound UI references live", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-theme-context-"))
+    const agentDir = path.join(root, "agent")
+    mkdirSync(path.join(agentDir, "themes"), { recursive: true })
+    mkdirSync(path.join(agentDir, "extensions"))
+    const theme = JSON.parse(readFileSync(new URL("./modes/interactive/theme/dark.json", import.meta.resolve("@earendil-works/pi-coding-agent")), "utf8"))
+    theme.name = "custom-fixture"
+    writeFileSync(path.join(agentDir, "themes/custom-fixture.json"), JSON.stringify(theme))
+    writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ theme: "custom-fixture" }))
+    writeFileSync(path.join(agentDir, "extensions/probe.js"), `
+export default function (pi) {
+  let capturedTheme;
+  pi.on("session_start", (_event, ctx) => {
+    capturedTheme = ctx.ui.theme;
+    ctx.ui.onTerminalInput(() => undefined)();
+    ctx.ui.setStatus("initial-theme", capturedTheme.name);
+    ctx.ui.setWidget("todo-like", (_tui, factoryTheme) => ({
+      render: () => [ctx.ui.theme.fg("accent", factoryTheme.name)], invalidate() {}
+    }));
+  });
+  pi.registerCommand("swap-theme", { handler: async (_args, ctx) => {
+    if (!ctx.ui.setTheme("light").success) throw new Error("theme unavailable");
+    ctx.ui.setStatus("changed-theme", capturedTheme.name + ":" + ctx.ui.theme.name);
+  } });
+}
+`)
+    let session: RealPiSession | undefined
+    try {
+      session = await RealPiSession.open(root, undefined, { agentDir })
+      await session.initializeExtensions()
+      await session.invokeCommand("swap-theme")
+      const patches = session.extensionUi.getStateMirror().patches
+      assert.ok(patches.some(patch => patch.kind === "status" && patch.key === "initial-theme" && patch.text === "custom-fixture"))
+      assert.ok(patches.some(patch => patch.kind === "status" && patch.key === "changed-theme" && patch.text === "light:light"))
+      assert.ok(session.extensionUi.listTuiPanels().some(panel => panel.key === "todo-like"))
+    } finally {
+      await session?.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it("supplies tool context and preserves the SDK guard on manual nested calls", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "piui-tool-context-"))
     const agentDir = path.join(root, "agent")

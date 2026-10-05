@@ -260,8 +260,10 @@ export class RealPiSession implements SessionRuntime {
     this.extensionUi = new ExtensionUiBridge(
       () => this.runtime.session.sessionManager.getSessionId(),
       () => undefined,
-      () => this.runtime.session.resourceLoader.getThemes().themes.flatMap(theme =>
-        theme.name ? [{ name: theme.name, path: theme.sourcePath }] : []),
+      {
+        getThemes: () => this.runtime.session.resourceLoader.getThemes().themes,
+        getPreferredTheme: () => this.runtime.session.settingsManager.getTheme(),
+      },
     )
     this.nativeFingerprint = this.getNativeFingerprint()
     this.bindSessionEvents()

@@ -5,6 +5,7 @@ import { extensionTuiStore } from '../pi/extensionTuiStore'
 import { commandFeedbackStore, type CommandFeedbackEntry, type CommandFeedbackStatus } from '../pi/commandFeedbackStore'
 import { ExtensionUiDialogCard } from '../features/chat/ExtensionUiDialogCard'
 import { ExtensionTuiView } from './ExtensionTuiView'
+import { stripAnsi } from '../utils/ansiUtils'
 
 const feedbackStatusConfig: Record<CommandFeedbackStatus, { label: string; className: string }> = {
   ok: { label: 'ok', className: 'text-success-100 bg-success-100/10' },
@@ -109,7 +110,7 @@ export function ExtensionsPanel({ sessionId }: { sessionId: string | null }) {
       {state?.title && (
         <section>
           <SectionLabel>{t('extensionsPanel.title', 'Title')}</SectionLabel>
-          <div className="text-[length:var(--fs-sm)] text-text-100">{state.title}</div>
+          <div className="text-[length:var(--fs-sm)] text-text-100">{stripAnsi(state.title)}</div>
         </section>
       )}
 
@@ -117,8 +118,8 @@ export function ExtensionsPanel({ sessionId }: { sessionId: string | null }) {
         <section>
           <SectionLabel>{t('extensionsPanel.working', 'Working')}</SectionLabel>
           <div className="flex items-center gap-2 text-[length:var(--fs-sm)] text-accent-main-100">
-            {state?.workingIndicator?.frames?.[0] && <span>{state.workingIndicator.frames[0]}</span>}
-            {state?.workingMessage && <span>{state.workingMessage}</span>}
+            {state?.workingIndicator?.frames?.[0] && <span>{stripAnsi(state.workingIndicator.frames[0])}</span>}
+            {state?.workingMessage && <span>{stripAnsi(state.workingMessage)}</span>}
           </div>
         </section>
       )}
@@ -129,7 +130,7 @@ export function ExtensionsPanel({ sessionId }: { sessionId: string | null }) {
           <div className="flex flex-col gap-1">
             {statuses.map(([key, value]) => (
               <div key={key} className="text-[length:var(--fs-sm)] text-text-200">
-                <span className="text-text-500">{key}:</span> {value}
+                <span className="text-text-500">{stripAnsi(key)}:</span> {stripAnsi(value)}
               </div>
             ))}
           </div>
@@ -143,7 +144,7 @@ export function ExtensionsPanel({ sessionId }: { sessionId: string | null }) {
             <span className="ml-1 text-text-500/60">({widget.placement})</span>
           </SectionLabel>
           <pre className="whitespace-pre-wrap rounded-md bg-bg-200/40 px-3 py-2 text-[length:var(--fs-sm)] text-text-200 font-mono">
-            {widget.lines.join('\n')}
+            {stripAnsi(widget.lines.join('\n'))}
           </pre>
         </section>
       ))}
@@ -177,7 +178,7 @@ function CommandFeedbackItem({ entry }: { entry: CommandFeedbackEntry }) {
         <span className="shrink-0 font-mono text-[length:var(--fs-xxs)] text-text-500">{time}</span>
       </div>
       <p className="mt-1 whitespace-pre-wrap break-words text-[length:var(--fs-sm)] text-text-200">
-        {entry.message}
+        {stripAnsi(entry.message)}
       </p>
     </div>
   )

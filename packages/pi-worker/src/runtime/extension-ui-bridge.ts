@@ -10,6 +10,7 @@ import type {
 import type { ExtensionUIContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent"
 import type { Component, TUI } from "@earendil-works/pi-tui"
 import { ExtensionTuiHost } from "./extension-tui.js"
+import { ExtensionThemeService, type ExtensionThemeOptions } from "./extension-theme.js"
 
 const MAX_TEXT_LENGTH = 256 * 1024
 const MAX_TITLE_LENGTH = 4 * 1024
@@ -49,11 +50,13 @@ export class ExtensionUiBridge {
    * cancelAll 时清空——会话替换/重载后新会话从零开始。
    */
   private stateMirror: ExtensionUiStatePatch[] = []
+  private readonly compatibilityWarnings = new Set<string>()
+  private readonly themes: ExtensionThemeService
 
   constructor(
     private readonly getSessionId: () => string,
     private readonly getWorkerGeneration: () => string | undefined,
-    private readonly getAllThemes: () => Array<{ name: string; path: string | undefined }> = () => [],
+    themeOptions: ExtensionThemeOptions = {},
   ) {
     this.tuiHost = new ExtensionTuiHost(event => {
       const sessionId = this.getSessionId()
@@ -66,7 +69,8 @@ export class ExtensionUiBridge {
       } else {
         this.emit({ type: "tuiFrame", sessionId, data: event.data })
       }
-    })
+    }, () => this.themes.current)
+    this.themes = new ExtensionThemeService(themeOptions, () => this.tuiHost.getFallbackTheme(), (key, message) => this.reportCompatibility(key, message))
   }
 
   readonly context = this.createContext()
@@ -132,6 +136,8 @@ export class ExtensionUiBridge {
     }
     this.pending.clear()
     this.stateMirror = []
+    this.compatibilityWarnings.clear()
+    this.themes.reset()
     this.tuiHost.reset()
   }
 
@@ -191,7 +197,8 @@ export class ExtensionUiBridge {
         bridge.emit({ type: "notify", sessionId: bridge.getSessionId(), message, notifyType })
       },
       onTerminalInput() {
-        throw unsupported("terminal input")
+        bridge.reportCompatibility("onTerminalInput", "Terminal key listeners are inactive in RPC mode; use the app's touch controls.")
+        return () => undefined
       },
       setStatus(key, text) {
         assertText("status key", key, MAX_TITLE_LENGTH)
@@ -314,27 +321,31 @@ export class ExtensionUiBridge {
         return bridge.editorText
       },
       addAutocompleteProvider() {
-        throw unsupported("autocomplete providers")
+        bridge.reportCompatibility("addAutocompleteProvider", "TUI autocomplete providers are not connected to the app composer.")
       },
       setEditorComponent() {
-        throw unsupported("custom editor components")
+        bridge.reportCompatibility("setEditorComponent", "TUI editor components cannot replace the app composer.")
       },
       getEditorComponent() {
-        throw unsupported("custom editor components")
+        bridge.reportCompatibility("getEditorComponent", "The app composer is not a TUI editor component.")
+        return undefined
       },
       get theme(): Theme {
         return bridge.tuiHost.getTheme()
       },
       getAllThemes() {
-        return bridge.getAllThemes()
+        return bridge.themes.list()
       },
-      getTheme() {
-        throw unsupported("TUI theme access")
+      getTheme(name) {
+        return bridge.themes.get(name)
       },
-      setTheme(name) {
-        if (typeof name !== "string" || !name.trim()) return { success: false, error: "Theme name is required" }
-        bridge.state({ kind: "theme", name: name.trim() })
-        return { success: true }
+      setTheme(value) {
+        const result = bridge.themes.set(value)
+        if (result.success) {
+          bridge.state({ kind: "theme", name: bridge.themes.current.name ?? "custom" })
+          bridge.tuiHost.invalidateTheme()
+        }
+        return result
       },
       getToolsExpanded() {
         return bridge.toolsExpanded
@@ -344,6 +355,13 @@ export class ExtensionUiBridge {
         bridge.state({ kind: "toolsExpanded", expanded })
       },
     }
+  }
+
+  private reportCompatibility(key: string, message: string): void {
+    if (this.compatibilityWarnings.has(key)) return
+    this.compatibilityWarnings.add(key)
+    this.state({ kind: "status", key: `piui-host:${key}`, text: message })
+    this.emit({ type: "notify", sessionId: this.getSessionId(), message, notifyType: "warning" })
   }
 
   private dialog(

@@ -158,8 +158,9 @@ export class ExtensionTuiHost {
   private readonly mounts = new Map<string, MountedPanel>()
   private customHandle?: { hide(): void }
   private started = false
+  private fallbackTheme?: Theme
 
-  constructor(private readonly emit: (event: ExtensionTuiHostEvent) => void) {
+  constructor(private readonly emit: (event: ExtensionTuiHostEvent) => void, private readonly themeProvider?: () => Theme) {
     this.tui = new TuiMainScreen(this.terminal, false)
     // Keep the same stacking order the interactive TUI uses.
     for (const container of [this.header, this.widgetsAbove, this.widgetsBelow, this.footer]) {
@@ -169,13 +170,24 @@ export class ExtensionTuiHost {
   }
 
   getTheme(): Theme {
+    return this.themeProvider?.() ?? this.getFallbackTheme()
+  }
+
+  invalidateTheme(): void {
+    this.tui.invalidate()
+    this.redraw()
+  }
+
+  getFallbackTheme(): Theme {
+    if (this.fallbackTheme) return this.fallbackTheme
     // The pi-coding-agent package index does not re-export the singleton
     // `theme` (only the Theme class), so build a default dark palette. The
     // interactive TUI's components only use theme.fg/bg helpers, so a static
     // palette is sufficient for offscreen rendering.
     try {
       const sdk = getLoadedSdk().sdk
-      return new sdk.Theme(DEFAULT_FG, DEFAULT_BG, "truecolor")
+      this.fallbackTheme = new sdk.Theme(DEFAULT_FG, DEFAULT_BG, "truecolor", { name: "piui-fallback" })
+      return this.fallbackTheme
     } catch {
       // SDK not loaded yet (unit tests / early startup): fall back to a
       // structural ANSI theme so factories still receive a working object.
