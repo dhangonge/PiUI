@@ -83,7 +83,8 @@ export const ToolGroup = memo(function ToolGroup({
         (immersiveMode && !!isStreaming && hasReadableTools)
 
   const groupStateKey = `message:${groupId}:tool-group:${executions[0]?.call.id ?? 'empty'}`
-  const [expanded, setExpanded] = useUiDisclosureState(groupStateKey, shouldStartExpanded)
+  const [storedExpanded, setExpanded, touched] = useUiDisclosureState(groupStateKey, shouldStartExpanded)
+  const expanded = processCollapseEnabled && !defaultExpanded && !touched ? false : storedExpanded
   const hasAutoExpandedReadableRef = useRef(
     !processCollapseEnabled && shouldStartExpanded && immersiveMode && hasReadableTools,
   )

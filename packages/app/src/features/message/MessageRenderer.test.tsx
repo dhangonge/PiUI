@@ -1,9 +1,10 @@
 import { StrictMode, type ReactNode } from 'react'
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { isEntryGrowComplete, resetEntryGrowCompletionsForTests } from '../../utils/entryGrow'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   MessageRenderer,
+  ProcessCollapseBlock,
   assistantHasFinalContent,
   assistantHasProcessContent,
   splitProcessRenderItems,
@@ -186,6 +187,21 @@ describe('entry animation lifecycle', () => {
     expect(container.querySelector('[style*="clip-path"]')).toBeNull()
     unmount()
     expect(isEntryGrowComplete(item.entryId)).toBe(true)
+  })
+})
+
+describe('process shell disclosure', () => {
+  it('stays collapsed through tool activity and preserves an explicit user expansion', () => {
+    const props = { stateKey: 'process-no-auto-flash', children: <div>Process details</div> }
+    const { rerender } = render(<ProcessCollapseBlock {...props} isActive={false} />)
+    rerender(<ProcessCollapseBlock {...props} isActive />)
+    expect(screen.queryByText('Process details')).toBeNull()
+    rerender(<ProcessCollapseBlock {...props} isActive={false} />)
+    expect(screen.queryByText('Process details')).toBeNull()
+    fireEvent.click(screen.getByRole('button'))
+    expect(screen.getByText('Process details')).toBeTruthy()
+    rerender(<ProcessCollapseBlock {...props} isActive />)
+    expect(screen.getByText('Process details')).toBeTruthy()
   })
 })
 

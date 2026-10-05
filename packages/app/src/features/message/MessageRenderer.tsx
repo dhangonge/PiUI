@@ -121,19 +121,13 @@ export function ProcessCollapseBlock({
   isActive: boolean
   stateKey: string
 }) {
-  const [expanded, setExpanded, touched] = useUiDisclosureState(stateKey, isActive)
-  // Automatic settling happens with the final answer moving outside the
-  // process shell. Animating that height makes the virtualizer measure the
-  // same row repeatedly while its contents move.
-  const settledExpanded = !isActive && !touched ? false : expanded
+  const [expanded, setExpanded, touched] = useUiDisclosureState(stateKey, false)
+  // Only an explicit user action opens a process shell, including cached rows.
+  const settledExpanded = touched ? expanded : false
   const shouldRenderBody = useMessageExpandRender(settledExpanded)
   const rootRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLButtonElement>(null)
   const unlockScrollRef = useRef<(() => void) | null>(null)
-
-  useEffect(() => {
-    setExpanded(isActive, { touched: false, respectUser: true })
-  }, [isActive, setExpanded])
 
   useEffect(() => {
     return () => {
@@ -147,12 +141,10 @@ export function ProcessCollapseBlock({
     unlockScrollRef.current = lockScrollAroundAnchor(headerRef.current, {
       observe: rootRef.current,
     })
-    setExpanded(!expanded)
-  }, [expanded, setExpanded])
+    setExpanded(!settledExpanded)
+  }, [settledExpanded, setExpanded])
 
-  // 动画：仅「进行中 + 用户未操作」的默认展开不开动画（避免每条新消息都带动画高度重排）；
-  // 用户手动折叠/展开、或结束后自动收起时都开动画——展开/收起手感对称。
-  const animateGrid = touched || !isActive
+  const animateGrid = touched
 
   return (
     <div ref={rootRef} className="flex flex-col">
