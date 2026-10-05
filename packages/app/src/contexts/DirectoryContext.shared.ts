@@ -10,7 +10,7 @@ export interface DirectoryContextValue {
   currentDirectory: string | undefined
   setCurrentDirectory: (directory: string | undefined) => void
   savedDirectories: SavedDirectory[]
-  addDirectory: (path: string) => void
+  addDirectory: (path: string, serverId?: string) => void
   removeDirectory: (path: string) => void
   reorderDirectories: (draggedPath: string, targetPath: string) => void
   sidebarExpanded: boolean

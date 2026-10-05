@@ -15,6 +15,8 @@ const listWorktreesMock = vi.fn()
 const subscribeToConnectionStateMock = vi.fn()
 const onServerChangeMock = vi.fn()
 let latestServerChange: (() => void) | undefined
+let activeServerId = 'a'
+const serverListeners = new Set<() => void>()
 
 vi.mock('../api', () => ({
   getCurrentProject: (...args: unknown[]) => getCurrentProjectMock(...args),
@@ -27,12 +29,16 @@ vi.mock('../api/events', () => ({
 
 vi.mock('../store/serverStore', () => ({
   serverStore: {
+    getActiveServerId: () => activeServerId,
+    subscribe: (listener: () => void) => { serverListeners.add(listener); return () => serverListeners.delete(listener) },
     onServerChange: (...args: unknown[]) => onServerChangeMock(...args),
   },
 }))
 
 describe('useGitWorkspaceCatalog', () => {
   beforeEach(() => {
+    activeServerId = 'a'
+    serverListeners.clear()
     getCurrentProjectMock.mockReset()
     listWorktreesMock.mockReset()
     subscribeToConnectionStateMock.mockReset()
@@ -45,6 +51,23 @@ describe('useGitWorkspaceCatalog', () => {
       return vi.fn()
     })
     listWorktreesMock.mockResolvedValue(['C:/repo', 'C:/repo-worktree'])
+  })
+
+  it('never opens the previous server directories on the next server', async () => {
+    getCurrentProjectMock.mockImplementation(async (directory: string) => ({ path: directory }))
+    const { result, rerender } = renderHook(({ dirs }) => useGitWorkspaceCatalog(dirs), { initialProps: { dirs: ['/a'] } })
+    await waitFor(() => expect(result.current.catalog.has('/a')).toBe(true))
+    act(() => {
+      activeServerId = 'b'
+      latestServerChange?.()
+      serverListeners.forEach(listener => listener())
+      rerender({ dirs: ['/b'] })
+    })
+    await waitFor(() => expect(result.current.catalog.has('/b')).toBe(true))
+    expect(getCurrentProjectMock).toHaveBeenCalledWith('/a', 'a')
+    expect(getCurrentProjectMock).toHaveBeenCalledWith('/b', 'b')
+    expect(getCurrentProjectMock).not.toHaveBeenCalledWith('/a', 'b')
+    expect(result.current.catalog.has('/a')).toBe(false)
   })
 
   it('refetches workspace metadata on server endpoint changes while stale requests are in flight', async () => {

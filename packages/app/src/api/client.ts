@@ -22,10 +22,10 @@ export * from './events'
 /**
  * 获取当前工作区（PiUI 原生形状：path/gitRoot，无 OCUI worktree 概念）
  */
-export async function getCurrentProject(directory?: string): Promise<HostProject> {
-  const workspacePath = await resolveWorkspacePath(directory)
+export async function getCurrentProject(directory?: string, serverId?: string): Promise<HostProject> {
+  const workspacePath = await resolveWorkspacePath(directory, serverId)
   if (!workspacePath) throw new Error('No PiUI workspace is available')
-  const git = await getHostGitInfo(workspacePath).catch(() => null)
+  const git = await (serverId ? getHostGitInfo(workspacePath, undefined, serverId) : getHostGitInfo(workspacePath)).catch(() => null)
   const path = workspacePath.replace(/\\/g, '/').replace(/\/+$/, '')
   const name = path.split('/').pop() || path
   return {

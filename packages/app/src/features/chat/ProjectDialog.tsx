@@ -15,6 +15,7 @@ interface ProjectDialogProps {
   onClose: () => void
   onSelect: (path: string) => void
   initialPath?: string
+  serverId?: string
 }
 
 interface FileItem {
@@ -60,7 +61,7 @@ function getFilterText(path: string): string {
 // Component
 // ============================================
 
-export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '' }: ProjectDialogProps) {
+export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '', serverId }: ProjectDialogProps) {
   const { t } = useTranslation(['chat', 'common'])
   // State
   const [inputValue, setInputValue] = useState('')
@@ -136,7 +137,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '' }: P
       setIsLoading(true)
       setError(null)
 
-      listDirectory(currentDir)
+      listDirectory(currentDir, undefined, serverId)
         .then(nodes => {
           if (cancelled || requestId !== requestIdRef.current) return
 
@@ -178,7 +179,7 @@ export function ProjectDialog({ isOpen, onClose, onSelect, initialPath = '' }: P
       cancelled = true
       clearTimeout(timer)
     }
-  }, [isOpen, currentDir])
+  }, [isOpen, currentDir, serverId])
 
   // ==========================================
   // Scroll to Selection

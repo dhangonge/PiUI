@@ -22,6 +22,7 @@ function bindSession(sessionId: string): string {
  */
 
 interface RouteState {
+  serverId?: string
   sessionId: string | null
   directory: string | undefined
 }
@@ -58,7 +59,7 @@ function parseHash(): RouteState {
     const saved = serverStorage.get(STORAGE_KEY_LAST_DIRECTORY)
     if (saved) directory = saved
   }
-  return { sessionId, directory }
+  return { serverId: serverStore.getActiveServerId(), sessionId, directory }
 }
 
 function buildHash(sessionId: string | null, directory: string | undefined): string {
@@ -70,7 +71,7 @@ function buildHash(sessionId: string | null, directory: string | undefined): str
 }
 
 function isSameRoute(a: RouteState, b: RouteState): boolean {
-  return a.sessionId === b.sessionId && a.directory === b.directory
+  return a.serverId === b.serverId && a.sessionId === b.sessionId && a.directory === b.directory
 }
 
 function ensureSnapshot(): RouteState {
@@ -84,6 +85,7 @@ function ensureSnapshot(): RouteState {
 }
 
 function emitRoute(next: RouteState) {
+  next = { ...next, serverId: serverStore.getActiveServerId() }
   const prev = ensureSnapshot()
   if (isSameRoute(prev, next)) return
   routeSnapshot = next
@@ -127,8 +129,8 @@ export function useRouter() {
   }, [isMobile])
 
   const navigateToSession = useCallback((sessionId: string, directory?: string) => {
-    const previousServerId = serverStore.getActiveServerId()
     const currentRoute = getSnapshot()
+    const previousServerId = currentRoute.serverId
     sessionId = bindSession(sessionId)
     const fallback = previousServerId === sessionKeyToServerId(sessionId)
       ? currentRoute.directory
@@ -157,8 +159,8 @@ export function useRouter() {
   }, [])
 
   const replaceSession = useCallback((sessionId: string | null, directory?: string) => {
-    const previousServerId = serverStore.getActiveServerId()
     const currentRoute = getSnapshot()
+    const previousServerId = currentRoute.serverId
     if (sessionId) sessionId = bindSession(sessionId)
     const fallback = !sessionId || previousServerId === sessionKeyToServerId(sessionId)
       ? currentRoute.directory
@@ -196,6 +198,7 @@ export function useRouter() {
   }, [])
 
   return {
+    serverId: route.serverId,
     sessionId: route.sessionId,
     directory: route.directory,
     navigateToSession,

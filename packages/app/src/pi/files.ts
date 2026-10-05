@@ -18,6 +18,7 @@ import {
 } from './transport/index.js'
 import { serverStore } from '../store/serverStore'
 import { resolveWorkspacePath } from './workspaces'
+import { getServerRevision } from '../utils/sessionKey'
 
 /**
  * Workspace file client over native host commands (files and git).
@@ -29,12 +30,12 @@ const rootDirectoryCache = new Map<string, { data: FileNodeDto[]; expiresAt: num
 const rootDirectoryInflight = new Map<string, Promise<FileNodeDto[]>>()
 const rootDirectoryGeneration = new Map<string, number>()
 
-function getRootDirectoryCacheKey(directory?: string): string {
-  return `${serverStore.getActiveServerId()}:${directory?.replace(/\\/g, '/').replace(/\/+$/, '') ?? ''}`
+function getRootDirectoryCacheKey(directory?: string, serverId?: string): string {
+  return `${serverId ? `${serverId}:${getServerRevision(serverId)}` : serverStore.getActiveServerId()}:${directory?.replace(/\\/g, '/').replace(/\/+$/, '') ?? ''}`
 }
 
-async function requireWorkspacePath(directory?: string): Promise<string> {
-  const workspacePath = await resolveWorkspacePath(directory)
+async function requireWorkspacePath(directory?: string, serverId?: string): Promise<string> {
+  const workspacePath = await resolveWorkspacePath(directory, serverId)
   if (!workspacePath) throw new Error('No PiUI workspace is available')
   return workspacePath
 }
@@ -72,7 +73,11 @@ function toPiRelativePath(path: string, directory?: string): string {
   return p.replace(/^\//, '')
 }
 
-async function fetchDirectory(path: string, directory?: string): Promise<FileNodeDto[]> {
+async function fetchDirectory(path: string, directory?: string, serverId?: string): Promise<FileNodeDto[]> {
+  const revision = serverId ? getServerRevision(serverId) : undefined
+  const checkOwner = () => {
+    if (serverId && getServerRevision(serverId) !== revision) throw new DOMException('Directory server changed', 'AbortError')
+  }
   const workspaceDir =
     directory && (/^[a-zA-Z]:/.test(directory) || directory.startsWith('/'))
       ? directory
@@ -88,12 +93,16 @@ async function fetchDirectory(path: string, directory?: string): Promise<FileNod
   // record server-side (workspace() find/resolve) without watching or prewarming;
   // the workspace is properly opened + watched only when the user actually picks
   // the directory and the app switches to it.
-  const workspacePath = isAbsolute && workspaceDir ? workspaceDir : await requireWorkspacePath(workspaceDir)
+  const workspacePath = isAbsolute && workspaceDir ? workspaceDir : await requireWorkspacePath(workspaceDir, serverId)
   const rel = toPiRelativePath(path, workspaceDir)
   const entries: FileNodeDto[] = []
   let cursor: string | undefined
   do {
-    const page = await listHostFiles(workspacePath, { path: rel, limit: 2000, cursor })
+    checkOwner()
+    const page = serverId
+      ? await listHostFiles(workspacePath, { path: rel, limit: 2000, cursor }, undefined, serverId)
+      : await listHostFiles(workspacePath, { path: rel, limit: 2000, cursor })
+    checkOwner()
     entries.push(...page.entries)
     cursor = page.nextCursor
   } while (cursor && entries.length < 20_000)
@@ -117,12 +126,12 @@ export async function searchFiles(
   return result.paths
 }
 
-export async function listDirectory(path: string, directory?: string): Promise<FileNodeDto[]> {
+export async function listDirectory(path: string, directory?: string, serverId?: string): Promise<FileNodeDto[]> {
   if (!isRootDirectoryPath(path)) {
-    return fetchDirectory(path, directory)
+    return fetchDirectory(path, directory, serverId)
   }
 
-  const key = getRootDirectoryCacheKey(directory)
+  const key = getRootDirectoryCacheKey(directory, serverId)
   const now = Date.now()
   const cached = rootDirectoryCache.get(key)
   if (cached && cached.expiresAt > now) {
@@ -135,7 +144,7 @@ export async function listDirectory(path: string, directory?: string): Promise<F
   }
 
   const generation = rootDirectoryGeneration.get(key) ?? 0
-  const request = fetchDirectory(path === '' ? '.' : path, directory)
+  const request = fetchDirectory(path === '' ? '.' : path, directory, serverId)
     .then(data => {
       if ((rootDirectoryGeneration.get(key) ?? 0) === generation) {
         rootDirectoryCache.set(key, { data, expiresAt: Date.now() + ROOT_DIRECTORY_CACHE_TTL_MS })

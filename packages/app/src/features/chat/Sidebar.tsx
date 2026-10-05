@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect, useRef, memo } from 'react'
 import { SidePanel } from './sidebar/SidePanel'
 import { ProjectDialog } from './ProjectDialog'
 import { useDirectory } from '../../hooks'
+import { useServerStore } from '../../hooks/useServerStore'
+import { getServerRevision } from '../../utils/sessionKey'
 import type { UiSession } from '../../types/session'
 import { useChatViewport } from './chatViewport'
 
@@ -46,6 +48,9 @@ export const Sidebar = memo(function Sidebar({
   const [isProjectDialogOpen, setIsProjectDialogOpen] = useState(false)
   const [projectDialogKey, setProjectDialogKey] = useState(0)
   const { addDirectory, currentDirectory } = useDirectory()
+  const { activeServer } = useServerStore()
+  const projectServerId = activeServer?.id
+  const projectOwnerKey = projectServerId ? `${projectServerId}:${getServerRevision(projectServerId)}` : ''
   // 已在项目里时，从当前项目路径起步，方便加相邻目录；否则回落 home
   const projectDialogInitialPath = currentDirectory
   const { interaction, layout, actions } = useChatViewport()
@@ -61,12 +66,12 @@ export const Sidebar = memo(function Sidebar({
 
   const handleAddProject = useCallback(
     (path: string) => {
-      addDirectory(path)
+      addDirectory(path, projectServerId)
       if (!isOverlay) {
         onOpen()
       }
     },
-    [addDirectory, isOverlay, onOpen],
+    [addDirectory, isOverlay, onOpen, projectServerId],
   )
 
   const openProjectDialog = useCallback(() => {
@@ -297,7 +302,8 @@ export const Sidebar = memo(function Sidebar({
           </div>
 
           <ProjectDialog
-            key={`mobile-${projectDialogKey}-${Number(isProjectDialogVisible)}`}
+            serverId={projectServerId}
+            key={`mobile-${projectOwnerKey}-${projectDialogKey}-${Number(isProjectDialogVisible)}`}
             isOpen={isProjectDialogVisible}
             onClose={closeProjectDialog}
             onSelect={handleAddProject}
@@ -352,7 +358,8 @@ export const Sidebar = memo(function Sidebar({
         </div>
 
         <ProjectDialog
-          key={`mobile-${projectDialogKey}-${Number(isProjectDialogVisible)}`}
+          serverId={projectServerId}
+          key={`mobile-${projectOwnerKey}-${projectDialogKey}-${Number(isProjectDialogVisible)}`}
           isOpen={isProjectDialogVisible}
           onClose={closeProjectDialog}
           onSelect={handleAddProject}
@@ -406,7 +413,8 @@ export const Sidebar = memo(function Sidebar({
       </div>
 
       <ProjectDialog
-        key={`desktop-${projectDialogKey}-${Number(isProjectDialogVisible)}`}
+        serverId={projectServerId}
+        key={`desktop-${projectOwnerKey}-${projectDialogKey}-${Number(isProjectDialogVisible)}`}
         isOpen={isProjectDialogVisible}
         onClose={closeProjectDialog}
         onSelect={handleAddProject}

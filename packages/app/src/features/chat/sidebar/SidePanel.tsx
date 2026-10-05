@@ -306,6 +306,7 @@ export function SidePanel({
     return subscribeToConnectionState(setConnectionState)
   }, [])
 
+  const activeServerId = useSyncExternalStore(listener => serverStore.subscribe(listener), () => serverStore.getActiveServerId())
   const { sessions, isLoading, isLoadingMore, hasMore, search, setSearch, loadMore, deleteSession, refresh } =
     useSessionContext()
 
@@ -314,16 +315,16 @@ export function SidePanel({
     pinnedSessionsStore.getScopedSnapshot,
     pinnedSessionsStore.getScopedSnapshot,
   )
-  const pinnedEntries = useMemo(() => allPinnedEntries.filter(entry => sessionKeyToServerId(entry.sessionId) === serverStore.getActiveServerId()), [allPinnedEntries])
+  const pinnedEntries = useMemo(() => allPinnedEntries.filter(entry => sessionKeyToServerId(entry.sessionId) === activeServerId), [allPinnedEntries, activeServerId])
   const sessionLookup = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions])
 
   // 列表显示按当前工作区过滤；数据本身是全局的（活跃 tab / 标题解析都需全局）
   const visibleSessions = useMemo(
     () =>
       currentDirectory
-        ? sessions.filter(session => isSameDirectory(session.directory, currentDirectory))
+        ? sessions.filter(session => sessionKeyToServerId(session.id) === activeServerId && isSameDirectory(session.directory, currentDirectory))
         : sessions,
-    [sessions, currentDirectory],
+    [sessions, currentDirectory, activeServerId],
   )
   const visibleLookup = useMemo(() => new Map(visibleSessions.map(session => [session.id, session])), [visibleSessions])
 
@@ -417,7 +418,8 @@ export function SidePanel({
   const folderProjectGroups = useMemo<ProjectItem[]>(() => {
     const reorderablePaths = new Set(savedDirectories.map(directory => normalizeToForwardSlash(directory.path)))
     const directories = [...savedDirectories]
-    const discovered = [...sessions]
+    const ownedSessions = sessions.filter(session => sessionKeyToServerId(session.id) === activeServerId)
+    const discovered = [...ownedSessions]
       .sort((left, right) => right.updatedAt - left.updatedAt)
       .map(session => session.directory)
     for (const directory of discovered) {
@@ -425,11 +427,11 @@ export function SidePanel({
       directories.push({
         path: directory,
         name: getDirectoryName(directory),
-        addedAt: sessions.find(session => isSameDirectory(session.directory, directory))?.updatedAt ?? 0,
+        addedAt: ownedSessions.find(session => isSameDirectory(session.directory, directory))?.updatedAt ?? 0,
       })
     }
     return buildProjectGroups(directories, reorderablePaths)
-  }, [buildProjectGroups, savedDirectories, sessions])
+  }, [buildProjectGroups, savedDirectories, sessions, activeServerId])
 
   const selectorProjectGroups = useMemo<ProjectItem[]>(() => {
     const sortedDirectories = [...savedDirectories].sort((a, b) => {
@@ -645,7 +647,7 @@ export function SidePanel({
     (session: UiSession) => {
       // Global 模式下，点击 session 自动切换到该 session 的工作目录并添加到项目列表
       if (!currentDirectory && session.directory) {
-        addDirectory(session.directory)
+        addDirectory(session.directory, sessionKeyToServerId(session.id))
       }
       onSelectSession(session)
       if (window.innerWidth < 768 && onCloseMobile) {
@@ -660,7 +662,7 @@ export function SidePanel({
   const handleSelectActive = useCallback(
     (session: { id: string; directory?: string }) => {
       if (session.directory) {
-        addDirectory(session.directory)
+        addDirectory(session.directory, sessionKeyToServerId(session.id))
       }
       const selectable: UiSession = {
         id: session.id,

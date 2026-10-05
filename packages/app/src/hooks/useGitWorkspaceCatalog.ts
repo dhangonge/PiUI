@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { getCurrentProject } from '../api'
 import { subscribeToConnectionState } from '../api/events'
 import { serverStore } from '../store/serverStore'
@@ -22,6 +22,7 @@ export function requestGitWorkspaceCatalogRefresh() {
 }
 
 export function useGitWorkspaceCatalog(directories: string[]) {
+  const serverId = useSyncExternalStore(listener => serverStore.subscribe(listener), () => serverStore.getActiveServerId())
   const [catalog, setCatalog] = useState<GitWorkspaceCatalog>(new Map())
   const [isLoading, setIsLoading] = useState(false)
   const mountedRef = useRef(true)
@@ -34,6 +35,7 @@ export function useGitWorkspaceCatalog(directories: string[]) {
   }, [])
 
   const refresh = useCallback(async () => {
+    if (serverId !== serverStore.getActiveServerId()) return
     const version = ++versionRef.current
     const normalizedDirectorySet = new Set(
       directories.filter(Boolean).map(directory => normalizeToForwardSlash(directory)),
@@ -53,7 +55,7 @@ export function useGitWorkspaceCatalog(directories: string[]) {
       const projectResults = await Promise.allSettled(
         normalizedDirectories.map(async directory => ({
           directory,
-          project: await getCurrentProject(directory),
+          project: await getCurrentProject(directory, serverId),
         })),
       )
 
@@ -122,7 +124,7 @@ export function useGitWorkspaceCatalog(directories: string[]) {
         setIsLoading(false)
       }
     }
-  }, [directories, setCatalogState])
+  }, [directories, serverId, setCatalogState])
 
   // 工作区目录变化时刷新：请求-响应模式，loading 与请求同步设置
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -156,8 +158,14 @@ export function useGitWorkspaceCatalog(directories: string[]) {
   }, [refresh])
 
   useEffect(() => {
-    return serverStore.onServerChange(() => void refresh())
-  }, [refresh])
+    return serverStore.onServerChange(() => {
+      versionRef.current++
+      setCatalogState(new Map())
+      // A switch first invalidates the old render's directories; the new render
+      // refreshes the new shard. Endpoint edits can refresh the same owner now.
+      if (serverId === serverStore.getActiveServerId()) void refresh()
+    })
+  }, [refresh, serverId, setCatalogState])
 
   return {
     catalog,

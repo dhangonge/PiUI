@@ -1435,7 +1435,8 @@ export function PiChatPane({
 
   const overlayRef = useRef<PaneDropOverlayHandle>(null)
   const paneRootRef = useRef<HTMLDivElement>(null)
-  const isFolderDropActive = useFolderProjectDrop(paneRootRef, addDirectory)
+  const addDroppedProject = useCallback((path: string) => addDirectory(path, boundServerId), [addDirectory, boundServerId])
+  const isFolderDropActive = useFolderProjectDrop(paneRootRef, addDroppedProject)
   const currentZoneRef = useRef<DropZone | null>(null)
   const pendingZoneRef = useRef<DropZone | null>(null)
   const dropRafRef = useRef<number | null>(null)

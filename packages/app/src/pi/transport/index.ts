@@ -164,8 +164,8 @@ export async function postHostCommand<T = JsonValue | undefined, K extends keyof
 }
 
 // Host git commands (git.*), workspace-scoped
-export function getHostGitInfo(workspacePath: string, signal?: AbortSignal): Promise<GitInfoResponse> {
-  return postHostCommand('git.info', { workspacePath }, signal)
+export function getHostGitInfo(workspacePath: string, signal?: AbortSignal, serverId?: string): Promise<GitInfoResponse> {
+  return postHostCommand('git.info', { workspacePath }, signal, serverId)
 }
 
 export function getHostGitStatus(workspacePath: string, signal?: AbortSignal): Promise<GitStatusResponse> {
@@ -185,8 +185,9 @@ export function listHostFiles(
   workspacePath: string,
   params?: { path?: string; limit?: number; cursor?: string },
   signal?: AbortSignal,
+  serverId?: string,
 ): Promise<FileListResponse> {
-  return postHostCommand('files.list', { workspacePath, ...params }, signal)
+  return postHostCommand('files.list', { workspacePath, ...params }, signal, serverId)
 }
 
 export function readHostFile(workspacePath: string, path: string, signal?: AbortSignal): Promise<FileReadResponse> {

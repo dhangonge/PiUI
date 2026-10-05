@@ -12,6 +12,7 @@ import { layoutStore, useLayoutStore } from '../store/layoutStore'
 import { isTauri, isTauriMobile } from '../utils/tauri'
 import { DirectoryContext, type DirectoryContextValue, type SavedDirectory } from './DirectoryContext.shared'
 import { hasUnsavedFileChanges } from '../store/unsavedFileStore'
+import { STORAGE_KEY_LAST_DIRECTORY } from '../constants/storage'
 
 const STORAGE_KEY_SAVED = 'piui-saved-directories'
 const STORAGE_KEY_RECENT = 'piui-recent-projects'
@@ -51,13 +52,16 @@ function readRecentProjects(serverId: string): RecentProjects {
 
 export function DirectoryProvider({ children }: { children: ReactNode }) {
   // 从 URL 获取 directory（替代 localStorage）
-  const { directory: urlDirectory, setDirectory: setUrlDirectory } = useRouter()
+  const { directory: routeDirectory, serverId: routeServerId, setDirectory: setUrlDirectory } = useRouter()
 
   // 从 layoutStore 获取 sidebarExpanded
   const { sidebarExpanded } = useLayoutStore()
 
   const serverId = useSyncExternalStore(listener => serverStore.subscribe(listener), () => serverStore.getActiveServerId())
   const storageVersion = useSyncExternalStore(subscribePerServerStorageVersion, getStorageVersion)
+  const urlDirectory = routeServerId && routeServerId !== serverId
+    ? serverStorage.getFor(STORAGE_KEY_LAST_DIRECTORY, serverId) ?? undefined
+    : routeDirectory
   const savedDirectories = useMemo(() => { void storageVersion; return readSavedDirectories(serverId) }, [serverId, storageVersion])
   const recentProjects = useMemo(() => { void storageVersion; return readRecentProjects(serverId) }, [serverId, storageVersion])
   const setSavedDirectories = useCallback((update: (previous: SavedDirectory[]) => SavedDirectory[]) => {
@@ -82,7 +86,8 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
 
   // 添加目录
   const addDirectory = useCallback(
-    (path: string) => {
+    (path: string, owner = serverId) => {
+      if (!serverStore.getServer(owner)) return
       let normalized = normalizeToForwardSlash(path)
 
       // normalizeToForwardSlash 会去掉尾斜杠，导致根路径 "/" → "" 和 "C:/" → "C:"
@@ -96,8 +101,9 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       if (!normalized || normalized === '.') return
 
       // 使用 isSameDirectory 检查是否已存在（处理大小写和斜杠差异）
-      if (savedDirectories.some(d => isSameDirectory(d.path, normalized))) {
-        setCurrentDirectory(normalized)
+      const directories = readSavedDirectories(owner)
+      if (directories.some(d => isSameDirectory(d.path, normalized))) {
+        if (owner === serverId) setCurrentDirectory(normalized)
         return
       }
 
@@ -107,10 +113,10 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
         addedAt: Date.now(),
       }
 
-      setSavedDirectories(prev => [...prev, newDir])
-      setCurrentDirectory(normalized)
+      serverStorage.setJSONFor(STORAGE_KEY_SAVED, [...directories, newDir], owner)
+      if (owner === serverId) setCurrentDirectory(normalized)
     },
-    [savedDirectories, setCurrentDirectory, setSavedDirectories],
+    [serverId, setCurrentDirectory],
   )
 
   // 移除目录
