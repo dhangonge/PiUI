@@ -61,7 +61,7 @@ export function ExtensionUiDialogHost({
 
   return (
     <ExtensionUiDialogCardWrapper
-      key={request.requestId}
+      key={`${request.sessionId}:${request.workerGeneration ?? ''}:${request.requestId}`}
       request={request}
       queueLength={sorted.length}
       queueIndex={queueIndex}

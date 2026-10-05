@@ -222,6 +222,7 @@
     "fileCount_other": "{{count}} files"
   },
   "dialog": {
+    "extensionRequest": "Extension request",
     "minimize": "Minimize",
     "previous": "Previous",
     "next": "Next",

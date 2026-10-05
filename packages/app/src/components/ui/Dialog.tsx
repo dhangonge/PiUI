@@ -16,6 +16,7 @@ interface DialogProps {
   showCloseButton?: boolean
   /** 跳过默认的 header 和 content 包裹，children 直接作为面板内容 */
   rawContent?: boolean
+  fullscreen?: boolean
   /** 允许触摸设备点击遮罩关闭，默认关闭以避免误触 */
   allowTouchBackdropClose?: boolean
 }
@@ -30,6 +31,7 @@ export function Dialog({
   className = '',
   showCloseButton = true,
   rawContent = false,
+  fullscreen = false,
   allowTouchBackdropClose = false,
 }: DialogProps) {
   const { t } = useTranslation(['common'])
@@ -303,6 +305,7 @@ export function Dialog({
     >
       <div
         className="dialog-safe-region absolute inset-x-0 bottom-0 flex items-center justify-center p-4"
+        style={fullscreen ? { paddingTop: 0, paddingLeft: 'var(--safe-area-inset-left, 0px)', paddingRight: 'var(--safe-area-inset-right, 0px)', paddingBottom: 'var(--safe-area-inset-bottom, 0px)' } : undefined}
         onPointerDown={e => {
           handleBackdropPointerDown(e)
           e.stopPropagation()
@@ -322,10 +325,11 @@ export function Dialog({
             relative glass border border-border-200/60 rounded-xl shadow-lg 
             flex flex-col overflow-hidden
             ${isDraggingActive ? '' : 'transition-all duration-200 ease-out'}
-            ${className}
+            ${fullscreen ? '!rounded-none' : ''} ${className}
           `}
           style={{
-            width: typeof width === 'number' ? `${width}px` : width,
+            width: fullscreen ? '100%' : typeof width === 'number' ? `${width}px` : width,
+            height: fullscreen ? '100%' : undefined,
             maxWidth: '100%',
             maxHeight: '100%',
             opacity: isVisible ? (dragY > 0 ? Math.max(0.3, 1 - dragY / 300) : 1) : 0,
@@ -342,7 +346,7 @@ export function Dialog({
           {/* Drag Handle (mobile) - 触摸下滑关闭的唯一触发区域 */}
           <div
             ref={dragHandleRef}
-            className="md:hidden flex justify-center pt-3 pb-2 shrink-0 cursor-grab active:cursor-grabbing"
+            className={fullscreen ? 'hidden' : 'md:hidden flex justify-center pt-3 pb-2 shrink-0 cursor-grab active:cursor-grabbing'}
           >
             <div className="w-10 h-1 rounded-full bg-bg-300" />
           </div>

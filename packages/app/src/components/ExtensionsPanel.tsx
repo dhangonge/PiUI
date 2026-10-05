@@ -66,7 +66,7 @@ export function ExtensionsPanel({ sessionId }: { sessionId: string | null }) {
         <section className="flex flex-col gap-2">
           <SectionLabel>{t('extensionsPanel.dialogs', 'Dialog')}</SectionLabel>
           {sortedPending.map(request => (
-            <ExtensionUiDialogCard key={request.requestId} request={request} compact />
+            <ExtensionUiDialogCard key={`${request.sessionId}:${request.workerGeneration ?? ''}:${request.requestId}`} request={request} compact />
           ))}
         </section>
       )}

@@ -183,9 +183,9 @@ describe('ExtensionUiDialogHost', () => {
       expect(expandButtons.length).toBe(2)
       expect(screen.getAllByText(longOption)).toHaveLength(1)
 
-      // 展开：完整文本内联出现（摘要 + 展开区 = 2 处），按钮变为收起
+      // Expand the original text in place, without a second copy of the option.
       fireEvent.click(expandButtons[1]!)
-      expect(screen.getAllByText(longOption)).toHaveLength(2)
+      expect(screen.getAllByText(longOption)).toHaveLength(1)
       expect(screen.getAllByTitle(/收起详情|Collapse details/i)).toHaveLength(1)
 
       // 展开状态下点击选项仍正常选中并提交
@@ -203,6 +203,32 @@ describe('ExtensionUiDialogHost', () => {
         delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollWidth
       }
     }
+  })
+
+  it('preserves an answer across fullscreen and Escape without cancelling the request', async () => {
+    extensionUiStore.requestOpened(selectRequest({ kind: 'input', placeholder: 'Answer', options: undefined } as never))
+    render(<ExtensionUiDialogHost sessionId="session-1" />)
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'kept answer' } })
+    fireEvent.click(screen.getByRole('button', { name: /^fullscreen$|^全屏$/i }))
+    expect(screen.getByRole('dialog')).toHaveStyle({ height: '100%', width: '100%' })
+    expect(screen.getByRole('textbox')).toHaveValue('kept answer')
+    expect(screen.getAllByText('Choose mode')).toHaveLength(1)
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('textbox')).toHaveValue('kept answer')
+    expect(respondPiExtensionUi).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: /submit|提交/i }))
+    await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalledWith('session-1', 'request-1', expect.objectContaining({ value: 'kept answer' })))
+  })
+
+  it('resets draft ownership for the same request ID on another server', async () => {
+    extensionUiStore.requestOpened(selectRequest({ sessionId: 'a::same', options: ['A first', 'A second'] }))
+    extensionUiStore.requestOpened(selectRequest({ sessionId: 'b::same', options: ['B first', 'B second'] }))
+    const { rerender } = render(<ExtensionUiDialogHost sessionId="a::same" />)
+    fireEvent.click(screen.getByText('A second'))
+    rerender(<ExtensionUiDialogHost sessionId="b::same" />)
+    fireEvent.click(screen.getByRole('button', { name: /submit|提交/i }))
+    await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalledWith('b::same', 'request-1', expect.objectContaining({ value: 'B first' })))
   })
 
   it('clears the settled request from the store after submit', async () => {
