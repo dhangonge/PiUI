@@ -37,7 +37,8 @@ import type {
 import type { SessionInfo, SessionTreeNode, Skill, PromptTemplate } from '@earendil-works/pi-coding-agent'
 import type { PiBranchPage, PiConfiguredPackage, PiModelRuntimeSnapshot, PiPackageUpdate, PiProjectTrust, PiProviderAuthInfo, PiSettingsSnapshot, ResolvedPaths } from '../domain/index.js'
 import { getApiBase, getPiAuthToken, piFetch } from '../httpClient.js'
-import { piCommandStore } from '../state/index.js'
+import { getPiCommandStore } from '../state/index.js'
+import { isScopedSessionKey, resolveSessionTarget } from '../../utils/sessionKey.js'
 
 // Response types
 export type PiCommandResponse<T = JsonValue | undefined> = {
@@ -87,31 +88,32 @@ export type PiSessionCreateResult = {
 }
 
 // Transport layer - raw API calls
-export async function fetchHostHealth(signal?: AbortSignal): Promise<HealthResponse> {
-  return readJson<HealthResponse>(`${getApiBase()}/api/v1/host/health`, { signal })
+export async function fetchHostHealth(signal?: AbortSignal, serverId?: string): Promise<HealthResponse> {
+  return readJson<HealthResponse>(`${getApiBase(serverId)}/api/v1/host/health`, { signal }, serverId)
 }
 
-export async function fetchHostShare(signal?: AbortSignal): Promise<ShareInfo> {
-  return readJson<ShareInfo>(`${getApiBase()}/api/v1/host/share`, { signal })
+export async function fetchHostShare(signal?: AbortSignal, serverId?: string): Promise<ShareInfo> {
+  return readJson<ShareInfo>(`${getApiBase(serverId)}/api/v1/host/share`, { signal }, serverId)
 }
 
-export async function fetchPiRegistry(signal?: AbortSignal): Promise<PiRegistrySnapshot> {
-  return readJson<PiRegistrySnapshot>(`${getApiBase()}/api/v1/pi/registry`, { signal })
+export async function fetchPiRegistry(signal?: AbortSignal, serverId?: string): Promise<PiRegistrySnapshot> {
+  return readJson<PiRegistrySnapshot>(`${getApiBase(serverId)}/api/v1/pi/registry`, { signal }, serverId)
 }
 
 export async function postPiGlobalCommand<T = JsonValue | undefined, K extends PiGlobalCommandName = PiGlobalCommandName>(
   name: K,
   params?: PiParamsFor<K>,
   signal?: AbortSignal,
+  serverId?: string,
 ): Promise<T extends undefined ? null : T> {
   const body = params ? JSON.stringify(params) : '{}'
-  const response = await readJson<PiCommandResponse<T>>(`${getApiBase()}/api/v1/pi/commands/${encodeURIComponent(name)}`, {
+  const response = await readJson<PiCommandResponse<T>>(`${getApiBase(serverId)}/api/v1/pi/commands/${encodeURIComponent(name)}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body,
     signal,
-  })
-  if (response.command) piCommandStore.upsert(response.command)
+  }, serverId)
+  if (response.command) getPiCommandStore(serverId).upsert(response.command)
   return (response.data !== undefined ? response.data : response.command) as T extends undefined ? null : T
 }
 
@@ -120,18 +122,22 @@ export async function postPiSessionCommand<T = JsonValue | undefined, K extends 
   name: K,
   params?: PiParamsFor<K>,
   signal?: AbortSignal,
+  serverId?: string,
 ): Promise<T extends undefined ? null : T> {
+  const target = resolveSessionTarget(sessionId, serverId)
+  const scope = serverId !== undefined || isScopedSessionKey(sessionId) ? target.serverId : undefined
   const body = params ? JSON.stringify(params) : '{}'
   const response = await readJson<PiCommandResponse<T>>(
-    `${getApiBase()}/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/${encodeURIComponent(name)}`,
+    `${getApiBase(scope)}/api/v1/pi/sessions/${encodeURIComponent(target.sessionId)}/commands/${encodeURIComponent(name)}`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body,
       signal,
     },
+    scope,
   )
-  if (response.command) piCommandStore.upsert(response.command)
+  if (response.command) getPiCommandStore(scope).upsert(response.command)
   return (response.data !== undefined ? response.data : response.command) as T extends undefined ? null : T
 }
 
@@ -140,15 +146,17 @@ export async function postHostCommand<T = JsonValue | undefined, K extends keyof
   name: K,
   params?: HostCommandParams[K],
   signal?: AbortSignal,
+  serverId?: string,
 ): Promise<T> {
   const response = await readJson<{ data: T }>(
-    `${getApiBase()}/api/v1/host/commands/${encodeURIComponent(name)}`,
+    `${getApiBase(serverId)}/api/v1/host/commands/${encodeURIComponent(name)}`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(params ?? {}),
       signal,
     },
+    serverId,
   )
   return response.data
 }
@@ -362,28 +370,30 @@ export function getPiPackageInstalledPath(cwd: string, source: string, scope?: '
 export function checkPiPackageUpdates(cwd: string, signal?: AbortSignal): Promise<PiPackageUpdate[]> {
   return postPiGlobalCommand('packages.checkUpdates', { cwd }, signal)
 }
-export function listPiSessions(params: PiSessionListParams, signal?: AbortSignal): Promise<PiSessionListResult> {
-  return postPiGlobalCommand<PiSessionListResult>('session.list', params, signal)
+export function listPiSessions(params: PiSessionListParams, signal?: AbortSignal, serverId?: string): Promise<PiSessionListResult> {
+  return postPiGlobalCommand<PiSessionListResult>('session.list', params, signal, serverId)
 }
 
-export function listAllPiSessions(signal?: AbortSignal): Promise<PiSessionListResult> {
-  return postPiGlobalCommand<PiSessionListResult>('session.listAll', undefined, signal)
+export function listAllPiSessions(signal?: AbortSignal, serverId?: string): Promise<PiSessionListResult> {
+  return postPiGlobalCommand<PiSessionListResult>('session.listAll', undefined, signal, serverId)
 }
 
-export function createPiSession(cwd: string, signal?: AbortSignal): Promise<PiSessionCreateResult> {
-  return postPiGlobalCommand<PiSessionCreateResult>('session.create', { cwd }, signal)
+export function createPiSession(cwd: string, signal?: AbortSignal, serverId?: string): Promise<PiSessionCreateResult> {
+  return postPiGlobalCommand<PiSessionCreateResult>('session.create', { cwd }, signal, serverId)
 }
 
-export function previewPiSession(sessionId: string, params: PiBranchGetParams = {}, signal?: AbortSignal): Promise<PiSessionPreviewResult> {
-  return postPiGlobalCommand<PiSessionPreviewResult>('session.preview', { sessionId, ...params }, signal)
+export function previewPiSession(sessionId: string, params: PiBranchGetParams = {}, signal?: AbortSignal, serverId?: string): Promise<PiSessionPreviewResult> {
+  const target = resolveSessionTarget(sessionId, serverId)
+  const scope = serverId !== undefined || isScopedSessionKey(sessionId) ? target.serverId : undefined
+  return postPiGlobalCommand<PiSessionPreviewResult>('session.preview', { sessionId: target.sessionId, ...params }, signal, scope)
 }
 
-export function openPiSession(params: PiSessionOpenParams, signal?: AbortSignal): Promise<PiSessionOpenResult> {
-  return postPiGlobalCommand<PiSessionOpenResult>('session.open', params, signal)
+export function openPiSession(params: PiSessionOpenParams, signal?: AbortSignal, serverId?: string): Promise<PiSessionOpenResult> {
+  return postPiGlobalCommand<PiSessionOpenResult>('session.open', params, signal, serverId)
 }
 
-export function deletePiSession(cwd: string, sessionFile: string, signal?: AbortSignal): Promise<null> {
-  return postPiGlobalCommand('session.delete', { cwd, sessionFile }, signal)
+export function deletePiSession(cwd: string, sessionFile: string, signal?: AbortSignal, serverId?: string): Promise<null> {
+  return postPiGlobalCommand('session.delete', { cwd, sessionFile }, signal, serverId)
 }
 
 // Catalog commands
@@ -682,8 +692,8 @@ export function cyclePiThinkingLevel(sessionId: string, signal?: AbortSignal): P
 }
 
 // Helper
-async function readJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await piFetch(url, init)
+async function readJson<T>(url: string, init?: RequestInit, serverId?: string): Promise<T> {
+  const response = await piFetch(url, init, serverId)
   if (!response.ok) {
     const message = await response.text().catch(() => '')
     let code: string | undefined
