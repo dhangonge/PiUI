@@ -95,6 +95,47 @@ export default function (pi) {
     }
   })
 
+  it("reports load, setup and action failures safely and rebinds diagnostics on reload", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-extension-errors-"))
+    const agentDir = path.join(root, "agent")
+    const extensionsDir = path.join(agentDir, "extensions")
+    mkdirSync(extensionsDir, { recursive: true })
+    writeFileSync(path.join(extensionsDir, "broken.js"), 'throw new Error("private-load-sentinel"); export default function() {}')
+    writeFileSync(path.join(extensionsDir, "events.js"), `
+export default function (pi) {
+  pi.on("session_start", () => {
+    pi.appendEntry("start-counter", {});
+    throw new Error("private-setup-sentinel");
+  });
+  pi.registerCommand("bad-command", { handler: async () => { throw new Error("private-command-sentinel") } });
+  pi.registerCommand("good-command", { handler: async (_args, ctx) => { ctx.ui.setStatus("alive", "yes") } });
+  pi.registerTool({ name: "bad_tool", label: "Bad tool", description: "Fault fixture", parameters: { type: "object", properties: {} },
+    execute: async () => { throw new Error("private-tool-sentinel") } });
+}
+`)
+    let session: RealPiSession | undefined
+    try {
+      session = await RealPiSession.open(root, undefined, { agentDir })
+      await session.initializeExtensions()
+      const initial = JSON.stringify(session.extensionUi.getStateMirror())
+      assert.ok(initial.includes("broken.js failed during load"))
+      assert.ok(initial.includes("events.js failed during session_start"))
+      await assert.rejects(session.invokeCommand("bad-command"), /Extension action failed/)
+      await assert.rejects(session.invokeTool("bad_tool"), /Extension action failed/)
+      await session.invokeCommand("good-command")
+      assert.ok(JSON.stringify(session.extensionUi.getStateMirror()).includes('"text":"yes"'))
+      assert.ok(!JSON.stringify(session.extensionUi.getStateMirror()).includes("sentinel"))
+      await session.reload()
+      const reloaded = JSON.stringify(session.extensionUi.getStateMirror())
+      assert.ok(reloaded.includes("events.js failed during session_start"))
+      assert.ok(reloaded.includes("broken.js failed during load"))
+      assert.equal(session.getEntriesPage(undefined, 100, 100_000).items.filter(entry => entry.customType === "start-counter").length, 2)
+    } finally {
+      await session?.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it("supplies tool context and preserves the SDK guard on manual nested calls", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "piui-tool-context-"))
     const agentDir = path.join(root, "agent")

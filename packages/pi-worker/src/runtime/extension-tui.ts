@@ -1,7 +1,8 @@
-import { Container, getKeybindings, TuiMainScreen, type Component, type Terminal } from "@earendil-works/pi-tui"
+import { Container, getKeybindings, TuiMainScreen, type Component, type Terminal, type OverlayHandle, type OverlayOptions } from "@earendil-works/pi-tui"
 import type { KeybindingsManager as SdkKeybindingsManager, Theme } from "@earendil-works/pi-coding-agent"
 import type { ExtensionTuiAttach, ExtensionTuiKind } from "@piui/protocol"
 import { getLoadedSdk } from "../sdk-host.js"
+import { GuardedComponent, type ComponentPhase, type DisposableComponent } from "./guarded-component.js"
 
 const DEFAULT_COLS = 64
 const DEFAULT_ROWS = 10
@@ -124,11 +125,12 @@ export type ExtensionTuiHostEvent =
   | { type: "attach"; attach: ExtensionTuiAttach }
   | { type: "detach"; key: string }
   | { type: "frame"; data: string }
+  | { type: "error"; key: string; phase: ComponentPhase }
 
 interface MountedPanel {
   key: string
   kind: ExtensionTuiKind
-  component: Component & { dispose?: () => void }
+  component: GuardedComponent
   container: ContainerLike
 }
 
@@ -156,7 +158,9 @@ export class ExtensionTuiHost {
   private readonly widgetsBelow = new Container()
   private readonly footer = new Container()
   private readonly mounts = new Map<string, MountedPanel>()
-  private customHandle?: { hide(): void }
+  private customHandle?: OverlayHandle
+  private customComponent?: GuardedComponent
+  private generation = 0
   private started = false
   private fallbackTheme?: Theme
 
@@ -208,8 +212,9 @@ export class ExtensionTuiHost {
     const container = kind === "header" ? this.header
       : kind === "footer" ? this.footer
         : placement === "belowEditor" ? this.widgetsBelow : this.widgetsAbove
-    container.addChild(component)
-    this.mounts.set(key, { key, kind, component, container })
+    const guarded = this.guard(key, component)
+    container.addChild(guarded)
+    this.mounts.set(key, { key, kind, component: guarded, container })
     this.ensureStarted()
     this.emit({
       type: "attach",
@@ -228,8 +233,8 @@ export class ExtensionTuiHost {
     const mount = this.mounts.get(key)
     if (!mount) return
     mount.container.removeChild(mount.component)
-    mount.component.dispose?.()
     this.mounts.delete(key)
+    mount.component.dispose()
     this.emit({ type: "detach", key })
     if (this.mounts.size === 0 && !this.customHandle) {
       this.stop()
@@ -242,28 +247,51 @@ export class ExtensionTuiHost {
    * Mount a `custom()` component as an overlay. Returns a handle used by the
    * bridge to close it once the extension resolves its promise.
    */
-  mountCustom(component: Component & { dispose?: () => void }): { hide(): void } {
+  mountCustom(component: DisposableComponent, options?: OverlayOptions, onFailure?: () => void): OverlayHandle {
+    this.unmountCustom()
     this.ensureStarted()
-    if (this.customHandle) this.customHandle.hide()
-    const overlay = this.tui.showOverlay(component, { width: "100%", maxHeight: "100%", anchor: "center" })
+    const guarded = this.guard("custom", component, onFailure)
+    const visible = options?.visible
+    const generation = this.generation
+    let layoutFailed = false
+    const overlay = this.tui.showOverlay(guarded, {
+      width: "100%", maxHeight: "100%", anchor: "center", ...options,
+      visible: visible ? (cols, rows) => {
+        if (layoutFailed) return false
+        try { return visible(cols, rows) } catch {
+          layoutFailed = true
+          queueMicrotask(() => {
+            if (generation !== this.generation) return
+            if (this.customComponent === guarded) {
+              this.unmountCustom()
+              onFailure?.()
+            }
+            this.emit({ type: "error", key: "custom", phase: "layout" })
+          })
+          return false
+        }
+      } : undefined,
+    })
     const teardown = () => {
-      if (!this.customHandle) return
+      if (this.customComponent !== guarded) return
       this.customHandle = undefined
-      component.dispose?.()
+      this.customComponent = undefined
       overlay.hide()
-      this.tui.setFocus(null)
+      guarded.dispose()
       this.emit({ type: "detach", key: "custom" })
       if (this.mounts.size === 0) this.stop()
       else this.tui.requestRender()
     }
-    this.customHandle = { hide: teardown }
-    this.tui.setFocus(component)
+    const handle = { ...overlay, hide: teardown }
+    this.customHandle = handle
+    this.customComponent = guarded
+    if (!options?.nonCapturing) overlay.focus()
     this.tui.requestRender()
     this.emit({
       type: "attach",
       attach: { key: "custom", kind: "custom", width: this.terminal.columns, height: this.terminal.rows },
     })
-    return { hide: teardown }
+    return handle
   }
 
   /** Close the active `custom()` overlay (no-op when none is mounted). */
@@ -291,9 +319,27 @@ export class ExtensionTuiHost {
   }
 
   reset(): void {
+    this.generation++
     for (const key of [...this.mounts.keys()]) this.unmount(key)
     if (this.customHandle) this.customHandle.hide()
     this.stop()
+  }
+
+  private guard(key: string, component: DisposableComponent, onFailure?: () => void): GuardedComponent {
+    const generation = this.generation
+    const guarded = new GuardedComponent(component, phase => {
+      // Do not mutate Container children during their current render pass.
+      queueMicrotask(() => {
+        if (generation !== this.generation) return
+        const mounted = this.mounts.get(key)?.component === guarded
+        const custom = this.customComponent === guarded
+        if (mounted) this.unmount(key)
+        if (custom) this.unmountCustom()
+        this.emit({ type: "error", key, phase })
+        if (custom) onFailure?.()
+      })
+    })
+    return guarded
   }
 
   private ensureStarted(): void {

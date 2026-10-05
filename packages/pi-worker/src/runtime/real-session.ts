@@ -15,6 +15,7 @@ import { isJsonObject, requireJsonValue } from "@piui/protocol"
 import { getLoadedSdk } from "../sdk-host.js"
 import { configuredSessionDir, normalizeCwd, resolveUserPath } from "./catalog.js"
 import { ExtensionUiBridge } from "./extension-ui-bridge.js"
+import { extensionActionError } from "./extension-diagnostics.js"
 import {
   entriesPageFromEntries,
   imageAttachmentFromEntry,
@@ -61,15 +62,16 @@ function unsupportedExtensionHostAction(action: string): never {
 }
 
 function extensionBindings(
-  uiContext: ExtensionUiBridge["context"],
+  bridge: ExtensionUiBridge,
   runtime: AgentSessionRuntime,
   navigateTree: RealPiSession["navigateTree"],
   reload: RealPiSession["reload"],
   hostActions?: ExtensionHostActions,
 ) {
+  const reportFailure = bridge.captureFailureReporter()
   return {
     mode: "rpc" as const,
-    uiContext,
+    uiContext: bridge.context,
     commandContextActions: {
       waitForIdle: () => runtime.session.waitForIdle(),
       newSession: (options?: Parameters<AgentSessionRuntime["newSession"]>[0]) =>
@@ -91,16 +93,11 @@ function extensionBindings(
       reload,
     },
     abortHandler: () => {
-      void runtime.session.abort().catch(error => {
-        console.error(`[piui-worker] session abort failed: ${error instanceof Error ? error.message : String(error)}`)
-      })
+      void runtime.session.abort().catch(() => reportFailure("runtime", "abort"))
     },
     shutdownHandler: () => hostActions
       ? hostActions.requestShutdown(runtime.session.sessionManager.getSessionId())
       : unsupportedExtensionHostAction("shutdown"),
-    onError: (error: { extensionPath: string; event: string; error: string }) => {
-      console.error(`[piui-worker] extension error (${error.event}) ${error.extensionPath}: ${error.error}`)
-    },
   }
 }
 
@@ -242,6 +239,7 @@ export class RealPiSession implements SessionRuntime {
   private readonly extensionUi: ExtensionUiBridge
   private extensionsInitialized = false
   private sessionUnsub: (() => void) | null = null
+  private extensionErrorUnsub?: () => void
   private readonly piEventListeners = new Set<(event: JsonObject, meta: PiEventMeta) => void>()
   private readonly activityListeners = new Set<(status: SessionActivityStatus | null) => void>()
   private readonly headListeners = new Set<(head: SessionHead) => void>()
@@ -306,13 +304,15 @@ export class RealPiSession implements SessionRuntime {
       result.nativeRevision += 1
       result.nativeFingerprint = result.getNativeFingerprint()
       if (result.extensionsInitialized) {
+        result.bindExtensionErrors()
         await session.bindExtensions(extensionBindings(
-          result.extensionUi.context,
+          result.extensionUi,
           result.runtime,
           result.navigateTree.bind(result),
           result.reload.bind(result),
           result.hostActions,
         ))
+        result.reportExtensionLoadErrors()
       }
       result.bindSessionEvents()
     })
@@ -321,14 +321,30 @@ export class RealPiSession implements SessionRuntime {
 
   async initializeExtensions(): Promise<void> {
     if (this.extensionsInitialized) return
+    this.bindExtensionErrors()
     await this.runtime.session.bindExtensions(extensionBindings(
-      this.extensionUi.context,
+      this.extensionUi,
       this.runtime,
       this.navigateTree.bind(this),
       this.reload.bind(this),
       this.hostActions,
     ))
     this.extensionsInitialized = true
+    this.reportExtensionLoadErrors()
+  }
+
+  private bindExtensionErrors(): void {
+    this.extensionErrorUnsub?.()
+    const reportFailure = this.extensionUi.captureFailureReporter()
+    this.extensionErrorUnsub = this.runtime.session.extensionRunner?.onError(error => {
+      reportFailure(error.extensionPath, error.event)
+    })
+  }
+
+  private reportExtensionLoadErrors(): void {
+    for (const error of this.runtime.session.resourceLoader.getExtensions().errors) {
+      this.extensionUi.reportFailure(error.path, "load")
+    }
   }
 
   private bindSessionEvents(): void {
@@ -534,6 +550,8 @@ export class RealPiSession implements SessionRuntime {
   }
 
   private detachSessionSubscriptions(): void {
+    this.extensionErrorUnsub?.()
+    this.extensionErrorUnsub = undefined
     this.sessionUnsub?.()
     this.sessionUnsub = null
   }
@@ -769,9 +787,15 @@ export class RealPiSession implements SessionRuntime {
       throw Object.assign(new Error("Pi SDK does not expose extension tool execution contexts"), { code: "PI_SDK_INCOMPATIBLE" })
     }
     const toolCallId = randomUUID()
-    const result = await registered.definition.execute(toolCallId, args ?? {}, undefined, undefined, runner.createToolContext(toolCallId, undefined))
-    this.emitHeadIfChanged()
-    return toJson(result)
+    const reportFailure = this.extensionUi.captureFailureReporter()
+    try {
+      const result = await registered.definition.execute(toolCallId, args ?? {}, undefined, undefined, runner.createToolContext(toolCallId, undefined))
+      this.emitHeadIfChanged()
+      return toJson(result)
+    } catch (error) {
+      reportFailure(registered.sourceInfo.path, "tool")
+      throw extensionActionError(error)
+    }
   }
 
   async invokeCommand(name: string, args?: string): Promise<JsonValue | undefined> {
@@ -779,9 +803,15 @@ export class RealPiSession implements SessionRuntime {
     if (!runner) throw Object.assign(new Error("extensions are not initialized"), { code: "CAPABILITY_DISABLED" })
     const command = runner.getCommand(name)
     if (!command) throw Object.assign(new Error(`command not found: ${name}`), { code: "NOT_FOUND" })
-    await command.handler(args ?? "", runner.createCommandContext())
-    this.emitHeadIfChanged()
-    return undefined
+    const reportFailure = this.extensionUi.captureFailureReporter()
+    try {
+      await command.handler(args ?? "", runner.createCommandContext())
+      this.emitHeadIfChanged()
+      return undefined
+    } catch (error) {
+      reportFailure(command.sourceInfo.path, "command")
+      throw extensionActionError(error)
+    }
   }
 
   /**
@@ -1178,7 +1208,8 @@ export class RealPiSession implements SessionRuntime {
 
   async reload(): Promise<void> {
     this.extensionUi.cancelAll("runtime_reloaded")
-    await this.runtime.session.reload()
+    await this.runtime.session.reload({ beforeSessionStart: async () => this.bindExtensionErrors() })
+    this.reportExtensionLoadErrors()
     this.nativeFingerprint = ""
     this.emitHeadIfChanged()
     for (const listener of this.resourceListeners) listener()

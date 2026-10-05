@@ -8,9 +8,11 @@ import type {
   ExtensionUiSettlementReason,
 } from "@piui/protocol"
 import type { ExtensionUIContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent"
-import type { Component, TUI } from "@earendil-works/pi-tui"
+import type { Component, TUI, OverlayHandle, OverlayOptions } from "@earendil-works/pi-tui"
 import { ExtensionTuiHost } from "./extension-tui.js"
 import { ExtensionThemeService, type ExtensionThemeOptions } from "./extension-theme.js"
+import { extensionDiagnostic } from "./extension-diagnostics.js"
+import { GuardedComponent } from "./guarded-component.js"
 
 const MAX_TEXT_LENGTH = 256 * 1024
 const MAX_TITLE_LENGTH = 4 * 1024
@@ -52,6 +54,8 @@ export class ExtensionUiBridge {
   private stateMirror: ExtensionUiStatePatch[] = []
   private readonly compatibilityWarnings = new Set<string>()
   private readonly themes: ExtensionThemeService
+  private activeCustom?: { cancel(): void }
+  private diagnosticGeneration = 0
 
   constructor(
     private readonly getSessionId: () => string,
@@ -66,6 +70,8 @@ export class ExtensionUiBridge {
       } else if (event.type === "detach") {
         this.tuiPanels.delete(event.key)
         this.emit({ type: "tuiDetach", sessionId, key: event.key })
+      } else if (event.type === "error") {
+        this.reportFailure(event.key, event.phase)
       } else {
         this.emit({ type: "tuiFrame", sessionId, data: event.data })
       }
@@ -124,6 +130,7 @@ export class ExtensionUiBridge {
 
   /** Tear down all offscreen extension TUI panels (session replaced/reloaded). */
   resetTui(): void {
+    this.activeCustom?.cancel()
     this.tuiHost.reset()
   }
 
@@ -135,10 +142,11 @@ export class ExtensionUiBridge {
       this.emit({ type: "settled", requestId, sessionId: pending.request.sessionId, reason })
     }
     this.pending.clear()
+    this.resetTui()
+    this.diagnosticGeneration++
     this.stateMirror = []
     this.compatibilityWarnings.clear()
     this.themes.reset()
-    this.tuiHost.reset()
   }
 
   /**
@@ -223,13 +231,11 @@ export class ExtensionUiBridge {
       setWidget(key, content, options) {
         assertText("widget key", key, MAX_TITLE_LENGTH)
         if (typeof content === "function") {
-          // Component widget — host it offscreen and stream frames to PiUI.
-          if (content === undefined) {
-            bridge.tuiHost.unmount(key)
-            return
-          }
-          const component = content(bridge.tuiHost.getTui(), bridge.tuiHost.getTheme())
-          bridge.tuiHost.mount("widget", key, component, options?.placement)
+          bridge.tuiHost.unmount(key)
+          try {
+            const component = content(bridge.tuiHost.getTui(), bridge.tuiHost.getTheme())
+            bridge.tuiHost.mount("widget", key, component, options?.placement)
+          } catch { bridge.reportFailure(key, "factory") }
           return
         }
         if (content !== undefined && !Array.isArray(content)) throw unsupported("component widgets")
@@ -247,61 +253,78 @@ export class ExtensionUiBridge {
           bridge.tuiHost.unmount("footer")
           return
         }
-        const component = factory(bridge.tuiHost.getTui(), bridge.tuiHost.getTheme(), footerDataProviderStub)
-        bridge.tuiHost.mount("footer", "footer", component)
+        bridge.tuiHost.unmount("footer")
+        bridge.reportCompatibility("footerData", "Mirrored footers do not provide git branch or provider-count data; use the app's native panels.")
+        try {
+          const component = factory(bridge.tuiHost.getTui(), bridge.tuiHost.getTheme(), footerDataProviderStub)
+          bridge.tuiHost.mount("footer", "footer", component)
+        } catch { bridge.reportFailure("footer", "factory") }
       },
       setHeader(factory) {
         if (factory === undefined) {
           bridge.tuiHost.unmount("header")
           return
         }
-        const component = factory(bridge.tuiHost.getTui(), bridge.tuiHost.getTheme())
-        bridge.tuiHost.mount("header", "header", component)
+        bridge.tuiHost.unmount("header")
+        try {
+          const component = factory(bridge.tuiHost.getTui(), bridge.tuiHost.getTheme())
+          bridge.tuiHost.mount("header", "header", component)
+        } catch { bridge.reportFailure("header", "factory") }
       },
       setTitle(title) {
         assertText("title", title, MAX_TITLE_LENGTH)
         bridge.state({ kind: "title", title })
       },
-      custom<T>(factory: (tui: TUI, theme: Theme, keybindings: KeybindingsManager, done: (result: T) => void) => (Component & { dispose?: () => void }) | Promise<Component & { dispose?: () => void }>, options?: { overlay?: boolean; overlayOptions?: unknown; onHandle?: (handle: OverlayHandleStub) => void }): Promise<T> {
+      custom<T>(factory: (tui: TUI, theme: Theme, keybindings: KeybindingsManager, done: (result: T) => void) => (Component & { dispose?: () => void }) | Promise<Component & { dispose?: () => void }>, options?: { overlay?: boolean; overlayOptions?: OverlayOptions | (() => OverlayOptions); onHandle?: (handle: OverlayHandle) => void }): Promise<T> {
+        bridge.activeCustom?.cancel()
+        const generation = bridge.diagnosticGeneration
         return new Promise<T>((resolve, reject) => {
           let closed = false
+          let mounted: OverlayHandle | undefined
+          let disposePending: (() => void) | undefined
+          const cleanup = () => {
+            if (bridge.activeCustom === pending) bridge.activeCustom = undefined
+            mounted?.hide()
+            disposePending?.()
+            disposePending = undefined
+          }
           const close = (result: T) => {
             if (closed) return
             closed = true
-            bridge.tuiHost.unmountCustom()
+            cleanup()
             resolve(result)
           }
-          const handle: OverlayHandleStub = {
-            hide: () => bridge.tuiHost.unmountCustom(),
-            setHidden: () => undefined,
-            isHidden: () => false,
-            focus: () => undefined,
-            unfocus: () => undefined,
-            isFocused: () => true,
-            getBounds: () => undefined,
+          const fail = (phase?: string) => {
+            if (closed) return
+            closed = true
+            cleanup()
+            if (phase) bridge.reportFailure("custom", phase)
+            reject(Object.assign(new Error("Extension custom UI failed; see the extension diagnostics"), { code: "INTERNAL_ERROR" }))
           }
+          const pending = { cancel: () => close(undefined as T) }
+          bridge.activeCustom = pending
           try {
-            const created = factory(
-              bridge.tuiHost.getTui(),
-              bridge.tuiHost.getTheme(),
-              bridge.tuiHost.getKeybindings(),
-              close,
-            )
+            const created = factory(bridge.tuiHost.getTui(), bridge.tuiHost.getTheme(), bridge.tuiHost.getKeybindings(), close)
             Promise.resolve(created).then(component => {
+              const detached = new GuardedComponent(component, phase => {
+                if (bridge.diagnosticGeneration === generation) bridge.reportFailure("custom", phase)
+              })
+              disposePending = () => detached.dispose()
               if (closed) {
-                component?.dispose?.()
+                disposePending()
+                disposePending = undefined
                 return
               }
-              options?.onHandle?.(handle)
-              bridge.tuiHost.mountCustom(component)
-            }).catch(error => {
+              if (typeof options?.overlayOptions === "function") {
+                bridge.reportCompatibility("overlayLayout", "Dynamic overlay options are evaluated on mount; responsive callback updates are not supported.")
+              }
+              const layout = typeof options?.overlayOptions === "function" ? options.overlayOptions() : options?.overlayOptions
               if (closed) return
-              closed = true
-              reject(error)
-            })
-          } catch (error) {
-            reject(error)
-          }
+              mounted = bridge.tuiHost.mountCustom(component, layout, () => fail())
+              disposePending = undefined
+              options?.onHandle?.({ ...mounted, hide: pending.cancel })
+            }).catch(() => fail("factory"))
+          } catch { fail("factory") }
         })
       },
       pasteToEditor(text) {
@@ -355,6 +378,23 @@ export class ExtensionUiBridge {
         bridge.state({ kind: "toolsExpanded", expanded })
       },
     }
+  }
+
+  captureFailureReporter(): (source: string, phase: string) => void {
+    const generation = this.diagnosticGeneration
+    return (source, phase) => {
+      if (generation === this.diagnosticGeneration) this.reportFailure(source, phase)
+    }
+  }
+
+  reportFailure(source: string, phase: string): void {
+    const diagnostic = extensionDiagnostic(source, phase)
+    const key = `error:${diagnostic.key}`
+    if (this.compatibilityWarnings.has(key)) return
+    this.compatibilityWarnings.add(key)
+    this.state({ kind: "status", key: `piui-host:${key}`, text: diagnostic.message })
+    this.emit({ type: "notify", sessionId: this.getSessionId(), message: diagnostic.message, notifyType: "error" })
+    console.error(`[piui-worker] ${diagnostic.key}: ${diagnostic.message}`)
   }
 
   private reportCompatibility(key: string, message: string): void {
@@ -464,17 +504,6 @@ const footerDataProviderStub = {
   onBranchChange: (): (() => void) => () => undefined,
   setCwd: (): void => undefined,
   dispose: (): void => undefined,
-}
-
-/** Minimal `OverlayHandle` for `custom()` — visibility is owned by the bridge. */
-interface OverlayHandleStub {
-  hide(): void
-  setHidden(hidden: boolean): void
-  isHidden(): boolean
-  focus(): void
-  unfocus(): void
-  isFocused(): boolean
-  getBounds(): undefined
 }
 
 function assertText(name: string, value: unknown, maxLength = MAX_TEXT_LENGTH): asserts value is string {
