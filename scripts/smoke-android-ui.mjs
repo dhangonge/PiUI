@@ -166,6 +166,12 @@ try {
   assert.equal(await evaluate(`document.querySelector('[data-chat-pane-root]').innerText.includes('Alpha-only task')`), false)
   assert.equal(await evaluate(`document.querySelector('[data-chat-pane-root]').innerText.includes('Model: opus')`), false)
   console.log('PASS: only the todo widget is mirrored beside the composer; other widgets stay out and owners stay isolated')
+  await evaluate(`document.querySelector('[aria-label="Collapse sidebar"]')?.click()`)
+  await waitFor(() => evaluate(`!document.querySelector('[aria-label="Collapse sidebar"]')`), 'composer visible for widget screenshot')
+  const todoScreenshot = await call('Page.captureScreenshot', { format: 'png' })
+  const todoScreenshotPath = path.join(tmpdir(), `piui-todo-widget-${Date.now()}.png`)
+  writeFileSync(todoScreenshotPath, Buffer.from(todoScreenshot.data, 'base64'), { flag: 'wx' })
+  console.log(`Todo widget screenshot: ${todoScreenshotPath}`)
 
   const longOption = 'A long option that is displayed once. '.repeat(15)
   b.publishUi({ type: 'requested', request: { requestId: 'browser-question', sessionId: 'shared', kind: 'select', title: 'Browser question', options: ['Short option', longOption], createdAt: new Date().toISOString() } })

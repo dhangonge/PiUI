@@ -63,27 +63,34 @@ export function TodoList({ todos, stateKey, counts }: { todos: TodoItem[]; state
 
       {/* List */}
       <MessageExpandPanel open={!collapsed} innerClassName="overflow-hidden">
-        {shouldRenderBody && (
-          <div className="divide-y divide-border-200/30">
-            {todos.map(todo => (
-              <div
-                key={todo.id}
-                className={`flex items-center gap-2 px-3 py-2 ${
-                  todo.status === 'completed' ? 'text-text-500' : 'text-text-200'
-                }`}
-              >
-                <span className="shrink-0 flex items-center">{getTodoIcon(todo.status)}</span>
-                <span className={todo.status === 'completed' ? 'line-through' : ''}>{todo.content}</span>
-                {todo.priority === 'high' && todo.status !== 'completed' && (
-                  <span className="text-[length:var(--fs-xxs)] text-warning-100 bg-warning-100/10 px-1 rounded ml-auto shrink-0">
-                    !
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {shouldRenderBody && <TodoRows todos={todos} />}
       </MessageExpandPanel>
+    </div>
+  )
+}
+
+/** Shared row list; also used by the live todo widget card. */
+export function TodoRows({ todos }: { todos: TodoItem[] }) {
+  return (
+    <div className="divide-y divide-border-200/30">
+      {todos.map(todo => (
+        <div
+          key={todo.id}
+          className={`flex items-center gap-2 px-3 py-2 ${
+            todo.status === 'completed' ? 'text-text-500' : 'text-text-200'
+          }`}
+        >
+          <span className="shrink-0 flex items-center">{getTodoIcon(todo.status)}</span>
+          <span className={todo.status === 'completed' ? 'line-through' : ''}>
+            {todo.content}
+          </span>
+          {todo.priority === 'high' && todo.status !== 'completed' && (
+            <span className="text-[length:var(--fs-xxs)] text-warning-100 bg-warning-100/10 px-1 rounded ml-auto shrink-0">
+              !
+            </span>
+          )}
+        </div>
+      ))}
     </div>
   )
 }

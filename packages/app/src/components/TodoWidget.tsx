@@ -1,6 +1,9 @@
-import { useMemo, useSyncExternalStore } from 'react'
+import { useMemo, useState, useSyncExternalStore } from 'react'
+import { useTranslation } from 'react-i18next'
 import { extensionUiStore } from '../pi/extensionUiStore'
-import { TodoList, type TodoItem } from '../features/message/tools/renderers/TodoRenderer'
+import { TodoRows, type TodoItem } from '../features/message/tools/renderers/TodoRenderer'
+import { ChevronDownIcon, PermissionListIcon } from './Icons'
+import { MessageExpandPanel } from '../features/message/messageExpand'
 import { stripAnsi } from '../utils/ansiUtils'
 
 const TODO_WIDGET_KEY = /todo/i
@@ -19,11 +22,13 @@ const STATUS_BY_GLYPH: Record<string, TodoItem['status']> = {
  *
  * Extensions render a terminal component; the worker mirrors its text snapshot
  * (see packages/pi-worker/src/runtime/extension-tui.ts). Only the todo widget is
- * surfaced here and it reuses the tool-result list presentation, so both look
- * the same as the rest of the app. Other widget mirrors stay in the extensions
- * panel instead of crowding the composer.
+ * surfaced here, and it uses the app's own card chrome — the same shell as the
+ * questionnaire card above the composer — instead of reproducing plugin drawing.
+ * Other widget mirrors stay in the extensions panel.
  */
 export function TodoWidget({ sessionId }: { sessionId: string | null }) {
+  const { t } = useTranslation(['message', 'components'])
+  const [collapsed, setCollapsed] = useState(false)
   const snapshot = useSyncExternalStore(extensionUiStore.subscribe, extensionUiStore.getSnapshot, extensionUiStore.getSnapshot)
   const widgets = useMemo(
     () => (sessionId ? snapshot.sessions[sessionId]?.state.widgets ?? {} : {}),
@@ -41,9 +46,32 @@ export function TodoWidget({ sessionId }: { sessionId: string | null }) {
   }, [widgets])
 
   if (parsed.todos.length === 0) return null
+
+  const completed = parsed.counts?.completed ?? parsed.todos.filter(todo => todo.status === 'completed').length
+  const total = parsed.counts?.total ?? parsed.todos.length
+
   return (
-    <div className="mx-3 mb-2">
-      <TodoList todos={parsed.todos} stateKey={`todo-widget:${sessionId ?? ''}`} counts={parsed.counts} />
+    <div className="shrink-0 overflow-hidden rounded-xl border border-border-200/60 bg-bg-100 shadow-float mb-2">
+      <button
+        type="button"
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed(value => !value)}
+        className="flex w-full items-center gap-2 px-4 py-2.5 text-left transition-colors hover:bg-bg-200/40"
+      >
+        <PermissionListIcon size={16} className="shrink-0 text-text-400" />
+        <span className="text-[length:var(--fs-sm)] font-medium text-text-100">{t('message:todo.tasks')}</span>
+        <span className="text-[length:var(--fs-xs)] tabular-nums font-mono text-text-500">
+          {t('message:todo.completedCount', { completed, total })}
+        </span>
+        <span className="ml-auto shrink-0 rounded-md p-1 text-text-400">
+          <ChevronDownIcon size={14} className={collapsed ? '-rotate-90' : ''} />
+        </span>
+      </button>
+      <MessageExpandPanel open={!collapsed} animate={false}>
+        <div className="max-h-[32dvh] overflow-y-auto custom-scrollbar border-t border-border-200/40">
+          <TodoRows todos={parsed.todos} />
+        </div>
+      </MessageExpandPanel>
     </div>
   )
 }

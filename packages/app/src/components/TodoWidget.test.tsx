@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, expect, it } from 'vitest'
 import { TodoWidget } from './TodoWidget'
 import { extensionUiStore } from '../pi/extensionUiStore'
@@ -28,6 +28,19 @@ it('renders only todo widget rows in the shared list presentation', () => {
   expect(screen.getByText('Write notes')).toBeTruthy()
   // Non-todo widget mirrors must not reach the composer.
   expect(screen.queryByText(/Model: opus|Context 12%/)).toBeNull()
+})
+
+it('collapses to its header and uses the app card shell', () => {
+  extensionUiStore.statePatched('a::same', { kind: 'widget', key: 'rpiv-todos', lines: widgetLines })
+  const { container } = render(<TodoWidget sessionId="a::same" />)
+  expect(container.firstElementChild?.className).toContain('shadow-float')
+  const header = screen.getByRole('button', { expanded: true })
+  expect(screen.getByText('Write notes')).toBeTruthy()
+  fireEvent.click(header)
+  expect(screen.getByRole('button', { expanded: false })).toBeTruthy()
+  // Rows stay mounted briefly for the collapse transition; the panel is closed.
+  expect(container.innerHTML).toContain('grid-rows-[0fr]')
+  expect(screen.getByText('1/3')).toBeTruthy()
 })
 
 it('ignores other sessions, non-todo keys and empty widgets', () => {
