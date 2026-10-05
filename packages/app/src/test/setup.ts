@@ -1,23 +1,13 @@
 import '@testing-library/jest-dom/vitest'
 import '../i18n'
 
-if (typeof globalThis.localStorage === 'undefined' || typeof globalThis.localStorage.getItem !== 'function') {
-  let storage = new Map<string, string>()
-
-  Object.defineProperty(globalThis, 'localStorage', {
+// Use the test window's full Storage API, not Node's process-wide storage.
+// Vitest exposes its JSDOM instance even when window is aliased to globalThis.
+const { jsdom } = globalThis as typeof globalThis & { jsdom: { window: Window } }
+for (const key of ['localStorage', 'sessionStorage'] as const) {
+  Object.defineProperty(globalThis, key, {
     configurable: true,
-    value: {
-      getItem: (key: string) => storage.get(key) ?? null,
-      setItem: (key: string, value: string) => {
-        storage.set(key, value)
-      },
-      removeItem: (key: string) => {
-        storage.delete(key)
-      },
-      clear: () => {
-        storage = new Map<string, string>()
-      },
-    },
+    value: jsdom.window[key],
   })
 }
 
