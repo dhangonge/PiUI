@@ -27,7 +27,7 @@
 ## 自动验证
 
 - SDK 一致性检查通过；protocol 15、worker 76、server 126 测试通过，server 保留原有 2 项 skip。
-- 前端 138 个测试文件、774 项测试通过。运行时必须用 `NODE_ENV=test`；环境中的 `NODE_ENV=production` 会使 React 测试接口不可用。
+- 前端 138 个测试文件、781 项测试通过（e8b71df8 后；此前 774）。运行时必须用 `NODE_ENV=test`；环境中的 `NODE_ENV=production` 会使 React 测试接口不可用。
 - 四包 typecheck、应用 ESLint、生产构建通过；Dialog/Host 的 LSP 无诊断。
 - 新的真实 SDK 回归断言：事件仍有 Planning → Done 两次通知，重连快照只保留 Done。快照不是事件历史。
 - 隔离的真实 Todo 插件探针验证任务创建、实际组件帧和手机 widget 快照；没有读取或修改个人任务。
@@ -44,7 +44,21 @@ npm test -w @piui/server
 (cd packages/app && NODE_ENV=test npx vitest run --maxWorkers=1)
 npm run build
 node --import tsx scripts/smoke-android-ui.mjs
+node --import tsx scripts/smoke-timeline-order.mjs
 ```
+
+## 过程折叠回归（e8b71df8）
+
+上报症状：开启过程折叠后，流式过程中过程内容出现在用户消息气泡上方，且完全不折叠。
+
+两个独立根因都在前端：
+
+1. `packages/app/src/features/chat/chatPageModel.ts` 的 `buildProcessTimeline` 分两趟输出：第一趟把系统条目（压缩摘要、custom 条目）直接输出并结束当前回合，第二趟才按回合输出用户消息与折叠壳。于是第一趟输出的内容和它之后失去归属的助手全部排在**所有用户消息之前**，且不再进壳。改为单趟遍历 + 显式 slot 列表输出，系统条目不再截断回合。
+2. `packages/app/src/pi/selectors/index.ts` 把 `custom_message` 无条件当可见行。pi 的语义是 `display === false` 不进对话流（模型专用上下文，例如 plannotator 注入的 framing）。这类隐藏条目被渲染成行后正好插在用户消息与助手之间，触发上面的顺序错乱，并让助手脱离折叠壳。现在 `display !== true` 直接跳过，且不断开相邻的 bash 工具组。
+
+新增回归覆盖：`packages/app/src/features/chat/ChatArea.test.ts` 两例（系统条目保持在原位、页首孤立助手不平铺）、`packages/app/src/pi/selectors.test.ts` 三例（隐藏 hook 不显示、`display=true` 保留、隐藏 hook 不断开 bash 组）、以及浏览器级 `scripts/smoke-timeline-order.mjs`（412×915，断言行顺序、隐藏 hook 无行、流式中壳保持折叠、回合结算、点击展开）。
+
+本轮只改前端：新 APK 必须更新；server/worker 不依赖本轮改动（`mock-session.ts` 只加了 `mock-slow:` 慢回合夹具用于回归测试）。
 
 ## 仍需实际设备验收
 

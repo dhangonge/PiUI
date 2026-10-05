@@ -209,9 +209,10 @@ npm run build
 ```bash
 npm run build
 node --import tsx scripts/smoke-android-ui.mjs
+node --import tsx scripts/smoke-timeline-order.mjs
 ```
 
-需要本机 Chromium；可通过 `CHROMIUM_BIN` 指定路径。测试结束会关闭其启动的服务、worker 和浏览器，截图路径打印在输出中。
+需要本机 Chromium；可通过 `CHROMIUM_BIN` 指定路径。测试结束会关闭其启动的服务、worker 和浏览器，截图路径打印在输出中。`smoke-timeline-order.mjs` 单独校验聊天时间线：系统条目与隐藏 hook 消息不得让助手脱离所在回合，流式回合的过程内容必须留在折叠壳内。
 
 只运行 app 测试（低内存环境可附加 `-- --maxWorkers=1`）：
 
