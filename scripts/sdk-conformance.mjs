@@ -13,7 +13,8 @@
 //
 // --check-only：只校验版本一致，不跑测试（用于快速门禁）
 
-import { readFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { spawn } from "node:child_process"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -51,6 +52,24 @@ if (parityVersion !== installedVersion) {
   mismatches.push(`protocol PI_PARITY_SDK_VERSION=${parityVersion} != installed SDK ${installedVersion}`)
 }
 
+const bundled = readVersionFile("packages/pi-worker/src/bundled-sdk-version.ts").match(/BUNDLED_PI_SDK_VERSION = "([^"]+)"/)?.[1]
+if (bundled !== parityVersion) mismatches.push(`bundled SDK constant ${bundled} != ${parityVersion}`)
+const family = /^@earendil-works\/pi-(coding-agent|agent-core|ai|tui)$/
+for (const file of ["packages/app/package.json", "packages/pi-worker/package.json"]) {
+  const manifest = JSON.parse(readVersionFile(file))
+  for (const [name, version] of Object.entries(manifest.dependencies ?? {})) {
+    if (family.test(name) && version !== parityVersion) mismatches.push(`${file}: ${name} must pin ${parityVersion}, got ${version}`)
+  }
+}
+const lock = JSON.parse(readVersionFile("package-lock.json"))
+for (const [directory, metadata] of Object.entries(lock.packages)) {
+  if (!/(^|\/)node_modules\/@earendil-works\/pi-(coding-agent|agent-core|ai|tui)$/.test(directory)) continue
+  const actual = JSON.parse(readVersionFile(`${directory}/package.json`)).version
+  if (metadata.version !== parityVersion || actual !== parityVersion) {
+    mismatches.push(`${directory}: lock ${metadata.version}, installed ${actual}, expected ${parityVersion}`)
+  }
+}
+
 if (mismatches.length > 0) {
   console.error("SDK conformance FAILED — version drift:")
   for (const mismatch of mismatches) console.error(`  - ${mismatch}`)
@@ -64,7 +83,7 @@ if (mismatches.length > 0) {
   process.exit(1)
 }
 
-console.log(`SDK conformance: version aligned @ ${parityVersion} (parity / declared / installed)`)
+console.log(`SDK conformance: version aligned @ ${parityVersion} (protocol / bundled / app+worker declarations / lock / installed family)`)
 if (checkOnly) process.exit(0)
 
 // 2-3. 构建 + 测试 ----------------------------------------------
@@ -79,21 +98,22 @@ const steps = [
 ]
 
 const npmCli = process.env.npm_execpath
-if (!npmCli) {
-  throw new Error("npm_execpath is required to run the workspace test suite")
-}
-
-for (const { pkg, args } of steps) {
-  const code = await new Promise(resolve => {
-    const child = spawn(process.execPath, [npmCli, ...args], {
-      cwd: join(root, pkg),
-      env: { ...process.env, PIUI_DRIVER: "mock" },
-      stdio: "inherit",
+const agentDir = mkdtempSync(join(tmpdir(), "piui-sdk-gate-"))
+try {
+  for (const { pkg, args } of steps) {
+    const code = await new Promise(resolve => {
+      const child = spawn(npmCli ? process.execPath : (process.platform === "win32" ? "npm.cmd" : "npm"), npmCli ? [npmCli, ...args] : args, {
+        cwd: join(root, pkg),
+        env: { ...process.env, PIUI_DRIVER: "mock", PI_CODING_AGENT_DIR: agentDir },
+        stdio: "inherit",
+      })
+      child.on("exit", exitCode => resolve(exitCode ?? 1))
+      child.on("error", () => resolve(1))
     })
-    child.on("exit", exitCode => resolve(exitCode ?? 1))
-    child.on("error", () => resolve(1))
-  })
-  if (code !== 0) process.exit(code)
+    if (code !== 0) throw new Error(`SDK gate failed in ${pkg}: exit ${code}`)
+  }
+} finally {
+  rmSync(agentDir, { recursive: true, force: true })
 }
 
 // 4. 矩阵刷新提醒 ----------------------------------------------

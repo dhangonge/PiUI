@@ -34,6 +34,56 @@ function sessionTree(session: RealPiSession): AnyRecord[] {
 }
 
 describe("RealPiSession with the Pi SDK", () => {
+  it("reads a session persisted by SDK 0.84.2 without rewriting its history", () => {
+    const fixture = new URL("./fixtures/session-sdk-0.84.2.jsonl", import.meta.url)
+    const source = readFileSync(fixture, "utf8")
+    const entries = source.trim().split("\n").map(line => JSON.parse(line))
+    const root = mkdtempSync(path.join(tmpdir(), "piui-sdk-upgrade-"))
+    try {
+      const file = path.join(root, "legacy.jsonl")
+      writeFileSync(file, source)
+      const manager = SessionManager.open(file, root)
+      assert.deepEqual(manager.getEntries(), entries.slice(1))
+      assert.equal(readFileSync(file, "utf8"), source)
+      assert.ok(manager.buildSessionContext().messages.some(message => message.role === "user"))
+      manager.appendCustomEntry("piui.upgrade-check", { sdk: "1.0.3" })
+      assert.deepEqual(SessionManager.open(file, root).getEntries().slice(0, -1), entries.slice(1))
+      assert.equal(readFileSync(fixture, "utf8"), source)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("supplies tool context and preserves the SDK guard on manual nested calls", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "piui-tool-context-"))
+    const agentDir = path.join(root, "agent")
+    const extensions = path.join(agentDir, "extensions")
+    mkdirSync(extensions, { recursive: true })
+    writeFileSync(path.join(extensions, "nested.js"), `
+export default function (pi) {
+  pi.registerTool({ name: "child", description: "fixture", parameters: { type: "object", properties: {} },
+    execute: async () => ({ content: [{ type: "text", text: "nested result" }], details: {} }) })
+  pi.registerTool({ name: "parent", description: "fixture", parameters: { type: "object", properties: {} },
+    execute: async (_id, _args, _signal, _update, ctx) => {
+      if (!ctx.tools.some(tool => tool.name === "child")) throw new Error("missing tool catalog")
+      const outcome = await ctx.executeTool("child", {})
+      return { ...outcome.result, details: { nestedIsError: outcome.isError } }
+    } })
+}
+`)
+    let session: RealPiSession | undefined
+    try {
+      session = await RealPiSession.open(root, undefined, { agentDir })
+      await session.initializeExtensions()
+      const result = await session.invokeTool("parent") as { content: Array<{ text: string }>; details: { nestedIsError: boolean } }
+      assert.equal(result.details.nestedIsError, true)
+      assert.match(result.content[0]?.text ?? "", /No assistant message issued this call/)
+    } finally {
+      await session?.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it("uses the configured sessionDir for creation and discovery", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "piui-session-dir-"))
     const cwd = path.join(root, "workspace")
@@ -420,7 +470,8 @@ export default function (pi) {
       const unsubscribeNative = session.onPiEvent(
         event => nativeEvents.push(event as Record<string, unknown>),
       )
-      await session.prompt("ping", [{ type: "image", mimeType: "image/png", data: "aW1hZ2U=" }])
+      const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==" }
+      await session.prompt("ping", [image])
       unsubscribeNative()
 
       // The authenticated client receives Pi's complete JSON event structure.
@@ -450,7 +501,7 @@ export default function (pi) {
       assert.ok(userMessage && typeof userMessage === "object" && !Array.isArray(userMessage))
       assert.deepEqual(userMessage.content, [
         { type: "text", text: "ping" },
-        { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+        image,
       ])
       await session.setLabel(String(assistantEntry.id), "offline checkpoint")
       await session.setSessionName("Offline R3")
@@ -658,7 +709,7 @@ export default function (pi) {
       const gate = new Promise<void>(resolve => { release = resolve })
       let held = false
       runner.emit = async event => {
-        if (!held && event.type === "message_start") {
+        if (!held && event.type === "message_start" && (event as { message?: { role?: string } }).message?.role === "user") {
           held = true
           markBlocked()
           await gate
@@ -667,7 +718,7 @@ export default function (pi) {
       }
       const eventLiveIds: string[] = []
       const off = session.onPiEvent((event, meta) => {
-        if (event && typeof event === "object" && !Array.isArray(event) && event.type === "message_start" && meta.liveMessage) {
+        if (event && typeof event === "object" && !Array.isArray(event) && event.type === "message_start" && (event.message as { role?: string } | undefined)?.role === "user" && meta.liveMessage) {
           eventLiveIds.push(meta.liveMessage.id)
         }
       })

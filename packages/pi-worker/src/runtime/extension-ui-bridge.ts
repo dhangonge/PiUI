@@ -271,6 +271,7 @@ export class ExtensionUiBridge {
             focus: () => undefined,
             unfocus: () => undefined,
             isFocused: () => true,
+            getBounds: () => undefined,
           }
           try {
             const created = factory(
@@ -321,8 +322,8 @@ export class ExtensionUiBridge {
       getEditorComponent() {
         throw unsupported("custom editor components")
       },
-      get theme(): never {
-        throw unsupported("TUI theme access")
+      get theme(): Theme {
+        return bridge.tuiHost.getTheme()
       },
       getAllThemes() {
         return bridge.getAllThemes()
@@ -455,6 +456,7 @@ interface OverlayHandleStub {
   focus(): void
   unfocus(): void
   isFocused(): boolean
+  getBounds(): undefined
 }
 
 function assertText(name: string, value: unknown, maxLength = MAX_TEXT_LENGTH): asserts value is string {

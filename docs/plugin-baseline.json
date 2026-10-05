@@ -1,0 +1,148 @@
+{
+  "formatVersion": 1,
+  "sdkCandidate": "1.0.3",
+  "purpose": "Read-only inventory, not an activation manifest or proof of compatibility. Package tree hashes exclude nested dependencies.",
+  "packages": [
+    {
+      "name": "pi-cache-optimizer",
+      "version": "2.8.19",
+      "pinnedSpec": "npm:pi-cache-optimizer@2.8.19",
+      "sourceTree": {
+        "files": 31,
+        "sha256": "2abac110301c5d7e5d7bbdf76d84288bcd653713918d04da004ecd56811ab58a"
+      }
+    },
+    {
+      "name": "@plannotator/pi-extension",
+      "version": "0.28.3",
+      "pinnedSpec": "npm:@plannotator/pi-extension@0.28.3",
+      "sourceTree": {
+        "files": 240,
+        "sha256": "160ab7534c57c03b78fcb464983516b84787d2129ac97e01404cbeae068d76e6"
+      }
+    },
+    {
+      "name": "pi-mcp-adapter",
+      "version": "5.0.0",
+      "pinnedSpec": "npm:pi-mcp-adapter@5.0.0",
+      "sourceTree": {
+        "files": 252,
+        "sha256": "9bf2201782f6b84609f4d2173ec2437a4a8a918d0a405e9743bb9805ce28629f"
+      }
+    },
+    {
+      "name": "@narumitw/pi-lsp",
+      "version": "0.49.9",
+      "pinnedSpec": "npm:@narumitw/pi-lsp@0.49.9",
+      "sourceTree": {
+        "files": 17,
+        "sha256": "ce94712c1c9b52a42db515339232f7e6f1db87d1cfb935c776f65397782b477b"
+      }
+    },
+    {
+      "name": "pi-subagents-lite",
+      "version": "1.15.1",
+      "pinnedSpec": "npm:pi-subagents-lite@1.15.1",
+      "sourceTree": {
+        "files": 63,
+        "sha256": "b54c7c3ea3b3903c499eaf4af6311ada440f270f1bf11510156d9549fc937eac"
+      }
+    },
+    {
+      "name": "pi-simple-web-tools",
+      "version": "0.2.0",
+      "pinnedSpec": "npm:pi-simple-web-tools@0.2.0",
+      "sourceTree": {
+        "files": 8,
+        "sha256": "72ab404ae758d945a9de6bde47a87d7be06dc61488bf0b97dc4ac7ba397e077a"
+      }
+    },
+    {
+      "name": "pi-context-view",
+      "version": "0.6.0",
+      "pinnedSpec": "npm:pi-context-view@0.6.0",
+      "sourceTree": {
+        "files": 28,
+        "sha256": "c6a35640201957dc3f9d8f5ed1ba34296dc039a00b85f5d29277cafe1d70fe33"
+      }
+    },
+    {
+      "name": "pi-render-cache",
+      "version": "1.4.0",
+      "pinnedSpec": "npm:pi-render-cache@1.4.0",
+      "sourceTree": {
+        "files": 16,
+        "sha256": "13658d7623c4e7c8ce504e8df6d01baf89d9d5bb85028c82a1665c4eb7dc7756"
+      }
+    },
+    {
+      "name": "@juicesharp/rpiv-todo",
+      "version": "2.12.0",
+      "pinnedSpec": "npm:@juicesharp/rpiv-todo@2.12.0",
+      "sourceTree": {
+        "files": 31,
+        "sha256": "6f63439086097e81d99b442b3d0a7da4c70bbf4fc6f2898184685eef541c6ad7"
+      }
+    },
+    {
+      "name": "@juicesharp/rpiv-ask-user-question",
+      "version": "2.12.0",
+      "pinnedSpec": "npm:@juicesharp/rpiv-ask-user-question@2.12.0",
+      "sourceTree": {
+        "files": 57,
+        "sha256": "ec49a500560b439f85989362c903596887ba4f143350fe949e0bd591c8baa98e"
+      }
+    },
+    {
+      "name": "billion-context",
+      "version": "0.1.185",
+      "pinnedSpec": "npm:billion-context@0.1.185",
+      "sourceTree": {
+        "files": 38,
+        "sha256": "0e96808506db23db098950113eff4e68b9520e1963d4ae408447dc36f111c453"
+      }
+    }
+  ],
+  "extensions": [
+    {
+      "file": "agentrouter-compat.ts",
+      "sha256": "b87bf23cf72d7400b2e56bd7feb1cdb20e5977412fe3a573fd3c4a5305c0ef82"
+    },
+    {
+      "file": "agentrouter-image-budget.ts",
+      "sha256": "f6c40691a3166d72cf0caabcbd85814151a4db5bc718c68a4ba746dd194481dd"
+    },
+    {
+      "file": "auto-consent.ts",
+      "sha256": "c037ad6dda5a6ddda0b69d980f2bd1c666e5f5d1e604f89b71dcfff67485045f"
+    },
+    {
+      "file": "auto-patch.ts",
+      "sha256": "2684f64ccf6a09190700b32e742100e47d1f179fd37bebc922153c4ea1316467"
+    },
+    {
+      "file": "deepseek-retry.ts",
+      "sha256": "71def3fd138e234bb146dca7b1811a5583437e7bfb9ec37fa2d79afcf1ffd149"
+    },
+    {
+      "file": "input-bar.ts",
+      "sha256": "482e14659c38d5a170e7dc06865544e08aa9f9d2ed6a00fe75ecec1656028b19"
+    },
+    {
+      "file": "native-cursor.ts",
+      "sha256": "e7330ae8f5995ac9a14d767f562acabd8960d31c27850a45d13688ba696d7118"
+    },
+    {
+      "file": "startup-banner.ts",
+      "sha256": "9a255f0707e15eb56c733c9ac8d85ef3a9f0a70413c30ee37ab121a4b978eadf"
+    },
+    {
+      "file": "translate-context.ts",
+      "sha256": "27cbf94c2f3994667a17b431f87b6f2fe89adcf9b0a894cb816eb00354061ea3"
+    },
+    {
+      "file": "youzi-compat.ts",
+      "sha256": "f172a0ff44ff92f380498fe05ddbaad94a4208dc98df48d4fd4ea353be9e72c8"
+    }
+  ]
+}

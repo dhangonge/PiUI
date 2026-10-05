@@ -763,7 +763,11 @@ export class RealPiSession implements SessionRuntime {
     if (!runner) throw Object.assign(new Error("extensions are not initialized"), { code: "CAPABILITY_DISABLED" })
     const registered = runner.getAllRegisteredTools().find(tool => tool.definition.name === name)
     if (!registered) throw Object.assign(new Error(`tool not found: ${name}`), { code: "NOT_FOUND" })
-    const result = await registered.definition.execute(randomUUID(), args ?? {}, undefined, undefined, runner.createContext())
+    if (typeof runner.createToolContext !== "function") {
+      throw Object.assign(new Error("Pi SDK does not expose extension tool execution contexts"), { code: "PI_SDK_INCOMPATIBLE" })
+    }
+    const toolCallId = randomUUID()
+    const result = await registered.definition.execute(toolCallId, args ?? {}, undefined, undefined, runner.createToolContext(toolCallId, undefined))
     this.emitHeadIfChanged()
     return toJson(result)
   }
