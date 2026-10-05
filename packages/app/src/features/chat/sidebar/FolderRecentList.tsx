@@ -861,7 +861,17 @@ function FolderRecentSection({
     }
   }, [isExpanded, inView])
 
-  const { sessions, isLoading, isLoadingMore, hasMore, loadMore, patchLocalSession, removeLocalSession } = useSessions({
+  const {
+    sessions,
+    isLoading,
+    isLoadingMore,
+    hasMore,
+    error,
+    loadMore,
+    refresh,
+    patchLocalSession,
+    removeLocalSession,
+  } = useSessions({
     directory: project.path,
     pageSize: DIRECTORY_PAGE_SIZE,
     enabled: hasActivated && !hasWorkspaceTree,
@@ -1054,9 +1064,19 @@ function FolderRecentSection({
                   onReorderWorkspace={onReorderWorkspace}
                 />
               ) : visibleSessions.length === 0 ? (
-                <div className="px-2 py-1 text-[length:var(--fs-xs)] text-text-400/50">
-                  {t('sidebar.noChatsInFolder')}
-                </div>
+                error ? (
+                  <button
+                    type="button"
+                    onClick={() => void refresh()}
+                    className="px-2 py-1 text-[length:var(--fs-xs)] text-error-100 hover:text-error-200 text-left"
+                  >
+                    {t('sidebar.loadFailed')}
+                  </button>
+                ) : (
+                  <div className="px-2 py-1 text-[length:var(--fs-xs)] text-text-400/50">
+                    {t('sidebar.noChatsInFolder')}
+                  </div>
+                )
               ) : (
                 <>
                   {visibleSessions.map((session, index) => {

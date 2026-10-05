@@ -7,6 +7,23 @@ import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } fro
 import { trackPiSession } from '../pi/piSessionIndex'
 import { resolveWorkspacePath } from '../pi/workspaces.js'
 
+// 会话列表加载失败的重试退避（毫秒）。退避间隔内仍算「加载中」，
+// 不落空态——消费方据此区分「还在加载」与「确实没有对话」
+const SESSION_RETRY_DELAYS_MS = [500, 1500, 3000]
+
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    if (signal.aborted) return resolve()
+    const finish = () => {
+      window.clearTimeout(timer)
+      signal.removeEventListener('abort', finish)
+      resolve()
+    }
+    const timer = window.setTimeout(finish, ms)
+    signal.addEventListener('abort', finish, { once: true })
+  })
+}
+
 interface UseSessionsOptions {
   /** 每页数量 */
   pageSize?: number
@@ -66,10 +83,18 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   // 防止 onReconnected 密集触发时重复请求
   const isFetchingRef = useRef(false)
   const queuedReconnectRefreshRef = useRef(false)
-  const retryTimerRef = useRef<number | null>(null)
+  const retryAbortRef = useRef<AbortController | null>(null)
   const fetchSessionsRef = useRef<
-    (params?: SessionListParams & { append?: boolean; retryAttempt?: number; silent?: boolean }) => Promise<void>
+    (params?: SessionListParams & { append?: boolean; silent?: boolean }) => Promise<void>
   >(() => Promise.resolve())
+
+  const cancelPendingRequest = useCallback(() => {
+    requestIdRef.current += 1
+    retryAbortRef.current?.abort()
+    retryAbortRef.current = null
+    isFetchingRef.current = false
+    queuedReconnectRefreshRef.current = false
+  }, [])
 
   useEffect(() => {
     searchRef.current = search
@@ -83,12 +108,17 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   // 获取会话列表
   // append 仅用于控制 loading 状态：true 时用 isLoadingMore，false 时用 isLoading
   // 数据始终全量替换（递增 limit 策略）
+  // 重试为显式循环而非 setTimeout 自调用：loading 的生命周期 = 循环的生命周期，
+  // 重试空档不再以「空列表 + 非 loading」示人（空态文案闪现的根因）
   const fetchSessions = useCallback(
-    async (params: SessionListParams & { append?: boolean; retryAttempt?: number; silent?: boolean } = {}) => {
+    async (params: SessionListParams & { append?: boolean; silent?: boolean } = {}) => {
       if (!enabled) return
 
-      const { append = false, retryAttempt = 0, silent = false, ...queryParams } = params
+      const { append = false, silent = false, ...queryParams } = params
       const requestId = ++requestIdRef.current
+      retryAbortRef.current?.abort()
+      const retryAbort = new AbortController()
+      retryAbortRef.current = retryAbort
       isFetchingRef.current = true
 
       if (append) {
@@ -101,43 +131,47 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
       }
 
       try {
-        const nativeSessions = normalizedDirectory
-          ? await loadPiSessionsForCwd(normalizedDirectory)
-          : await loadPiSessions()
-        const mapped = nativeSessions
-          .map(piSessionInfoToUiSession)
-          .filter((session): session is UiSession => session !== null)
-        const all = linkPiSessionForks(mapped)
-        const searchTerm = queryParams.search?.trim().toLowerCase()
-        const matching = filterPiSessionList(all.filter(session => matchesDirectory(session)), searchTerm ?? '')
-        const data = matching.slice(0, currentLimitRef.current)
+        for (let retryAttempt = 0; ; retryAttempt++) {
+          try {
+            const nativeSessions = normalizedDirectory
+              ? await loadPiSessionsForCwd(normalizedDirectory)
+              : await loadPiSessions()
+            const mapped = nativeSessions
+              .map(piSessionInfoToUiSession)
+              .filter((session): session is UiSession => session !== null)
+            const all = linkPiSessionForks(mapped)
+            const searchTerm = queryParams.search?.trim().toLowerCase()
+            const matching = filterPiSessionList(
+              all.filter(session => matchesDirectory(session)),
+              searchTerm ?? '',
+            )
+            const data = matching.slice(0, currentLimitRef.current)
 
-        // 检查是否是最新的请求
-        if (requestId !== requestIdRef.current) return
+            // 已被更新的请求覆盖：静默退出，不碰任何状态
+            if (requestId !== requestIdRef.current) return
 
-        if (data.length > 0 && data[0].directory) {
-          autoDetectPathStyle(data[0].directory)
-        }
+            if (data.length > 0 && data[0].directory) {
+              autoDetectPathStyle(data[0].directory)
+            }
 
-        setSessions(data)
-        setHasMore(matching.length > data.length)
-      } catch (e) {
-        if (requestId !== requestIdRef.current) return
-        setError(e instanceof Error ? e : new Error('Failed to fetch sessions'))
-        if (!append) {
-          if (retryAttempt < 3) {
-            if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
-            retryTimerRef.current = window.setTimeout(() => {
-              if (requestId !== requestIdRef.current) return
-              void fetchSessionsRef.current({ ...queryParams, retryAttempt: retryAttempt + 1 })
-            }, [500, 1500, 3000][retryAttempt])
-          } else {
-            setSessions([])
-            setHasMore(false)
+            setSessions(data)
+            setHasMore(matching.length > data.length)
+            setError(null)
+            return
+          } catch (e) {
+            if (requestId !== requestIdRef.current) return
+            const exhausted = retryAttempt >= SESSION_RETRY_DELAYS_MS.length
+            if (append || exhausted) {
+              setError(e instanceof Error ? e : new Error('Failed to fetch sessions'))
+              return
+            }
+            await delay(SESSION_RETRY_DELAYS_MS[retryAttempt], retryAbort.signal)
+            if (requestId !== requestIdRef.current) return
           }
         }
       } finally {
         if (requestId === requestIdRef.current) {
+          retryAbortRef.current = null
           isFetchingRef.current = false
           setIsLoading(false)
           setIsLoadingMore(false)
@@ -185,11 +219,10 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
       if (searchTimerRef.current) {
         clearTimeout(searchTimerRef.current)
       }
-      if (retryTimerRef.current) {
-        clearTimeout(retryTimerRef.current)
-      }
+      // Invalidate before the next debounce, not only when the next fetch starts.
+      cancelPendingRequest()
     }
-  }, [search, fetchSessions, enabled, pageSize])
+  }, [search, fetchSessions, enabled, pageSize, cancelPendingRequest])
 
   useEffect(() => {
     if (!enabled) return
