@@ -88,7 +88,7 @@ $env:PIUI_PORT = "8787"
 npm run pi-worker -- web
 ```
 
-启动后 server 会打印局域网访问地址。也可以在 PiUI 的“设置 → 服务 → 网络监听”中修改监听地址和端口，重启服务后生效。
+启动后 server 会打印局域网访问地址。Android 客户端不管理远端服务的监听配置；请在服务所在机器修改环境变量并重启服务。
 
 监听地址选项：
 
@@ -129,21 +129,16 @@ PIUI_DATA_DIR=/var/lib/piui \
 npm run pi-worker -- web --api-only
 ```
 
-## 服务设置
+## 多服务器使用
 
-桌面端可以在“设置 → 服务”中管理：
+1. 在“设置 → 服务器”添加远端 PiUI 地址及 token。也可通过连接链接导入；不要公开分享含 token 的链接。
+2. 启用多服务器模式，订阅需要同时查看的服务器。侧栏按服务器、工作区、会话分组；搜索支持服务器名、工作区路径及会话内容。
+3. 打开不同服务器的会话或分屏。每个会话绑定自己的服务器，切换焦点不会断开其他服务器的会话流。
+4. “设为默认服务器”只改变下次启动的默认选择，不立即切换当前会话。关闭多服务器模式后恢复单服务器侧栏。
 
-- 网络监听地址
-- 网络监听端口
-- 自动启动
-- Pi SDK 来源
-- 终端 Shell
-- 额外环境变量
-- 服务启动、停止和重启
+会话、事件游标、命令、模型偏好、置顶、目录及终端快照按服务器隔离；文件、Git、provider 管理面板跟随当前焦点。Android 不启动或管理本地 agent runtime。
 
-监听配置和环境变量保存到本地服务设置中。修改监听地址或端口后需要重启 server；已运行的外部 server 不会被浏览器强行修改。
-
-Android 端不管理本地服务（`isTauriMobile()` 会跳过自动启动），只作为远端 server 的客户端：在登录/连接界面填入 server 地址与 `~/.piui/auth-token` 对应的 token，或使用 `piui://connect?url=...&token=...` 链接导入。
+本轮 OCUI 移植范围、验证方式和保留限制见 [同步记录](docs/OCUI_ANDROID_SYNC.md)。
 
 ## Android 构建
 
@@ -190,7 +185,16 @@ npm test
 npm run build
 ```
 
-只运行 app 测试：
+真实双后端 + Chromium 移动视口冒烟（使用 mock worker，不调用 LLM，也不读取个人 Pi 配置）：
+
+```bash
+npm run build
+node --import tsx scripts/smoke-android-ui.mjs
+```
+
+需要本机 Chromium；可通过 `CHROMIUM_BIN` 指定路径。测试结束会关闭其启动的服务、worker 和浏览器，截图路径打印在输出中。
+
+只运行 app 测试（低内存环境可附加 `-- --maxWorkers=1`）：
 
 ```bash
 npm run test:run -w @piui/app
