@@ -16,7 +16,7 @@ import {
 } from '../../../components/Icons'
 import { useServerStore, useRouter } from '../../../hooks'
 import { multiServerStore, useMultiServerStore } from '../../../store/multiServerStore'
-import { settingsFieldClass, SettingsSection } from './SettingsUI'
+import { settingsFieldClass, SettingRow, SettingsSection, Toggle } from './SettingsUI'
 import type { ServerConfig, ServerHealth } from '../../../store/serverStore'
 import { parseConnectLink } from '../../../store/serverStore'
 import { fetchHostShare } from '../../../pi/transport'
@@ -643,11 +643,13 @@ export function ServersSettings() {
         </div>
       }
     >
-      <label className="flex items-start gap-3 mb-4 p-3 rounded-lg border border-border-200/40">
-        <input type="checkbox" checked={multiServer.enabled} onChange={event => multiServerStore.setEnabled(event.target.checked)} className="mt-1 accent-accent-main-100" />
-        <span><span className="block text-text-100 text-[length:var(--fs-md)]">{t('servers.multiServerMode')}</span>
-          <span className="block text-text-400 text-[length:var(--fs-sm)] mt-1">{t('servers.multiServerModeDesc')}</span></span>
-      </label>
+      <SettingRow
+        label={t('servers.multiServerMode')}
+        description={t('servers.multiServerModeDesc')}
+        onClick={() => multiServerStore.setEnabled(!multiServer.enabled)}
+      >
+        <Toggle enabled={multiServer.enabled} onChange={() => multiServerStore.setEnabled(!multiServer.enabled)} />
+      </SettingRow>
       <div className="space-y-1.5">
         {orderedServers.map(s => (
           <ServerItem

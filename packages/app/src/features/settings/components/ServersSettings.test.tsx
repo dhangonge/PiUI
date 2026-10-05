@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ServersSettings } from './ServersSettings'
+import { multiServerStore } from '../../../store/multiServerStore'
 
 const { useServerStoreMock, navigateHomeMock, clearSessionMock } = vi.hoisted(() => ({
   useServerStoreMock: vi.fn(),
@@ -33,6 +34,8 @@ describe('ServersSettings', () => {
   const setDefaultServerMock = vi.fn()
 
   beforeEach(() => {
+    multiServerStore.setEnabled(false)
+    multiServerStore.setSubscribedServerIds([])
     checkHealthMock.mockReset()
     setActiveServerMock.mockReset()
     setDefaultServerMock.mockReset()
@@ -51,6 +54,48 @@ describe('ServersSettings', () => {
       checkAllHealth: vi.fn(),
       getHealth: vi.fn(() => null),
     })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+    multiServerStore.setEnabled(false)
+    multiServerStore.setSubscribedServerIds([])
+  })
+
+  it('uses the shared settings switch and preserves subscriptions when toggled', () => {
+    render(<ServersSettings />)
+
+    const toggle = screen.getByRole('switch', { name: 'servers.multiServerMode' })
+    expect(toggle.closest('[data-setting-label]')).toHaveAttribute('data-setting-label', 'servers.multiServerMode')
+    expect(toggle).toHaveStyle({ width: '36px', height: '20px' })
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    expect(multiServerStore.isEnabled()).toBe(true)
+    expect(multiServerStore.getSubscribedServerIds()).toEqual(['local'])
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    expect(multiServerStore.isEnabled()).toBe(false)
+    expect(multiServerStore.getSubscribedServerIds()).toEqual(['local'])
+    expect(setActiveServerMock).not.toHaveBeenCalled()
+    expect(navigateHomeMock).not.toHaveBeenCalled()
+  })
+
+  it('toggles once per click on the row text or switch', () => {
+    const setEnabled = vi.spyOn(multiServerStore, 'setEnabled')
+    render(<ServersSettings />)
+
+    fireEvent.click(screen.getByText('servers.multiServerMode'))
+    fireEvent.click(screen.getByText('servers.multiServerModeDesc'))
+    fireEvent.click(screen.getByRole('switch', { name: 'servers.multiServerMode' }))
+
+    expect(setEnabled.mock.calls).toEqual([[true], [false], [true]])
+    expect(screen.getByRole('switch', { name: 'servers.multiServerMode' })).toHaveAttribute('aria-checked', 'true')
+    expect(setActiveServerMock).not.toHaveBeenCalled()
   })
 
   it('sets the startup preference without changing the active connection', () => {
