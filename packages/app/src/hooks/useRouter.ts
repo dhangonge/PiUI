@@ -2,6 +2,15 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { normalizeToForwardSlash, serverStorage } from '../utils'
 import { STORAGE_KEY_LAST_DIRECTORY } from '../constants/storage'
 import { useIsMobile } from './useIsMobile'
+import { serverStore } from '../store/serverStore'
+import { isScopedSessionKey, makeSessionKey, sessionKeyToServerId } from '../utils/sessionKey'
+
+function bindSession(sessionId: string): string {
+  const key = isScopedSessionKey(sessionId) ? sessionId : makeSessionKey(serverStore.getActiveServerId(), sessionId)
+  const serverId = sessionKeyToServerId(key)
+  if (serverStore.getServers().some(server => server.id === serverId)) serverStore.setActiveServer(serverId)
+  return key
+}
 
 /**
  * Hash 路由，支持 directory 参数
@@ -43,21 +52,17 @@ function parseHash(): RouteState {
     }
   }
 
+  const sessionMatch = path.match(/^#\/session\/(.+)$/)
+  const sessionId = sessionMatch ? bindSession(decodeDirectoryParam(sessionMatch[1])) : null
   if (!directory) {
     const saved = serverStorage.get(STORAGE_KEY_LAST_DIRECTORY)
     if (saved) directory = saved
   }
-
-  const sessionMatch = path.match(/^#\/session\/(.+)$/)
-  if (sessionMatch) {
-    return { sessionId: sessionMatch[1], directory }
-  }
-
-  return { sessionId: null, directory }
+  return { sessionId, directory }
 }
 
 function buildHash(sessionId: string | null, directory: string | undefined): string {
-  const path = sessionId ? `#/session/${sessionId}` : '#/'
+  const path = sessionId ? `#/session/${encodeURIComponent(sessionId)}` : '#/'
   if (directory) {
     return `${path}?dir=${encodeURIComponent(directory)}`
   }
@@ -122,8 +127,13 @@ export function useRouter() {
   }, [isMobile])
 
   const navigateToSession = useCallback((sessionId: string, directory?: string) => {
+    const previousServerId = serverStore.getActiveServerId()
     const currentRoute = getSnapshot()
-    const dir = directory !== undefined ? normalizeToForwardSlash(directory) || undefined : currentRoute.directory
+    sessionId = bindSession(sessionId)
+    const fallback = previousServerId === sessionKeyToServerId(sessionId)
+      ? currentRoute.directory
+      : serverStorage.getFor(STORAGE_KEY_LAST_DIRECTORY, sessionKeyToServerId(sessionId)) ?? undefined
+    const dir = directory !== undefined ? normalizeToForwardSlash(directory) || undefined : fallback
     const next = { sessionId, directory: dir }
     const newHash = buildHash(sessionId, dir)
     if (isMobileRef.current) {
@@ -147,8 +157,13 @@ export function useRouter() {
   }, [])
 
   const replaceSession = useCallback((sessionId: string | null, directory?: string) => {
+    const previousServerId = serverStore.getActiveServerId()
     const currentRoute = getSnapshot()
-    const dir = directory !== undefined ? normalizeToForwardSlash(directory) || undefined : currentRoute.directory
+    if (sessionId) sessionId = bindSession(sessionId)
+    const fallback = !sessionId || previousServerId === sessionKeyToServerId(sessionId)
+      ? currentRoute.directory
+      : serverStorage.getFor(STORAGE_KEY_LAST_DIRECTORY, sessionKeyToServerId(sessionId)) ?? undefined
+    const dir = directory !== undefined ? normalizeToForwardSlash(directory) || undefined : fallback
     const newHash = buildHash(sessionId, dir)
     window.history.replaceState(null, '', newHash)
     emitRoute({ sessionId, directory: dir })

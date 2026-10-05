@@ -15,7 +15,7 @@ import {
   CheckIcon,
 } from '../../../components/Icons'
 import { useServerStore, useRouter } from '../../../hooks'
-import { clearSessionRuntimeState } from '../../../utils/sessionLifecycle'
+import { multiServerStore, useMultiServerStore } from '../../../store/multiServerStore'
 import { settingsFieldClass, SettingsSection } from './SettingsUI'
 import type { ServerConfig, ServerHealth } from '../../../store/serverStore'
 import { parseConnectLink } from '../../../store/serverStore'
@@ -70,6 +70,7 @@ function ServerItem({
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [showShare, setShowShare] = useState(false)
+  const multiServer = useMultiServerStore()
 
   const statusIcon = () => {
     if (!health || health.status === 'checking') return <SpinnerIcon size={12} className="animate-spin text-text-400" />
@@ -143,6 +144,12 @@ function ServerItem({
           </div>
         </button>
         <div className="shrink-0 flex items-center gap-0.5">
+          {multiServer.enabled && <button type="button" aria-pressed={multiServer.subscribedServerIds.includes(server.id)}
+            aria-label={t(multiServer.subscribedServerIds.includes(server.id) ? 'servers.unsubscribe' : 'servers.subscribe')}
+            className="p-1.5 rounded-md text-accent-main-100 hover:bg-bg-200/70"
+            onClick={event => { event.stopPropagation(); multiServerStore.setSubscribed(server.id, !multiServerStore.isSubscribed(server.id)) }}>
+            {multiServer.subscribedServerIds.includes(server.id) ? <CheckIcon size={14} /> : <WifiIcon size={14} />}
+          </button>}
           {(server.isDefault || server.token) && (
             <button
               type="button"
@@ -235,7 +242,7 @@ function SharePanel({ server }: { server: ServerConfig }) {
     let cancelled = false
     if (server.isDefault) {
       // 本地服务器向服务端要分享信息，它能分辨 loopback 与 LAN 绑定
-      fetchHostShare()
+      fetchHostShare(undefined, server.id)
         .then(info => {
           if (!cancelled) setShare(info)
         })
@@ -563,6 +570,7 @@ function AddServerForm({
 export function ServersSettings() {
   const { t } = useTranslation(['settings', 'common'])
   const [addingServer, setAddingServer] = useState(false)
+  const multiServer = useMultiServerStore()
   const {
     servers,
     activeServer,
@@ -574,7 +582,7 @@ export function ServersSettings() {
     checkAllHealth,
     getHealth,
   } = useServerStore()
-  const { navigateHome, sessionId: routeSessionId } = useRouter()
+  const { setDirectory } = useRouter()
   const orderedServers = useMemo(() => {
     if (!activeServer) return servers
     const active = servers.find(s => s.id === activeServer.id)
@@ -591,16 +599,11 @@ export function ServersSettings() {
     (id: string) => {
       if (activeServer?.id === id) return // 没变，不做事
 
-      // 清理当前 session 的 store 状态
-      if (routeSessionId) {
-        clearSessionRuntimeState(routeSessionId)
-      }
-
-      setActiveServer(id) // 内部触发 serverChangeListeners → reconnectSSE()
-      navigateHome()
+      setActiveServer(id)
+      setDirectory(undefined)
       void checkHealth(id)
     },
-    [activeServer?.id, checkHealth, routeSessionId, setActiveServer, navigateHome],
+    [activeServer?.id, checkHealth, setActiveServer, setDirectory],
   )
 
   return (
@@ -627,6 +630,11 @@ export function ServersSettings() {
         </div>
       }
     >
+      <label className="flex items-start gap-3 mb-4 p-3 rounded-lg border border-border-200/40">
+        <input type="checkbox" checked={multiServer.enabled} onChange={event => multiServerStore.setEnabled(event.target.checked)} className="mt-1 accent-accent-main-100" />
+        <span><span className="block text-text-100 text-[length:var(--fs-md)]">{t('servers.multiServerMode')}</span>
+          <span className="block text-text-400 text-[length:var(--fs-sm)] mt-1">{t('servers.multiServerModeDesc')}</span></span>
+      </label>
       <div className="space-y-1.5">
         {orderedServers.map(s => (
           <ServerItem

@@ -23,6 +23,7 @@ import { layoutStore, useLayoutStore } from '../../store/layoutStore'
 import { usePiSessionTitle } from '../../pi/hooks/index.js'
 import { renamePiSession, loadPiSessions } from '../../pi/controllers/index.js'
 import { uiErrorHandler } from '../../utils'
+import { sessionKeyToServerId } from '../../utils/sessionKey'
 import { useChatViewport, canUseSplitPane } from './chatViewport'
 import { usePiCapabilities } from '../../pi/capabilities'
 import {
@@ -104,7 +105,7 @@ export function PaneHeader({
     }
     try {
       await renamePiSession(sessionId, editValue.trim())
-      void loadPiSessions().catch(() => undefined)
+      void loadPiSessions(undefined, sessionKeyToServerId(sessionId)).catch(() => undefined)
     } catch (e) {
       uiErrorHandler('rename session', e)
     } finally {

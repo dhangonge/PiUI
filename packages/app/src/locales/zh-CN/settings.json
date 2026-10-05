@@ -54,7 +54,12 @@
     "shareLoopbackHint": "此链接仅供本机客户端使用。如需局域网分享，请用 PIUI_HOST=0.0.0.0 重启服务端。",
     "editServer": "编辑服务器",
     "deleteServer": "删除服务器",
-    "deleteServerConfirm": "确定从列表中移除「{{name}}」？此操作无法撤销。"
+    "deleteServerConfirm": "确定从列表中移除「{{name}}」？此操作无法撤销。",
+    "multiServerMode": "多服务器模式",
+    "multiServerModeDesc": "同时订阅多个服务器，按服务器浏览会话，并保持各个对话独立连接。",
+    "multiServerModeOffHint": "请在设置中订阅服务器，以显示其项目和会话。",
+    "subscribe": "订阅",
+    "unsubscribe": "取消订阅"
   },
   "service": {
     "title": "本地 PiUI 服务",

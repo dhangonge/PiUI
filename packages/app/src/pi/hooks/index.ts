@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { useMemo } from 'react'
-import { piSessionInfoStore, piBranchStore, piSessionStateStore, piModelsStore } from '../state/index.js'
+import { piSessionInfoStore, piBranchStore, piSessionStateStore } from '../state/index.js'
+import { getPiModelsStore } from '../state/piModelsStore'
 import { paneLayoutStore } from '../../store/paneLayoutStore'
 
 /**
@@ -111,7 +112,8 @@ export function usePiSessionRuntimeState(sessionId: string | null) {
   )
 }
 
-export function usePiModels() {
+export function usePiModels(serverId?: string) {
+  const piModelsStore = getPiModelsStore(serverId)
   const models = useSyncExternalStore(
     piModelsStore.subscribe,
     () => piModelsStore.getModels(),

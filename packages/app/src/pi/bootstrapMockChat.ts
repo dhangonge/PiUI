@@ -1,12 +1,7 @@
 /** PiUI backend bootstrap. */
 import { getPiBackendState, setPiBackendState } from "./serverMode"
 import { serverStore } from "../store/serverStore"
-import { clearPiSessionIndex } from "./piSessionIndex"
-import { piBranchStore, piModelsStore, piSessionStateStore } from "./state/index.js"
-import { piSessionInfoStore } from "./piSessionInfoStore"
-import { extensionUiStore } from "./extensionUiStore"
-import { extensionTuiStore } from "./extensionTuiStore"
-import { commandFeedbackStore } from "./commandFeedbackStore"
+import { piModelsStore } from "./state/index.js"
 import { resetWorkspaceResolutionCache } from "./workspaces"
 import { clearAllWorkspaceFileCaches } from "./files"
 import { clearPiTimelineItemCache } from "./selectors/timelineCache"
@@ -14,7 +9,6 @@ import { resetManagementEvents } from "./managementEventStore"
 import { refreshPiNativeStatus } from "./nativeStatus"
 import { piEventStream } from "./eventStream"
 import { abortUnboundPiRequests } from "./httpClient"
-import { activeSessionStore } from "../store/activeSessionStore"
 import { PROTOCOL_VERSION } from "@piui/protocol"
 
 export interface PiBackendBootstrapResult {
@@ -81,16 +75,10 @@ export function installPiBackendServerSwitch(): void {
   serverSwitchInstalled = true
   serverStore.onServerChange(() => {
     abortUnboundPiRequests()
-    clearPiSessionIndex()
+    // Session IDs are server-qualified. A focus change must not erase other
+    // panes' branches, extension dialogs or in-flight activity.
     clearPiTimelineItemCache()
-    piBranchStore.clearAll()
-    piSessionStateStore.clearAll()
     piModelsStore.clear()
-    piSessionInfoStore.clear()
-    extensionUiStore.reset()
-    extensionTuiStore.reset()
-    commandFeedbackStore.reset()
-    activeSessionStore.reset()
     resetWorkspaceResolutionCache()
     clearAllWorkspaceFileCaches()
     resetManagementEvents()

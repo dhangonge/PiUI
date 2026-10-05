@@ -3,6 +3,12 @@
 // ============================================
 
 import type { TerminalInfo } from '@piui/protocol'
+import { getServerRevision, makeSessionKey } from '../utils/sessionKey'
+
+function terminalDirectoryKey(directory: string | undefined, serverId?: string): string | null {
+  if (!directory) return null
+  return serverId ? makeSessionKey(serverId, `${getServerRevision(serverId)}:${directory}`) : directory
+}
 
 // 面板位置
 export type PanelPosition = 'bottom' | 'right'
@@ -20,6 +26,7 @@ export interface PanelTab {
   previewFiles?: PreviewFile[]
   // Terminal 特有属性
   terminalId?: string
+  workspacePath?: string
   title?: string
   shellTitle?: string
   shell?: string
@@ -35,6 +42,7 @@ export interface PanelTab {
 
 export interface TerminalTab {
   id: string
+  workspacePath?: string
   title: string
   customTitle?: string
   shellTitle?: string
@@ -290,6 +298,7 @@ function buildTerminalPanelTab(tab: TerminalTab, position: PanelPosition, existi
     type: 'terminal',
     position,
     terminalId: tab.id,
+    workspacePath: tab.workspacePath,
     title: existing?.title ?? tab.title,
     shellTitle: existing?.shellTitle ?? tab.shellTitle ?? tab.title,
     customTitle: existing?.customTitle ?? tab.customTitle,
@@ -920,14 +929,17 @@ export class LayoutStore {
   // 兼容旧 API - Bottom Panel
   // ============================================
 
-  setCurrentTerminalDirectory(directory?: string) {
-    const nextDirectory = directory || null
+  setCurrentTerminalDirectory(directory?: string, serverId?: string) {
+    const nextDirectory = terminalDirectoryKey(directory, serverId)
     if (this.currentTerminalDirectory === nextDirectory) return
     this.persistTerminalLayout()
     this.currentTerminalDirectory = nextDirectory
   }
 
-  syncTerminalSessions(directory: string | undefined, sessions: TerminalInfo[]) {
+  syncTerminalSessions(directory: string | undefined, sessions: TerminalInfo[], serverId?: string) {
+    const workspacePath = directory
+    if (serverId) sessions = sessions.map(session => ({ ...session, id: makeSessionKey(serverId, session.id) }))
+    directory = terminalDirectoryKey(directory, serverId) ?? undefined
     const nextDirectory = directory || null
     const directoryChanged = this.currentTerminalDirectory !== nextDirectory
     if (directoryChanged) {
@@ -944,13 +956,14 @@ export class LayoutStore {
     }
 
     const savedLayout = directory ? layoutMap.directories[directory] : undefined
-    const existingTerminalById = new Map(this.state.panelTabs.filter(tab => tab.type === 'terminal').map(tab => [tab.id, tab]))
+    const existingTerminalById = new Map((directoryChanged ? [] : this.state.panelTabs).filter(tab => tab.type === 'terminal').map(tab => [tab.id, tab]))
     const sessionById = new Map(
       sessions.map(session => {
         const previous = existingTerminalById.get(session.id)
         const saved = savedLayout?.sessions?.[session.id]
         const terminal: TerminalTab = {
           id: session.id,
+          workspacePath,
           title: saved?.title ?? previous?.title ?? session.title,
           customTitle: saved?.customTitle ?? previous?.customTitle,
           shellTitle: saved?.shellTitle ?? previous?.shellTitle ?? session.shell,
@@ -1035,6 +1048,7 @@ export class LayoutStore {
     if (existing) {
       Object.assign(existing, {
         terminalId: tab.id,
+        workspacePath: tab.workspacePath,
         shellTitle: existing.shellTitle ?? tab.shellTitle ?? tab.shell ?? tab.title,
         shell: tab.shell,
         cwd: tab.cwd,

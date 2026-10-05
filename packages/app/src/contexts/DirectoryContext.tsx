@@ -2,7 +2,9 @@
 // DirectoryContext - 管理当前工作目录
 // ============================================
 
-import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
+import { serverStore } from '../store/serverStore'
+import { getStorageVersion, subscribePerServerStorageVersion } from '../utils/perServerStorage'
 import i18n from '../i18n'
 import { useRouter } from '../hooks/useRouter'
 import { normalizeToForwardSlash, getDirectoryName, isSameDirectory, serverStorage } from '../utils'
@@ -21,8 +23,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
-function readSavedDirectories(): SavedDirectory[] {
-  const saved = serverStorage.getJSON<unknown>(STORAGE_KEY_SAVED)
+function readSavedDirectories(serverId: string): SavedDirectory[] {
+  const saved = serverStorage.getJSONFor<unknown>(STORAGE_KEY_SAVED, serverId)
   if (!Array.isArray(saved)) return []
 
   return saved.flatMap(item => {
@@ -38,8 +40,8 @@ function readSavedDirectories(): SavedDirectory[] {
   })
 }
 
-function readRecentProjects(): RecentProjects {
-  const recent = serverStorage.getJSON<unknown>(STORAGE_KEY_RECENT)
+function readRecentProjects(serverId: string): RecentProjects {
+  const recent = serverStorage.getJSONFor<unknown>(STORAGE_KEY_RECENT, serverId)
   if (!isRecord(recent)) return {}
 
   return Object.fromEntries(
@@ -54,31 +56,28 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
   // 从 layoutStore 获取 sidebarExpanded
   const { sidebarExpanded } = useLayoutStore()
 
-  const [savedDirectories, setSavedDirectories] = useState<SavedDirectory[]>(readSavedDirectories)
-
-  const [recentProjects, setRecentProjects] = useState<RecentProjects>(readRecentProjects)
-
-
-  // 保存 savedDirectories 到 per-server storage
-  useEffect(() => {
-    serverStorage.setJSON(STORAGE_KEY_SAVED, savedDirectories)
-  }, [savedDirectories])
-
-  // 保存 recentProjects 到 per-server storage
-  useEffect(() => {
-    serverStorage.setJSON(STORAGE_KEY_RECENT, recentProjects)
-  }, [recentProjects])
+  const serverId = useSyncExternalStore(listener => serverStore.subscribe(listener), () => serverStore.getActiveServerId())
+  const storageVersion = useSyncExternalStore(subscribePerServerStorageVersion, getStorageVersion)
+  const savedDirectories = useMemo(() => { void storageVersion; return readSavedDirectories(serverId) }, [serverId, storageVersion])
+  const recentProjects = useMemo(() => { void storageVersion; return readRecentProjects(serverId) }, [serverId, storageVersion])
+  const setSavedDirectories = useCallback((update: (previous: SavedDirectory[]) => SavedDirectory[]) => {
+    serverStorage.setJSONFor(STORAGE_KEY_SAVED, update(readSavedDirectories(serverId)), serverId)
+  }, [serverId])
+  const setRecentProjects = useCallback((update: (previous: RecentProjects) => RecentProjects) => {
+    serverStorage.setJSONFor(STORAGE_KEY_RECENT, update(readRecentProjects(serverId)), serverId)
+  }, [serverId])
 
   // 设置当前目录（更新 URL + 记录最近使用）
   const setCurrentDirectory = useCallback(
     (directory: string | undefined) => {
+      if (serverStore.getActiveServerId() !== serverId) return
       if (directory !== urlDirectory && hasUnsavedFileChanges() && !window.confirm(i18n.t('components:fileExplorer.discardUnsaved'))) return
       setUrlDirectory(directory)
       if (directory) {
         setRecentProjects(prev => ({ ...prev, [directory]: Date.now() }))
       }
     },
-    [setUrlDirectory, urlDirectory],
+    [setUrlDirectory, urlDirectory, setRecentProjects, serverId],
   )
 
   // 添加目录
@@ -111,7 +110,7 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       setSavedDirectories(prev => [...prev, newDir])
       setCurrentDirectory(normalized)
     },
-    [savedDirectories, setCurrentDirectory],
+    [savedDirectories, setCurrentDirectory, setSavedDirectories],
   )
 
   // 移除目录
@@ -123,7 +122,7 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
         setCurrentDirectory(undefined)
       }
     },
-    [urlDirectory, setCurrentDirectory],
+    [urlDirectory, setCurrentDirectory, setSavedDirectories],
   )
 
   const reorderDirectories = useCallback((draggedPath: string, targetPath: string) => {
@@ -147,7 +146,7 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
       next.splice(targetIndex, 0, draggedDirectory)
       return next
     })
-  }, [])
+  }, [setSavedDirectories])
 
   // Tauri: 启动时获取 CLI 传入的目录 + 监听后续 open-directory 事件
   // 用 ref 持有最新的 addDirectory 避免 stale closure

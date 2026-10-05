@@ -38,7 +38,8 @@ import { InternalDragLayer } from './components/InternalDragLayer'
 import { CloseServiceDialog } from './components/CloseServiceDialog'
 import { ProviderAuthDialogHost } from './features/settings/ProviderAuthDialogHost'
 import { trackPiSession } from './pi/piSessionIndex'
-import { piEventStream } from './pi/eventStream.js'
+import { getPiEventStream } from './pi/eventStream.js'
+import { useServerStore } from './hooks/useServerStore'
 import { useSessionContext } from './contexts/useSessionContext'
 import { useCloseServiceDialog } from './hooks/useCloseServiceDialog'
 
@@ -67,6 +68,7 @@ function App() {
   } = router
   const { currentDirectory, savedDirectories, sidebarExpanded, setSidebarExpanded } = useDirectory()
   const { sessions } = useSessionContext()
+  const { activeServer } = useServerStore()
   const { rightPanelOpen, rightPanelWidth, wakeLock } = useLayoutStore()
   const { surfaceRef, value: chatViewport } = useChatViewportController({
     sidebarExpanded,
@@ -129,11 +131,11 @@ function App() {
   // not have an open pane. Without this subscription background completion
   // notifications have no event source.
   useEffect(() => {
-    for (const directory of activeDirectories) piEventStream.connectWorkspace(directory)
-    return () => {
-      for (const directory of activeDirectories) piEventStream.disconnectWorkspace(directory)
-    }
-  }, [activeDirectories])
+    if (!activeServer || !currentDirectory) return
+    const stream = getPiEventStream(activeServer.id)
+    stream.connectWorkspace(currentDirectory)
+    return () => stream.disconnectWorkspace(currentDirectory)
+  }, [activeServer, currentDirectory])
 
   // Runtime replacement (fork/new/import): panes follow the new session id
   useEffect(() => {

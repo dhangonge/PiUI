@@ -17,6 +17,7 @@ import { useSessionContext } from '../../contexts/useSessionContext'
 import { renamePiSession, loadPiSessions } from '../../pi/controllers/index.js'
 import { usePiSessionTitle } from '../../pi/hooks/index.js'
 import { uiErrorHandler } from '../../utils'
+import { sessionKeyToServerId } from '../../utils/sessionKey'
 import { useChatViewport } from './chatViewport'
 import type { Model, Api } from '@earendil-works/pi-ai'
 
@@ -190,7 +191,7 @@ export function Header({
     }
     try {
       await renamePiSession(sessionId, editTitle.trim())
-      void loadPiSessions().catch(() => undefined)
+      void loadPiSessions(undefined, sessionKeyToServerId(sessionId)).catch(() => undefined)
       refresh()
     } catch (e) {
       uiErrorHandler('rename session', e)

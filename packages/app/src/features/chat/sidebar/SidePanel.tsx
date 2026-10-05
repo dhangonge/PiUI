@@ -2,6 +2,10 @@ import { useCallback, useMemo, useState, useEffect, useRef, useSyncExternalStore
 import { useTranslation } from 'react-i18next'
 import { SessionList } from '../../sessions'
 import { FolderRecentList } from './FolderRecentList'
+import { MultiServerFolderList } from './MultiServerFolderList'
+import { useMultiServerStore } from '../../../store/multiServerStore'
+import { serverStore } from '../../../store/serverStore'
+import { sessionKeyToServerId } from '../../../utils/sessionKey'
 import { getProjectGroupIdentity } from './projectGrouping'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { ActiveSessionItem } from './ActiveSessionItem'
@@ -113,6 +117,7 @@ export function SidePanel({
 }: SidePanelProps) {
   const { t } = useTranslation(['chat', 'common'])
   const canDeleteSessions = usePiCapabilities().sessionDelete
+  const multiServer = useMultiServerStore()
   const {
     currentDirectory,
     savedDirectories,
@@ -304,11 +309,12 @@ export function SidePanel({
   const { sessions, isLoading, isLoadingMore, hasMore, search, setSearch, loadMore, deleteSession, refresh } =
     useSessionContext()
 
-  const pinnedEntries = useSyncExternalStore(
+  const allPinnedEntries = useSyncExternalStore(
     pinnedSessionsStore.subscribe,
-    pinnedSessionsStore.getSnapshot,
-    pinnedSessionsStore.getSnapshot,
+    pinnedSessionsStore.getScopedSnapshot,
+    pinnedSessionsStore.getScopedSnapshot,
   )
+  const pinnedEntries = useMemo(() => allPinnedEntries.filter(entry => sessionKeyToServerId(entry.sessionId) === serverStore.getActiveServerId()), [allPinnedEntries])
   const sessionLookup = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions])
 
   // 列表显示按当前工作区过滤；数据本身是全局的（活跃 tab / 标题解析都需全局）
@@ -1187,7 +1193,9 @@ export function SidePanel({
               ref={recentsSelectionRootRef}
               className={`flex-1 overflow-hidden ${isEditMode ? 'select-none' : ''}`}
             >
-              {canShowFolderRecents ? (
+              {multiServer.enabled ? (
+                <MultiServerFolderList search={search} selectedSessionId={selectedSessionId} onSelectSession={handleSelect} onNewSession={onNewSession} onAddProject={onAddProject} />
+              ) : canShowFolderRecents ? (
                 <FolderRecentList
                   projects={folderProjects}
                   {...commonFolderRecentListProps}

@@ -1,4 +1,5 @@
 import type { SessionInfo } from '@earendil-works/pi-coding-agent'
+import { makeSessionKey, isScopedSessionKey, sessionKeyToServerId } from '../utils/sessionKey'
 
 class PiSessionInfoStore {
   private all: SessionInfo[] = []
@@ -20,8 +21,15 @@ class PiSessionInfoStore {
     return this.all
   }
 
-  replaceForCwd(cwd: string, sessions: SessionInfo[]): SessionInfo[] {
-    this.byCwd.set(pathKey(cwd), sessions)
+  replaceForServer(serverId: string, sessions: SessionInfo[]): SessionInfo[] {
+    this.all = [...this.all.filter(item => isScopedSessionKey(item.id) && sessionKeyToServerId(item.id) !== serverId), ...sessions]
+    for (const key of this.byCwd.keys()) if (key.startsWith(`${serverId}::`)) this.byCwd.delete(key)
+    this.notify()
+    return sessions
+  }
+
+  replaceForCwd(cwd: string, sessions: SessionInfo[], serverId?: string): SessionInfo[] {
+    this.byCwd.set(serverId ? makeSessionKey(serverId, pathKey(cwd)) : pathKey(cwd), sessions)
     this.notify()
     return sessions
   }
@@ -30,8 +38,8 @@ class PiSessionInfoStore {
     return this.all
   }
 
-  getForCwd(cwd: string): readonly SessionInfo[] {
-    return this.byCwd.get(pathKey(cwd)) ?? []
+  getForCwd(cwd: string, serverId?: string): readonly SessionInfo[] {
+    return this.byCwd.get(serverId ? makeSessionKey(serverId, pathKey(cwd)) : pathKey(cwd)) ?? []
   }
 
   clear(): void {

@@ -9,7 +9,7 @@ import {
 } from './sessionKey'
 
 const active = vi.hoisted(() => ({ id: 'active' }))
-vi.mock('../store/serverStore', () => ({ serverStore: { getActiveServerId: () => active.id } }))
+vi.mock('../store/serverStore', () => ({ serverStore: { getActiveServerId: () => active.id, subscribe: vi.fn(() => () => undefined) } }))
 
 describe('server-scoped session keys', () => {
   it('distinguishes identical session IDs on different servers', () => {

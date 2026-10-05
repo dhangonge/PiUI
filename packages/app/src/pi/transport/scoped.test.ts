@@ -14,6 +14,11 @@ import {
   postPiSessionCommand,
   previewPiSession,
   promptPi,
+  waitHostCommand,
+  createHostTerminal,
+  issueHostTerminalToken,
+  getHostTerminalWebSocketUrl,
+  removeHostTerminal,
 } from './index'
 
 const fetchMock = vi.hoisted(() => vi.fn<typeof fetch>())
@@ -128,6 +133,48 @@ describe('server-scoped Pi protocol transport', () => {
       'https://b.example.test/api/v1/host/commands/files.list',
     ])
     expect(body(2)).toEqual({ workspacePath: '/b' })
+  })
+
+  it('polls accepted commands on their original server after a focus switch', async () => {
+    fetchMock.mockResolvedValueOnce(json({ command: command('accepted') }, 202))
+    const submitted = await postPiSessionCommand<CommandRecord>(makeSessionKey(b, 'same-session'), 'compact')
+    expect(submitted.id).toBe(makeSessionKey(b, 'same-command'))
+    serverStore.setActiveServer(a)
+    fetchMock.mockResolvedValueOnce(json({ command: { ...command('completed'), result: { targetSessionId: 'fork' } } }))
+    const result = await waitHostCommand(submitted.id)
+    expect(fetchMock.mock.calls[1][0]).toBe('https://b.example.test/api/v1/host/commands/same-command')
+    expect(result).toEqual({ targetSessionId: makeSessionKey(b, 'fork') })
+    expect(getPiCommandStore(b).get('same-command')?.status).toBe('completed')
+  })
+
+  it('stops polling if the endpoint is edited between requests', async () => {
+    vi.useFakeTimers()
+    try {
+      fetchMock.mockResolvedValue(json({ command: command('running') }))
+      const pending = waitHostCommand(makeSessionKey(b, 'same-command'))
+      const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      serverStore.updateServer(b, { url: 'https://replacement.example.test' })
+      await vi.advanceTimersByTimeAsync(200)
+      await rejected
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps terminal commands and websocket tickets on the owning server', async () => {
+    await createHostTerminal('/same', { shell: 'sh' }, undefined, b)
+    await issueHostTerminalToken('/same', makeSessionKey(b, 'term'))
+    await removeHostTerminal('/same', makeSessionKey(b, 'term'))
+    expect(fetchMock.mock.calls.every(([url]) => String(url).startsWith('https://b.example.test/'))).toBe(true)
+    expect(body(1)).toEqual({ workspacePath: '/same', terminalId: 'term' })
+    const url = new URL(getHostTerminalWebSocketUrl(makeSessionKey(b, 'term'), 'ticket', 7))
+    expect(url.host).toBe('b.example.test')
+    expect(url.pathname).toBe('/api/v1/host/terminals/term/stream')
+    expect(url.searchParams.get('token')).toBe('test-b')
+    expect(url.searchParams.get('cursor')).toBe('7')
   })
 
   it('preserves protocol error metadata for the requesting server', async () => {

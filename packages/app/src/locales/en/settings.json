@@ -54,7 +54,12 @@
     "shareLoopbackHint": "This link works for clients on this machine only. Restart the server with PIUI_HOST=0.0.0.0 to share it on your LAN.",
     "editServer": "Edit server",
     "deleteServer": "Delete Server",
-    "deleteServerConfirm": "Remove \"{{name}}\" from the server list? This cannot be undone."
+    "deleteServerConfirm": "Remove \"{{name}}\" from the server list? This cannot be undone.",
+    "multiServerMode": "Multi-server mode",
+    "multiServerModeDesc": "Subscribe to multiple servers. Browse sessions by server and keep independent conversations connected.",
+    "multiServerModeOffHint": "Subscribe to a server in Settings to show its projects and sessions here.",
+    "subscribe": "Subscribe",
+    "unsubscribe": "Unsubscribe"
   },
   "service": {
     "title": "Local PiUI Service",

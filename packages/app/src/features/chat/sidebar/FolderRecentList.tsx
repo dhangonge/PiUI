@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useServerStore } from '../../../hooks/useServerStore'
 import type { UiSession } from '../../../types/session'
 import {
   FolderIcon,
@@ -872,14 +873,15 @@ function FolderRecentSection({
     patchLocalSession,
     removeLocalSession,
   } = useSessions({
+    serverId: useServerStore().activeServer?.id,
     directory: project.path,
     pageSize: DIRECTORY_PAGE_SIZE,
     enabled: hasActivated && !hasWorkspaceTree,
   })
   const pinnedEntries = useSyncExternalStore(
     pinnedSessionsStore.subscribe,
-    pinnedSessionsStore.getSnapshot,
-    pinnedSessionsStore.getSnapshot,
+    pinnedSessionsStore.getScopedSnapshot,
+    pinnedSessionsStore.getScopedSnapshot,
   )
   const visibleSessions = useMemo(() => {
     const pinnedSet = new Set(pinnedEntries.map(entry => entry.sessionId))

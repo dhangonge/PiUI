@@ -17,7 +17,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../../../hooks', () => ({
   useServerStore: useServerStoreMock,
-  useRouter: () => ({ navigateHome: navigateHomeMock, sessionId: 'session-1' }),
+  useRouter: () => ({ setDirectory: navigateHomeMock, sessionId: 'session-1' }),
 }))
 
 vi.mock('../../../utils/sessionLifecycle', () => ({
@@ -61,6 +61,7 @@ describe('ServersSettings', () => {
     })
     expect(setActiveServerMock).toHaveBeenCalledWith('remote')
     expect(navigateHomeMock).toHaveBeenCalled()
-    expect(clearSessionMock).toHaveBeenCalledWith('session-1')
+    expect(navigateHomeMock).toHaveBeenCalledWith(undefined)
+    expect(clearSessionMock).not.toHaveBeenCalled()
   })
 })

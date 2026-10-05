@@ -38,7 +38,7 @@ import type { SessionInfo, SessionTreeNode, Skill, PromptTemplate } from '@earen
 import type { PiBranchPage, PiConfiguredPackage, PiModelRuntimeSnapshot, PiPackageUpdate, PiProjectTrust, PiProviderAuthInfo, PiSettingsSnapshot, ResolvedPaths } from '../domain/index.js'
 import { getApiBase, getPiAuthToken, piFetch } from '../httpClient.js'
 import { getPiCommandStore } from '../state/index.js'
-import { isScopedSessionKey, resolveSessionTarget } from '../../utils/sessionKey.js'
+import { isScopedSessionKey, makeSessionKey, resolveSessionTarget, scopeSessionResult, sessionKeyToSessionId, getSessionRevision } from '../../utils/sessionKey.js'
 
 // Response types
 export type PiCommandResponse<T = JsonValue | undefined> = {
@@ -114,7 +114,8 @@ export async function postPiGlobalCommand<T = JsonValue | undefined, K extends P
     signal,
   }, serverId)
   if (response.command) getPiCommandStore(serverId).upsert(response.command)
-  return (response.data !== undefined ? response.data : response.command) as T extends undefined ? null : T
+  const command = response.command && serverId ? { ...response.command, id: makeSessionKey(serverId, response.command.id) } : response.command
+  return (response.data !== undefined ? response.data : command) as T extends undefined ? null : T
 }
 
 export async function postPiSessionCommand<T = JsonValue | undefined, K extends PiCommandName = PiCommandName>(
@@ -138,7 +139,8 @@ export async function postPiSessionCommand<T = JsonValue | undefined, K extends 
     scope,
   )
   if (response.command) getPiCommandStore(scope).upsert(response.command)
-  return (response.data !== undefined ? response.data : response.command) as T extends undefined ? null : T
+  const command = response.command && scope ? { ...response.command, id: makeSessionKey(scope, response.command.id) } : response.command
+  return (response.data !== undefined ? response.data : command) as T extends undefined ? null : T
 }
 
 // Host commands (workspaces / files / git), POST /api/v1/host/commands/:name
@@ -231,16 +233,17 @@ export function listHostShells(signal?: AbortSignal): Promise<{ shells: Terminal
   return postHostCommand('terminals.shells', {}, signal)
 }
 
-export function listHostTerminals(workspacePath: string, signal?: AbortSignal): Promise<{ terminals: TerminalInfo[] }> {
-  return postHostCommand('terminals.list', { workspacePath }, signal)
+export function listHostTerminals(workspacePath: string, signal?: AbortSignal, serverId?: string): Promise<{ terminals: TerminalInfo[] }> {
+  return postHostCommand('terminals.list', { workspacePath }, signal, serverId)
 }
 
 export function createHostTerminal(
   workspacePath: string,
   params: TerminalCreateParams = {},
   signal?: AbortSignal,
+  serverId?: string,
 ): Promise<TerminalInfo> {
-  return postHostCommand('terminals.create', { workspacePath, ...params }, signal)
+  return postHostCommand('terminals.create', { workspacePath, ...params }, signal, serverId)
 }
 
 export function updateHostTerminal(
@@ -248,26 +251,35 @@ export function updateHostTerminal(
   terminalId: string,
   params: TerminalUpdateParams,
   signal?: AbortSignal,
+  serverId?: string,
 ): Promise<TerminalInfo> {
-  return postHostCommand('terminals.update', { workspacePath, terminalId, ...params }, signal)
+  const target = resolveSessionTarget(terminalId, serverId)
+  const scope = serverId ?? (isScopedSessionKey(terminalId) ? target.serverId : undefined)
+  return postHostCommand('terminals.update', { workspacePath, terminalId: target.sessionId, ...params }, signal, scope)
 }
 
-export function removeHostTerminal(workspacePath: string, terminalId: string, signal?: AbortSignal): Promise<{ ok: boolean }> {
-  return postHostCommand('terminals.remove', { workspacePath, terminalId }, signal)
+export function removeHostTerminal(workspacePath: string, terminalId: string, signal?: AbortSignal, serverId?: string): Promise<{ ok: boolean }> {
+  const target = resolveSessionTarget(terminalId, serverId)
+  const scope = serverId ?? (isScopedSessionKey(terminalId) ? target.serverId : undefined)
+  return postHostCommand('terminals.remove', { workspacePath, terminalId: target.sessionId }, signal, scope)
 }
 
-export function issueHostTerminalToken(workspacePath: string, terminalId: string, signal?: AbortSignal): Promise<{ token: string; expiresIn: number }> {
-  return postHostCommand('terminals.connectToken', { workspacePath, terminalId }, signal)
+export function issueHostTerminalToken(workspacePath: string, terminalId: string, signal?: AbortSignal, serverId?: string): Promise<{ token: string; expiresIn: number }> {
+  const target = resolveSessionTarget(terminalId, serverId)
+  const scope = serverId ?? (isScopedSessionKey(terminalId) ? target.serverId : undefined)
+  return postHostCommand('terminals.connectToken', { workspacePath, terminalId: target.sessionId }, signal, scope)
 }
 
-export function getHostTerminalWebSocketUrl(terminalId: string, ticket: string, cursor?: number): string {
-  const base = getApiBase() || (typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:8787')
-  const url = new URL(`${base.replace(/^http/, 'ws')}/api/v1/host/terminals/${encodeURIComponent(terminalId)}/stream`)
+export function getHostTerminalWebSocketUrl(terminalId: string, ticket: string, cursor?: number, serverId?: string): string {
+  const target = resolveSessionTarget(terminalId, serverId)
+  const scope = serverId ?? (isScopedSessionKey(terminalId) ? target.serverId : undefined)
+  const base = getApiBase(scope) || (typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:8787')
+  const url = new URL(`${base.replace(/^http/, 'ws')}/api/v1/host/terminals/${encodeURIComponent(target.sessionId)}/stream`)
   url.searchParams.set('ticket', ticket)
   if (cursor !== undefined && Number.isSafeInteger(cursor) && cursor >= 0) url.searchParams.set('cursor', String(cursor))
   // 同源模式（无 API base）下 WebSocket 升级请求无法携带 Authorization 头，
   // 因此只要配置了 token 就必须走 query 参数，与事件流保持一致。
-  const token = getPiAuthToken()
+  const token = getPiAuthToken(scope)
   if (token) url.searchParams.set('token', token)
   return url.toString()
 }
@@ -397,8 +409,8 @@ export function deletePiSession(cwd: string, sessionFile: string, signal?: Abort
 }
 
 // Catalog commands
-export function listPiModels(signal?: AbortSignal): Promise<JsonValue> {
-  return postPiGlobalCommand<JsonValue>('models.list', undefined, signal)
+export function listPiModels(signal?: AbortSignal, serverId?: string): Promise<JsonValue> {
+  return postPiGlobalCommand<JsonValue>('models.list', undefined, signal, serverId)
 }
 
 // State commands
@@ -456,7 +468,7 @@ export function reloadPiSession(sessionId: string, signal?: AbortSignal): Promis
 }
 
 export function newPiSession(sessionId: string, parentSession?: string, signal?: AbortSignal): Promise<CommandRecord> {
-  return postPiSessionCommand(sessionId, 'newSession', parentSession ? { parentSession } : undefined, signal)
+  return postPiSessionCommand(sessionId, 'newSession', parentSession ? { parentSession: sessionKeyToSessionId(parentSession) } : undefined, signal)
 }
 
 export function setPiScopedModels(sessionId: string, patterns: string[], signal?: AbortSignal): Promise<CommandRecord> {
@@ -649,15 +661,27 @@ export function setPiFollowUpMode(sessionId: string, mode: 'all' | 'one-at-a-tim
  * Poll a submitted command until it completes/fails (serialized commands
  * like fork return 'accepted' immediately; the result lands later).
  */
-export async function waitHostCommand(commandId: string, signal?: AbortSignal, timeoutMs = 30_000): Promise<JsonValue> {
+export async function waitHostCommand(commandId: string, signal?: AbortSignal, timeoutMs = 30_000, serverId?: string): Promise<JsonValue> {
+  const target = resolveSessionTarget(commandId, serverId)
+  const scope = serverId ?? (isScopedSessionKey(commandId) ? target.serverId : undefined)
+  const revisionKey = scope ? makeSessionKey(scope, target.sessionId) : target.sessionId
+  const revision = getSessionRevision(revisionKey)
+  const checkRevision = () => {
+    signal?.throwIfAborted()
+    if (getSessionRevision(revisionKey) !== revision) throw new DOMException('Command server changed', 'AbortError')
+  }
   const deadline = Date.now() + timeoutMs
   for (;;) {
+    checkRevision()
     const record = await readJson<{ command: CommandRecord }>(
-      `${getApiBase()}/api/v1/host/commands/${encodeURIComponent(commandId)}`,
+      `${getApiBase(scope)}/api/v1/host/commands/${encodeURIComponent(target.sessionId)}`,
       { signal },
+      scope,
     )
+    checkRevision()
+    getPiCommandStore(scope).upsert(record.command)
     const status = record.command.status
-    if (status === 'completed') return record.command.result ?? null
+    if (status === 'completed') return scopeSessionResult(record.command.result ?? null, scope)
     if (status === 'failed') {
       throw Object.assign(new Error(record.command.error?.message ?? 'Command failed'), {
         code: record.command.error?.code,
@@ -670,7 +694,17 @@ export async function waitHostCommand(commandId: string, signal?: AbortSignal, t
       })
     }
     if (Date.now() > deadline) throw new Error('Command timed out')
-    await new Promise(resolve => setTimeout(resolve, 200))
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort)
+        resolve()
+      }, 200)
+      const onAbort = () => {
+        clearTimeout(timer)
+        reject(signal?.reason ?? new DOMException('Command cancelled', 'AbortError'))
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+    })
   }
 }
 

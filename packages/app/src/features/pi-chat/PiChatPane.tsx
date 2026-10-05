@@ -65,13 +65,14 @@ import { resolveWorkspacePath } from '../../pi/workspaces.js'
 import { stashForkText, subscribeForkSeed, takeForkText } from '../../pi/pendingForkText'
 import { clearSessionEditorDraft, configureSessionEditorDraftSync, setSessionEditorDraft, useSessionEditorDraft } from '../../pi/sessionEditorDraftStore'
 import { isSessionBusyError, isSessionNotFoundError, uiErrorHandler } from '../../utils'
-import { usePiBranchData, usePiBranchError, usePiModels, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
+import { usePiBranchData, usePiBranchError, usePiModels, usePiSessionInfos, usePiSessionRuntimeState } from '../../pi/hooks/index.js'
 import { useDirectory } from '../../contexts/useDirectory'
 import { useSessionContext } from '../../contexts/useSessionContext'
 import { SessionNavigationContext, type SessionNavigationContextValue } from '../../contexts/SessionNavigationContext'
 import { paneLayoutStore } from '../../store/paneLayoutStore'
 import { notificationStore } from '../../store/notificationStore'
 import { useServerStore } from '../../hooks/useServerStore'
+import { sessionKeyToServerId } from '../../utils/sessionKey'
 import { useManagementEvents } from '../../pi/managementEventStore'
 import { getInternalDragSnapshot, subscribeInternalDrag, subscribeInternalDrop } from '../../lib/internalDragCore'
 import { copyTextToClipboard } from '../../utils/clipboard'
@@ -225,7 +226,9 @@ export function PiChatPane({
   const onNewChatRef = useRef(onNewChat)
   const { currentDirectory, addDirectory } = useDirectory()
   const { sessions: allSessions, registerSession } = useSessionContext()
-  const { activeServer, activeServerGeneration } = useServerStore()
+  const { activeServer: selectedServer, servers } = useServerStore()
+  const activeServer = sessionId ? servers.find(server => server.id === sessionKeyToServerId(sessionId)) : selectedServer
+  const boundServerId = activeServer?.id
   const { providerRevision } = useManagementEvents()
   const registerSessionRef = useRef(registerSession)
   const currentDirectoryRef = useRef(currentDirectory)
@@ -240,11 +243,12 @@ export function PiChatPane({
   // ============================================
   // Pi data layer: event stream + keyed stores
   // ============================================
-  const { models, isLoading: modelsLoading } = usePiModels()
+  const { models, isLoading: modelsLoading } = usePiModels(boundServerId)
   useEffect(() => {
-    void loadPiModels().catch(() => undefined)
-  }, [activeServerGeneration, activeServer?.id, activeServer?.url, activeServer?.token, currentDirectory, providerRevision])
+    if (boundServerId) void loadPiModels(undefined, boundServerId).catch(() => undefined)
+  }, [boundServerId, activeServer?.url, activeServer?.token, providerRevision])
 
+  const sessionInfos = usePiSessionInfos()
   const branch = usePiBranchData(sessionId)
   const branchError = usePiBranchError(sessionId)
   const state = usePiSessionRuntimeState(sessionId)
@@ -260,8 +264,9 @@ export function PiChatPane({
   // 本 pane 当前会话的实际工作区（来自会话列表或全局当前目录），用于 @ 补全根目录。
   const inputRootPath = useMemo(() => {
     if (!sessionId) return currentDirectory ?? ''
-    return allSessions.find(s => s.id === sessionId)?.directory ?? currentDirectory ?? ''
-  }, [sessionId, allSessions, currentDirectory])
+    const headerCwd = branch?.head.header?.cwd
+    return sessionInfos.find(info => info.id === sessionId)?.cwd ?? allSessions.find(s => s.id === sessionId)?.directory ?? (typeof headerCwd === 'string' ? headerCwd : '')
+  }, [sessionId, sessionInfos, allSessions, branch, currentDirectory])
   // 只有服务端明确返回找不到会话时才显示“不存在”；网络、鉴权和服务端
   // 启动中的临时错误不能被误报成已删除。
   const sessionUnavailable = Boolean(sessionId && !branch && branchError && isSessionNotFoundError(branchError))
@@ -285,13 +290,13 @@ export function PiChatPane({
 
   useEffect(() => {
     // 会话已不可用：不订阅事件流，免得每次重连都 resync 打 404
-    if (!sessionId || sessionUnavailable || sessionLoadError) return
+    if (!sessionId || !boundServerId || sessionUnavailable || sessionLoadError) return
     piEventStream.connect(sessionId)
     if (!piBranchStore.getData(sessionId)) {
       void loadPiSessionData(sessionId).catch(() => undefined)
     }
     return () => piEventStream.disconnect(sessionId)
-  }, [activeServerGeneration, activeServer?.id, activeServer?.token, activeServer?.url, sessionId, sessionLoadError, sessionUnavailable])
+  }, [boundServerId, activeServer?.token, activeServer?.url, sessionId, sessionLoadError, sessionUnavailable])
 
   // Fork 带来的待编辑文本：进入目标会话时取走，灌进输入框。
   // fork 的 replacement 事件比命令结果先到时，导航会先于 stash 发生，
@@ -924,9 +929,9 @@ export function PiChatPane({
       if (!targetSessionId) {
         // Home: create the session on first send, then enter it. 全局（未选
         // 目录）时落到服务器默认工作区（桌面安装目录），与终端的全局语义一致。
-        const directory = currentDirectoryRef.current || (await resolveWorkspacePath())
+        const directory = currentDirectoryRef.current || (await resolveWorkspacePath(undefined, boundServerId))
         if (!directory) return false
-        const opened = await openPiSession(directory)
+        const opened = await openPiSession(directory, undefined, undefined, undefined, boundServerId)
         if (!opened.sessionId) return false
         const sessionDir = opened.cwd ?? directory
         targetSessionId = opened.sessionId
@@ -988,7 +993,7 @@ export function PiChatPane({
       scheduleDelayedRefresh(sid)
       return true
     },
-    [sessionId, isStreaming, models, scheduleDelayedRefresh],
+    [sessionId, isStreaming, models, scheduleDelayedRefresh, boundServerId],
   )
 
   // Slash command dispatch, mirroring pi TUI: frontend built-ins are handled
@@ -1059,7 +1064,7 @@ export function PiChatPane({
       if (!targetSessionId) {
         const directory = currentDirectoryRef.current
         if (!directory) return false
-        const opened = await openPiSession(directory)
+        const opened = await openPiSession(directory, undefined, undefined, undefined, boundServerId)
         if (!opened.sessionId) return false
         targetSessionId = opened.sessionId
         onEnterSessionRef.current?.(targetSessionId, directory)
@@ -1399,7 +1404,7 @@ export function PiChatPane({
       scheduleDelayedRefresh(sid)
       return true
     },
-    [currentDirectoryRef, handleFork, handleModelChange, isStreaming, items, models, onOpenSettings, onOpenSettingsTab, onOpenSidebar, scheduleDelayedRefresh, sessionId, state],
+    [currentDirectoryRef, handleFork, handleModelChange, isStreaming, items, models, onOpenSettings, onOpenSettingsTab, onOpenSidebar, scheduleDelayedRefresh, sessionId, state, boundServerId],
   )
 
   // Image attachment capability from the current model's native input

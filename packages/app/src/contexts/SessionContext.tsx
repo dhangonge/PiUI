@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { getStorageVersion, subscribePerServerStorageVersion } from '../utils/perServerStorage'
+import { readServerWorkspaces } from '../utils/serverWorkspaces'
 import i18n from '../i18n'
 import type { UiSession } from '../types/session'
 import { createPiSession, loadPiSessions, deletePiSession } from '../pi/controllers/index.js'
@@ -12,10 +14,30 @@ import { resolveWorkspacePath } from '../pi/workspaces.js'
 import { sessionErrorHandler } from '../utils'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { SessionContext, type SessionContextValue } from './SessionContext.shared'
+import { useMultiServerStore } from '../store/multiServerStore'
+import { serverStore } from '../store/serverStore'
+import { sessionKeyToServerId } from '../utils/sessionKey'
+import { getPiEventStream } from '../pi/eventStream'
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const { currentDirectory } = useDirectory()
+  const { serverIds, connectionRevision } = useMultiServerStore()
+  useEffect(() => {
+    const streams = serverIds.map(id => getPiEventStream(id))
+    streams.forEach(stream => stream.connectServer())
+    return () => streams.forEach(stream => stream.disconnectServer())
+  }, [serverIds, connectionRevision])
   const [sessions, setSessions] = useState<UiSession[]>([])
+  const storageVersion = useSyncExternalStore(subscribePerServerStorageVersion, getStorageVersion)
+  useEffect(() => {
+    const subscriptions = serverIds.flatMap(id => {
+      const paths = new Set([...readServerWorkspaces(id), ...sessions.filter(session => sessionKeyToServerId(session.id) === id).map(session => session.directory)])
+      const stream = getPiEventStream(id)
+      return [...paths].map(path => ({ stream, path }))
+    })
+    subscriptions.forEach(({ stream, path }) => stream.connectWorkspace(path))
+    return () => subscriptions.forEach(({ stream, path }) => stream.disconnectWorkspace(path))
+  }, [sessions, serverIds, storageVersion, connectionRevision])
   const [isLoading, setIsLoading] = useState(true)
   const [search, setSearch] = useState('')
   const requestIdRef = useRef(0)
@@ -48,14 +70,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const requestId = ++requestIdRef.current
     setIsLoading(true)
     try {
-      const nativeSessions = await loadPiSessions()
-      const mapped = nativeSessions.map(piSessionInfoToUiSession).filter((session): session is UiSession => session !== null)
+      const results = await Promise.allSettled(serverIds.map(id => loadPiSessions(undefined, id)))
+      if (requestId !== requestIdRef.current) return
+      const mapped = results.flatMap((result, index) => result.status === 'fulfilled'
+        ? result.value.map(piSessionInfoToUiSession).filter((session): session is UiSession => session !== null)
+        : allSessionsRef.current.filter(session => sessionKeyToServerId(session.id) === serverIds[index]))
+      if (results.length > 0 && results.every(result => result.status === 'rejected')) {
+        throw (results[0] as PromiseRejectedResult).reason
+      }
       const onDisk = new Set(mapped.map(session => session.id))
       const now = Date.now()
       for (const [id, since] of pendingRef.current) {
         if (onDisk.has(id) || now - since > PENDING_TTL_MS) pendingRef.current.delete(id)
       }
-      const pending = allSessionsRef.current.filter(session => pendingRef.current.has(session.id))
+      const pending = allSessionsRef.current.filter(session => pendingRef.current.has(session.id) && serverIds.includes(sessionKeyToServerId(session.id)))
       const next = linkPiSessionForks([...pending, ...mapped])
       if (requestId !== requestIdRef.current) return
       allSessionsRef.current = next
@@ -78,8 +106,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // 后续由 sessions-changed 事件或下一次操作触发刷新恢复。
       sessionErrorHandler('fetch sessions', error)
     } finally {
-      fetchInFlightRef.current = false
       if (requestId === requestIdRef.current) {
+        fetchInFlightRef.current = false
         setIsLoading(false)
         if (fetchQueuedRef.current) {
           fetchQueuedRef.current = false
@@ -87,7 +115,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         }
       }
     }
-  }, [])
+  }, [serverIds])
 
   // 事件驱动刷新：防抖合并（300ms 窗口内多事件只拉一次）
   const scheduleFetch = useCallback(() => {
@@ -107,8 +135,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     void fetchSessions()
     return () => {
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+      requestIdRef.current += 1
+      fetchInFlightRef.current = false
+      fetchQueuedRef.current = false
     }
-  }, [fetchSessions])
+  }, [fetchSessions, connectionRevision])
   useEffect(() => {
     searchRef.current = search
     setSessions(filterPiSessionList(allSessionsRef.current, search))
@@ -141,9 +172,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const createSession = useCallback(async (title?: string) => {
     // 全局（未选目录）时落到服务器默认工作区（桌面安装目录）
-    const directory = currentDirectory?.trim() || (await resolveWorkspacePath()) || ''
+    const serverId = serverStore.getActiveServerId()
+    const directory = currentDirectory?.trim() || (await resolveWorkspacePath(undefined, serverId)) || ''
     if (!directory) throw new Error('Choose a project directory before creating a session')
-    const created = await createPiSession(directory)
+    const created = await createPiSession(directory, undefined, serverId)
     const now = Date.now()
     const session: UiSession = {
       id: created.sessionId,
@@ -160,7 +192,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const deleteSession = useCallback(async (id: string) => {
     const session = allSessionsRef.current.find(item => item.id === id)
     if (!session?.path || !session.directory) throw new Error('Pi session file is unavailable')
-    await deletePiSession(session.directory, session.path)
+    await deletePiSession(session.directory, session.path, undefined, sessionKeyToServerId(id))
     pinnedSessionsStore.unpin(id)
     clearSessionRuntimeState(id)
     paneLayoutStore.clearSession(id)

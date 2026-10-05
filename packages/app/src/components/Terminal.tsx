@@ -3,7 +3,7 @@
 // 使用 xterm.js + WebSocket 连接后端 PTY
 // ============================================
 
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SerializeAddon } from '@xterm/addon-serialize'
@@ -20,6 +20,8 @@ import { copyTextToClipboard, readTextFromClipboard } from '../utils/clipboard'
 import { hapticTap } from '../utils/haptics'
 import { keybindingStore } from '../store/keybindingStore'
 import { isTauri } from '../utils/tauri'
+import { serverStore } from '../store/serverStore'
+import { getSessionRevision } from '../utils/sessionKey'
 
 const TERMINAL_FONT_FALLBACK =
   "'Fira Code', 'Noto Sans Mono CJK SC', 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'Noto Sans Mono', 'Ubuntu Mono', 'WenQuanYi Micro Hei Mono', 'DejaVu Sans Mono', 'Noto Sans CJK SC', ui-monospace, monospace"
@@ -355,6 +357,8 @@ interface TerminalProps {
 }
 
 export const Terminal = memo(function Terminal({ terminalId, workspacePath, isActive }: TerminalProps) {
+  const endpointRevision = useSyncExternalStore(serverStore.subscribe.bind(serverStore), () => getSessionRevision(terminalId))
+  const previousRevisionRef = useRef(endpointRevision)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isTouchScrolling, setIsTouchScrolling] = useState(false)
   const [stickyModifiers, setStickyModifiers] = useState<StickyModifiers>(() => createStickyModifiers())
@@ -438,7 +442,10 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
     // the render closure. This breaks the infinite cycle:
     //   old terminal cleanup → updateTerminalSnapshot → notify →
     //   re-render → effect deps changed → cleanup → notify → ...
-    const freshTab = layoutStore.getState().panelTabs.find(t => t.id === terminalId && t.type === 'terminal')
+    const freshTab = previousRevisionRef.current === endpointRevision
+      ? layoutStore.getState().panelTabs.find(t => t.id === terminalId && t.type === 'terminal')
+      : undefined
+    previousRevisionRef.current = endpointRevision
     const effectBuffer = typeof freshTab?.buffer === 'string' ? freshTab.buffer : ''
     const effectScrollY = typeof freshTab?.scrollY === 'number' ? freshTab.scrollY : undefined
     const effectCursor =
@@ -837,7 +844,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
       terminalRef.current = null
       fitAddonRef.current = null
     }
-  }, [terminalId, workspacePath, hasBeenActive, clearStickyModifiers, sendTerminalData, preferTouchUi])
+  }, [terminalId, workspacePath, endpointRevision, hasBeenActive, clearStickyModifiers, sendTerminalData, preferTouchUi])
 
   useEffect(() => {
     const container = containerRef.current

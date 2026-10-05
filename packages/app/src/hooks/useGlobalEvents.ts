@@ -5,6 +5,7 @@ import { activeSessionStore } from '../store/activeSessionStore'
 import { notificationStore } from '../store/notificationStore'
 import { notificationEventSettingsStore } from '../store/notificationEventSettingsStore'
 import { useNotification } from './useNotification'
+import { sessionKeyToServerId } from '../utils/sessionKey'
 
 /**
  * Session streaming is delivered by PiEventSocket; this consumer contract
@@ -53,8 +54,11 @@ export function subscribeSessionIdle(listener: (sessionId: string) => void): () 
   return () => sessionIdleListeners.delete(listener)
 }
 
-export function notifyReconnected(): void {
-  for (const consumer of sessionConsumers.values()) consumer.callbacks.onReconnected?.('network')
+export function notifyReconnected(serverId?: string): void {
+  for (const consumer of sessionConsumers.values()) {
+    if (serverId && consumer.sessionId && sessionKeyToServerId(consumer.sessionId) !== serverId) continue
+    consumer.callbacks.onReconnected?.('network')
+  }
 }
 
 export function updateConsumerSessionId(consumerId: string, sessionId: string | null) {

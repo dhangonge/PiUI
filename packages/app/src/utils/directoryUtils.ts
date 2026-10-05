@@ -10,6 +10,7 @@
 //
 
 import { serverStorage } from './perServerStorage'
+import { serverStore } from '../store/serverStore'
 
 // ============================================
 // Path Mode Configuration
@@ -31,16 +32,16 @@ export type DetectedPathStyle = 'unix' | 'windows'
 const STORAGE_KEY_PATH_MODE = 'piui-path-mode'
 const STORAGE_KEY_DETECTED_STYLE = 'piui-detected-path-style'
 
-let _pathMode: PathMode | null = null
-let _detectedStyle: DetectedPathStyle | null = null
+const pathModes = new Map<string, PathMode>()
+const detectedStyles = new Map<string, DetectedPathStyle>()
 
 /**
  * 重置路径模式缓存（服务器切换时调用）
  * 下次 getPathMode / getDetectedPathStyle 会从 serverStorage 重新读取
  */
 export function resetPathModeCache(): void {
-  _pathMode = null
-  _detectedStyle = null
+  pathModes.clear()
+  detectedStyles.clear()
 }
 
 // Path mode change listeners
@@ -58,7 +59,8 @@ export function subscribePathMode(listener: PathModeListener): () => void {
 /**
  * 通知所有监听器
  */
-function notifyListeners(): void {
+function notifyListeners(serverId = serverStore.getActiveServerId()): void {
+  if (serverId !== serverStore.getActiveServerId()) return
   const mode = getPathMode()
   const style = getEffectivePathStyle()
   _listeners.forEach(listener => listener(mode, style))
@@ -67,65 +69,46 @@ function notifyListeners(): void {
 /**
  * 获取当前路径模式设置
  */
-export function getPathMode(): PathMode {
-  if (_pathMode === null) {
-    try {
-      const saved = serverStorage.get(STORAGE_KEY_PATH_MODE)
-      if (saved === 'unix' || saved === 'windows') {
-        _pathMode = saved
-      } else {
-        _pathMode = 'auto' // 默认自动检测
-      }
-    } catch {
-      _pathMode = 'auto'
-    }
+export function getPathMode(serverId = serverStore.getActiveServerId()): PathMode {
+  let mode = pathModes.get(serverId)
+  if (!mode) {
+    const saved = serverStorage.getFor(STORAGE_KEY_PATH_MODE, serverId)
+    mode = saved === 'unix' || saved === 'windows' ? saved : 'auto'
+    pathModes.set(serverId, mode)
   }
-  return _pathMode
+  return mode
 }
 
 /**
  * 设置路径模式
  */
-export function setPathMode(mode: PathMode): void {
-  _pathMode = mode
-  try {
-    serverStorage.set(STORAGE_KEY_PATH_MODE, mode)
-  } catch {
-    // ignore
-  }
-  notifyListeners()
+export function setPathMode(mode: PathMode, serverId = serverStore.getActiveServerId()): void {
+  pathModes.set(serverId, mode)
+  serverStorage.setFor(STORAGE_KEY_PATH_MODE, mode, serverId)
+  notifyListeners(serverId)
 }
 
 /**
  * 获取检测到的路径风格
  */
-export function getDetectedPathStyle(): DetectedPathStyle {
-  if (_detectedStyle === null) {
-    try {
-      const saved = serverStorage.get(STORAGE_KEY_DETECTED_STYLE)
-      _detectedStyle = saved === 'windows' ? 'windows' : 'unix'
-    } catch {
-      _detectedStyle = 'unix'
-    }
+export function getDetectedPathStyle(serverId = serverStore.getActiveServerId()): DetectedPathStyle {
+  let style = detectedStyles.get(serverId)
+  if (!style) {
+    const saved = serverStorage.getFor(STORAGE_KEY_DETECTED_STYLE, serverId)
+    style = saved === 'windows' ? 'windows' : 'unix'
+    detectedStyles.set(serverId, style)
   }
-  return _detectedStyle
+  return style
 }
 
 /**
  * 设置检测到的路径风格（由自动检测逻辑调用）
  */
-export function setDetectedPathStyle(style: DetectedPathStyle): void {
-  const previousStyle = _detectedStyle
-  _detectedStyle = style
-  try {
-    serverStorage.set(STORAGE_KEY_DETECTED_STYLE, style)
-  } catch {
-    // ignore
-  }
-  // 只在 auto 模式且风格变化时通知
-  if (getPathMode() === 'auto' && previousStyle !== style) {
-    notifyListeners()
-  }
+export function setDetectedPathStyle(style: DetectedPathStyle, serverId = serverStore.getActiveServerId()): void {
+  const previousStyle = detectedStyles.get(serverId)
+  detectedStyles.set(serverId, style)
+  serverStorage.setFor(STORAGE_KEY_DETECTED_STYLE, style, serverId)
+  if (getPathMode(serverId) === 'auto' && previousStyle !== style) notifyListeners(serverId)
 }
 
 /**
@@ -133,10 +116,10 @@ export function setDetectedPathStyle(style: DetectedPathStyle): void {
  * - 如果是 auto 模式，返回检测到的风格
  * - 否则返回用户设置的模式
  */
-export function getEffectivePathStyle(): DetectedPathStyle {
-  const mode = getPathMode()
+export function getEffectivePathStyle(serverId?: string): DetectedPathStyle {
+  const mode = getPathMode(serverId)
   if (mode === 'auto') {
-    return getDetectedPathStyle()
+    return getDetectedPathStyle(serverId)
   }
   return mode
 }
@@ -144,8 +127,8 @@ export function getEffectivePathStyle(): DetectedPathStyle {
 /**
  * 是否为 Windows 路径模式（实际生效的）
  */
-export function isWindowsPathMode(): boolean {
-  return getEffectivePathStyle() === 'windows'
+export function isWindowsPathMode(serverId?: string): boolean {
+  return getEffectivePathStyle(serverId) === 'windows'
 }
 
 /**
@@ -153,7 +136,7 @@ export function isWindowsPathMode(): boolean {
  * - unix 模式: 转正斜杠
  * - windows 模式: 转反斜杠
  */
-export function formatPathForApi(dir: string | undefined | null): string | undefined {
+export function formatPathForApi(dir: string | undefined | null, serverId?: string): string | undefined {
   if (!dir) return undefined
 
   let trimmed = dir.replace(/[/\\]+$/, '') // 移除末尾斜杠
@@ -165,7 +148,7 @@ export function formatPathForApi(dir: string | undefined | null): string | undef
     trimmed = trimmed + '/'
   }
 
-  if (isWindowsPathMode()) {
+  if (isWindowsPathMode(serverId)) {
     return trimmed.replace(/\//g, '\\')
   } else {
     return trimmed.replace(/\\/g, '/')
@@ -198,10 +181,10 @@ export function detectPathStyleFromResponse(path: string | undefined | null): De
  * 自动检测并更新路径风格
  * 调用此函数时传入后端返回的路径，会自动更新检测结果
  */
-export function autoDetectPathStyle(path: string | undefined | null): void {
+export function autoDetectPathStyle(path: string | undefined | null, serverId?: string): void {
   const detected = detectPathStyleFromResponse(path)
   if (detected) {
-    setDetectedPathStyle(detected)
+    setDetectedPathStyle(detected, serverId)
   }
 }
 
@@ -219,9 +202,10 @@ export function autoDetectPathStyle(path: string | undefined | null): void {
  */
 export function normalizeToForwardSlash(dir: string | undefined | null): string {
   if (!dir) return ''
-  return dir
-    .replace(/\\/g, '/') // 反斜杠 → 正斜杠
-    .replace(/\/+$/, '') // 移除末尾斜杠
+  const forward = dir.replace(/\\/g, '/')
+  if (/^\/+$/u.test(forward)) return '/'
+  if (/^[a-zA-Z]:\/+$/u.test(forward)) return forward.slice(0, 3)
+  return forward.replace(/\/+$/, '')
 }
 
 /**

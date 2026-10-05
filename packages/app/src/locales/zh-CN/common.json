@@ -42,6 +42,7 @@
   "running": "运行中",
   "closing": "关闭中...",
   "loadingMore": "加载更多...",
+  "loadMore": "加载更多",
   "truncated": "...（已截断）",
   "closeEsc": "关闭 (Esc)",
   "navigate": "导航",

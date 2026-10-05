@@ -2,6 +2,7 @@ import type { ExtensionUiDialogRequest, ExtensionUiStatePatch, JsonObject } from
 import { extensionUiStore } from '../extensionUiStore'
 import { extensionTuiStore } from '../extensionTuiStore'
 import { activeSessionStore } from '../../store/activeSessionStore'
+import { isScopedSessionKey, sessionKeyToSessionId } from '../../utils/sessionKey'
 
 interface StateEntry {
   state: JsonObject | null
@@ -73,6 +74,18 @@ class PiSessionStateStore {
     this.notify()
   }
 
+  clearServer(serverId: string): void {
+    for (const id of this.bySessionId.keys()) {
+      if (id.startsWith(`${serverId}::`)) {
+        this.bySessionId.delete(id)
+        extensionUiStore.remove(id)
+        extensionTuiStore.replacePanels(id, [])
+        activeSessionStore.removeSession(id)
+      }
+    }
+    this.notify()
+  }
+
   clearAll(): void {
     this.bySessionId.clear()
     this.notify()
@@ -92,11 +105,11 @@ class PiSessionStateStore {
       for (const raw of pending) {
         const request = raw as Partial<ExtensionUiDialogRequest> | null
         if (!request || typeof request !== 'object' || typeof request.requestId !== 'string') continue
-        if (typeof request.sessionId === 'string' && request.sessionId !== sessionId) continue
+        if (typeof request.sessionId === 'string' && request.sessionId !== sessionKeyToSessionId(sessionId)) continue
         if (!request.kind || !['select', 'confirm', 'input', 'editor'].includes(request.kind)) continue
-        extensionUiStore.requestOpened(request as ExtensionUiDialogRequest)
+        extensionUiStore.requestOpened({ ...request, sessionId } as ExtensionUiDialogRequest)
         activeSessionStore.addPendingRequest(
-          request.requestId,
+          isScopedSessionKey(sessionId) ? `${sessionId}:${request.requestId}` : request.requestId,
           sessionId,
           request.kind === 'confirm' ? 'permission' : 'question',
           request.title,

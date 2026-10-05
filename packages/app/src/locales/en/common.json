@@ -42,6 +42,7 @@
   "running": "Running",
   "closing": "Closing...",
   "loadingMore": "Loading more...",
+  "loadMore": "Load more",
   "truncated": "... (truncated)",
   "closeEsc": "Close (Esc)",
   "navigate": "navigate",

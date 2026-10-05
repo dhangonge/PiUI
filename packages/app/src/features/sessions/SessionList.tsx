@@ -12,6 +12,7 @@ import type { UiSession } from '../../types/session'
 import { startInternalDrag } from '../../lib/internalDragCore'
 import { pinnedSessionsStore, type PinnedSessionEntry } from '../../store/pinnedSessionsStore'
 import { usePiCapabilities } from '../../pi/capabilities'
+import { makeSessionKey, splitSessionKey } from '../../utils/sessionKey'
 
 interface SessionListProps {
   sessions: UiSession[]
@@ -429,11 +430,14 @@ export function SessionListItem({
   const itemPaddingClass = isCompact ? 'pl-[6px] pr-3 py-2' : 'px-3 py-2.5'
   const pinnedEntries = useSyncExternalStore(
     pinnedSessionsStore.subscribe,
-    pinnedSessionsStore.getSnapshot,
-    pinnedSessionsStore.getSnapshot,
+    pinnedSessionsStore.getScopedSnapshot,
+    pinnedSessionsStore.getScopedSnapshot,
   )
   const isPinned = useMemo(
-    () => pinnedEntries.some(entry => entry.sessionId === session.id),
+    () => {
+      const target = splitSessionKey(session.id)
+      return pinnedEntries.some(entry => entry.sessionId === makeSessionKey(target.serverId, target.sessionId))
+    },
     [pinnedEntries, session.id],
   )
   const sessionTitleDetails = [

@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react'
 import type { SessionListParams, UiSession } from '../types/session'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
-import { autoDetectPathStyle, isSameDirectory } from '../utils'
+import { autoDetectPathStyle, isSameDirectory, normalizeToForwardSlash } from '../utils'
+import { serverStore } from '../store/serverStore'
+import { getServerRevision } from '../utils/sessionKey'
 import { createPiSession, loadPiSessions, loadPiSessionsForCwd, deletePiSession } from '../pi/controllers/index.js'
 import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } from '../pi/nativeSessionListModel'
 import { trackPiSession } from '../pi/piSessionIndex'
@@ -35,6 +37,7 @@ interface UseSessionsOptions {
   directory?: string
   /** 延迟启用，用于懒加载 */
   enabled?: boolean
+  serverId?: string
 }
 
 interface UseSessionsResult {
@@ -61,10 +64,11 @@ interface UseSessionsResult {
 }
 
 export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult {
-  const { pageSize = 20, initialSearch = '', directory, enabled = true } = options
+  const { pageSize = 20, initialSearch = '', directory, enabled = true, serverId } = options
 
   // 标准化 directory 路径 (移除末尾斜杠，统一正斜杠)
-  const normalizedDirectory = directory ? directory.replace(/\\/g, '/').replace(/\/$/, '') : undefined
+  const normalizedDirectory = normalizeToForwardSlash(directory) || undefined
+  const connectionRevision = useSyncExternalStore(serverStore.subscribe.bind(serverStore), () => serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration())
 
   const [sessions, setSessions] = useState<UiSession[]>([])
   const [isLoading, setIsLoading] = useState(enabled)
@@ -134,8 +138,8 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
         for (let retryAttempt = 0; ; retryAttempt++) {
           try {
             const nativeSessions = normalizedDirectory
-              ? await loadPiSessionsForCwd(normalizedDirectory)
-              : await loadPiSessions()
+              ? await (serverId ? loadPiSessionsForCwd(normalizedDirectory, retryAbort.signal, serverId) : loadPiSessionsForCwd(normalizedDirectory))
+              : await (serverId ? loadPiSessions(retryAbort.signal, serverId) : loadPiSessions())
             const mapped = nativeSessions
               .map(piSessionInfoToUiSession)
               .filter((session): session is UiSession => session !== null)
@@ -151,7 +155,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
             if (requestId !== requestIdRef.current) return
 
             if (data.length > 0 && data[0].directory) {
-              autoDetectPathStyle(data[0].directory)
+              autoDetectPathStyle(data[0].directory, serverId)
             }
 
             setSessions(data)
@@ -183,7 +187,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
         }
       }
     },
-    [matchesDirectory, enabled, normalizedDirectory],
+    [matchesDirectory, enabled, normalizedDirectory, serverId],
   )
 
   useEffect(() => {
@@ -222,7 +226,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
       // Invalidate before the next debounce, not only when the next fetch starts.
       cancelPendingRequest()
     }
-  }, [search, fetchSessions, enabled, pageSize, cancelPendingRequest])
+  }, [search, fetchSessions, enabled, pageSize, cancelPendingRequest, connectionRevision])
 
   useEffect(() => {
     if (!enabled) return
@@ -262,9 +266,9 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   const create = useCallback(
     async (title?: string) => {
       // 全局（未选目录）时落到服务器默认工作区（桌面安装目录）
-      const directory = normalizedDirectory || (await resolveWorkspacePath())
+      const directory = normalizedDirectory || (await resolveWorkspacePath(undefined, serverId))
       if (!directory) throw new Error('A project directory is required')
-      const created = await createPiSession(directory)
+      const created = await createPiSession(directory, undefined, serverId)
       if (!created.sessionFile) throw new Error('Pi did not return a session file')
       const now = Date.now()
       const newSession: UiSession = {
@@ -292,7 +296,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
 
       return newSession
     },
-    [normalizedDirectory],
+    [normalizedDirectory, serverId],
   )
 
   // 删除会话
@@ -300,12 +304,12 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
     async (sessionId: string) => {
       const session = sessions.find(item => item.id === sessionId)
       if (!session?.path || !session.directory) throw new Error('Pi session file is unavailable')
-      await deletePiSession(session.directory, session.path)
+      await deletePiSession(session.directory, session.path, undefined, serverId)
       pinnedSessionsStore.unpin(sessionId)
       setSessions(prev => prev.filter(s => s.id !== sessionId))
       window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
     },
-    [sessions],
+    [sessions, serverId],
   )
 
   const patchLocalSession = useCallback((sessionId: string, patch: Partial<UiSession>) => {

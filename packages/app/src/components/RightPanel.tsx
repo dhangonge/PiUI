@@ -1,14 +1,11 @@
 import { lazy, memo, Suspense, useCallback, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLayoutStore, layoutStore, type PanelTab } from '../store/layoutStore'
-import { notificationStore } from '../store/notificationStore'
 import { PanelContainer } from './PanelContainer'
 import { ResizablePanel } from './ui/ResizablePanel'
 import { useChatViewport } from '../features/chat/chatViewport'
-import { createHostTerminal, listHostTerminals, removeHostTerminal, updateHostTerminal } from '../pi/transport/index.js'
 import { useTerminalSessionRestore } from '../hooks/useTerminalSessionRestore'
-import { resolveWorkspacePath } from '../pi/workspaces'
-import { uiErrorHandler } from '../utils'
+import { useTerminalActions } from '../hooks/useTerminalActions'
 
 const SessionChangesPanel = lazy(() =>
   import('./SessionChangesPanel').then(module => ({
@@ -56,68 +53,8 @@ export const RightPanel = memo(function RightPanel({
   const { t } = useTranslation(['components', 'common'])
   const { rightPanelOpen, rightPanelWidth } = useLayoutStore()
   const { interaction, layout } = useChatViewport()
-  const { isRestoring, normalizedDirectory, workspacePath } = useTerminalSessionRestore(directory)
-
-  const handleNewTerminal = useCallback(async () => {
-    try {
-      const workspacePath = await resolveWorkspacePath(normalizedDirectory)
-      if (!workspacePath) throw new Error('no workspace available')
-      const terminal = await createHostTerminal(workspacePath)
-      layoutStore.addTerminalTab(
-        {
-          id: terminal.id,
-          title: terminal.title,
-          shell: terminal.shell,
-          cwd: terminal.cwd,
-          status: 'connecting'
-        },
-        true,
-        'right'
-      )
-    } catch (error) {
-      uiErrorHandler('create terminal', error)
-      notificationStore.push(
-        'error',
-        t('terminal.createTerminalFailed'),
-        error instanceof Error ? error.message : String(error),
-        ''
-      )
-    }
-  }, [normalizedDirectory, t])
-
-  const handleCloseTerminal = useCallback(
-    async (terminalId: string) => {
-      if (!normalizedDirectory) return
-      try {
-        const workspacePath = await resolveWorkspacePath(normalizedDirectory)
-        if (!workspacePath) return
-        await removeHostTerminal(workspacePath, terminalId)
-      } catch (error) {
-        uiErrorHandler('close terminal', error)
-        // 服务端可能仍持有该终端，重新拉取列表把 tab 恢复回来
-        try {
-          const workspacePath = await resolveWorkspacePath(normalizedDirectory)
-          if (!workspacePath) return
-          const result = await listHostTerminals(workspacePath)
-          layoutStore.syncTerminalSessions(workspacePath, result.terminals)
-        } catch {
-          // 列表也失败时保持现状，tab 由下次恢复流程修正
-        }
-      }
-    },
-    [normalizedDirectory]
-  )
-
-  const handleRenameTerminal = useCallback(
-    async (terminalId: string, title: string) => {
-      if (!normalizedDirectory) return
-      const workspacePath = await resolveWorkspacePath(normalizedDirectory)
-      if (!workspacePath) return
-      const terminal = await updateHostTerminal(workspacePath, terminalId, { title })
-      layoutStore.updateTerminalCustomTitle(terminalId, terminal.title)
-    },
-    [normalizedDirectory]
-  )
+  const { isRestoring, normalizedDirectory, workspacePath, serverId, connectionKey } = useTerminalSessionRestore(directory)
+  const { handleNewTerminal, handleCloseTerminal, handleRenameTerminal } = useTerminalActions(normalizedDirectory, serverId, 'right')
 
   // 追踪面板 resize 状态
   const [isPanelResizing, setIsPanelResizing] = useState(false)
@@ -154,7 +91,7 @@ export const RightPanel = memo(function RightPanel({
           {/* Keep files mounted so expanded folders and previews survive tab switches. */}
           <div className={activeTab.type === 'files' ? 'h-full' : 'hidden'}>
             <Suspense fallback={<PanelFallback />}>
-              <FilesContent activeTab={activeTab} directory={normalizedDirectory} isPanelResizing={isPanelResizing} sessionId={sessionId} />
+              <FilesContent key={connectionKey} activeTab={activeTab} directory={normalizedDirectory} isPanelResizing={isPanelResizing} sessionId={sessionId} />
             </Suspense>
           </div>
 
@@ -162,6 +99,7 @@ export const RightPanel = memo(function RightPanel({
             <div className={activeTab.type === 'changes' ? 'h-full' : 'hidden'}>
               <Suspense fallback={<PanelFallback />}>
                 <ChangesContent
+                  key={connectionKey}
                   activeTab={activeTab}
                   directory={normalizedDirectory}
                   sessionId={sessionId}
@@ -219,7 +157,7 @@ export const RightPanel = memo(function RightPanel({
         </>
       )
     },
-    [normalizedDirectory, workspacePath, isRestoring, sessionId, isPanelResizing, t, onNavigateSession, onNewChat]
+    [normalizedDirectory, workspacePath, connectionKey, isRestoring, sessionId, isPanelResizing, t, onNavigateSession, onNewChat]
   )
 
   if (inline) {
@@ -274,7 +212,7 @@ const TerminalContent = memo(function TerminalContent({ activeTab, workspacePath
   return (
     <>
       {tabs.map(tab => (
-        <Terminal key={tab.id} terminalId={tab.terminalId ?? tab.id} workspacePath={workspacePath} isActive={tab.id === activeTab.id} />
+        <Terminal key={tab.id} terminalId={tab.terminalId ?? tab.id} workspacePath={tab.workspacePath ?? workspacePath} isActive={tab.id === activeTab.id} />
       ))}
     </>
   )

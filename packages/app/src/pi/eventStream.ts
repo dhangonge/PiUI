@@ -15,8 +15,11 @@ import type { AgentMessage, AgentSessionEvent, PiLiveMessage } from './domain/in
 import type { ProviderAuthEvent, SessionsActivitySnapshot, SessionActivityStatus } from '@piui/protocol'
 import { getApiBase, getPiAuthToken } from './httpClient.js'
 import { openPiSocket, PI_SOCKET_CLOSED, PI_SOCKET_CLOSING, PI_SOCKET_OPEN, type PiSocket } from './piSocket'
-import { piBranchStore, piCommandStore, piSessionStateStore } from './state/index.js'
+import { piBranchStore, getPiCommandStore, piSessionStateStore } from './state/index.js'
+import { isScopedSessionKey, makeSessionKey, splitSessionKey, getServerRevision, scopeSessionResult } from '../utils/sessionKey'
 import { extensionUiStore } from './extensionUiStore'
+import { getPiModelsStore } from './state/piModelsStore'
+import { piSessionInfoStore } from './piSessionInfoStore'
 import { extensionTuiStore } from './extensionTuiStore'
 import { commandFeedbackStore } from './commandFeedbackStore'
 import { notificationStore } from '../store/notificationStore'
@@ -87,9 +90,30 @@ type SessionsUpdatedPayload = {
  * - resync_required: full reload for that stream
  * - sessions.updated: reload global session list
  */
-class PiEventStream {
-  constructor() {
-    queueMicrotask(() => this.ensureManagementWatch())
+export class PiEventStream {
+  private readonly serverId?: string
+
+  constructor(serverId?: string) {
+    this.serverId = serverId
+    if (!serverId) queueMicrotask(() => this.ensureManagementWatch())
+  }
+
+  private sessionKey(id: string): string {
+    return this.serverId ? makeSessionKey(this.serverId, id) : id
+  }
+
+  private get commandStore() { return getPiCommandStore(this.serverId) }
+  private providers(): string[] { return this.serverId ? [] : getTrackedManagementProviders() }
+  private serverRefs = 0
+
+  connectServer(): void {
+    this.serverRefs += 1
+    this.ensureSocket()
+  }
+
+  disconnectServer(): void {
+    this.serverRefs = Math.max(0, this.serverRefs - 1)
+    if (!this.hasSubscriptions()) this.closeSocket()
   }
 
   private ws: PiSocket | null = null
@@ -103,6 +127,11 @@ class PiEventStream {
 
   /** Subscribe a session stream (reference counted). */
   connect(sessionId: string): void {
+    if (!this.serverId && isScopedSessionKey(sessionId)) {
+      const target = splitSessionKey(sessionId)
+      getPiEventStream(target.serverId).connect(target.sessionId)
+      return
+    }
     this.refCounts.set(sessionId, (this.refCounts.get(sessionId) ?? 0) + 1)
     if (this.refCounts.get(sessionId) === 1) {
       this.ensureSocket()
@@ -112,12 +141,17 @@ class PiEventStream {
 
   /** Unsubscribe a session stream; closes the socket when nothing remains. */
   disconnect(sessionId: string): void {
+    if (!this.serverId && isScopedSessionKey(sessionId)) {
+      const target = splitSessionKey(sessionId)
+      streams.get(target.serverId)?.stream.disconnect(target.sessionId)
+      return
+    }
     const count = this.refCounts.get(sessionId) ?? 0
     if (count <= 1) {
       this.refCounts.delete(sessionId)
       this.cursors.delete(eventStreamKey({ kind: 'session', id: sessionId }))
-      this.clearRefreshTimers(sessionId)
-      liveToolOutputStore.clearSession(sessionId)
+      this.clearRefreshTimers(this.sessionKey(sessionId))
+      liveToolOutputStore.clearSession(this.sessionKey(sessionId))
     } else {
       this.refCounts.set(sessionId, count - 1)
       return
@@ -167,12 +201,25 @@ class PiEventStream {
 
   /** Drop everything (server switch etc.). */
   disconnectAll(): void {
-    for (const sessionId of this.refCounts.keys()) this.clearRefreshTimers(sessionId)
+    for (const sessionId of this.refCounts.keys()) this.clearRefreshTimers(this.sessionKey(sessionId))
+    this.serverRefs = 0
     this.refCounts.clear()
     this.workspaceRefCounts.clear()
     this.cursors.clear()
-    piCommandStore.clearAll()
+    this.commandStore.clearAll()
     this.closeSocket()
+  }
+
+  invalidate(): void {
+    const ids = new Set([...this.knownActiveSessions, ...Object.keys(extensionUiStore.getSnapshot().sessions).filter(id => this.serverId && id.startsWith(`${this.serverId}::`)), ...[...this.refCounts.keys()].map(id => this.sessionKey(id))])
+    this.disconnectAll()
+    this.knownActiveSessions.clear()
+    for (const id of ids) {
+      activeSessionStore.removeSession(id)
+      extensionUiStore.remove(id)
+      extensionTuiStore.remove(id)
+      liveToolOutputStore.clearSession(id)
+    }
   }
 
   /** Replace every subscription when the active backend changes. */
@@ -216,8 +263,8 @@ class PiEventStream {
   }
 
   private openSocket(): void {
-    const url = new URL(wsEventsUrl())
-    const token = getPiAuthToken()
+    const url = new URL(wsEventsUrl(this.serverId))
+    const token = getPiAuthToken(this.serverId)
     if (token) url.searchParams.set('token', token)
 
     const ws = openPiSocket(url.toString())
@@ -226,7 +273,7 @@ class PiEventStream {
     ws.onopen = () => {
       if (this.ws !== ws) return
       this.sendSubscribe()
-      notifyReconnected()
+      notifyReconnected(this.serverId)
       this.pingTimer = setInterval(() => {
         this.send({ type: 'ping', protocolVersion: PROTOCOL_VERSION })
       }, PING_INTERVAL_MS)
@@ -274,7 +321,7 @@ class PiEventStream {
       const cursor = this.cursors.get(key)
       if (cursor) cursors[key] = cursor
     }
-    for (const providerId of getTrackedManagementProviders()) {
+    for (const providerId of this.providers()) {
       const stream = { kind: 'provider' as const, id: providerId }
       streams.push(stream)
       const cursor = this.cursors.get(eventStreamKey(stream))
@@ -288,7 +335,7 @@ class PiEventStream {
     // 上下文用量永远不恢复。每次订阅建立都主动 pull 一次（有防抖合并），
     // 让打开/刷新会话时立即拿到正在工作的 runtime 的真实状态。
     for (const sessionId of this.refCounts.keys()) {
-      this.scheduleStateRefresh(sessionId)
+      this.scheduleStateRefresh(this.sessionKey(sessionId))
     }
   }
 
@@ -322,8 +369,15 @@ class PiEventStream {
   }
 
   private handleEvent(envelope: EventEnvelope): void {
-    const sessionId = envelope.stream.kind === 'session' ? envelope.stream.id : null
+    const sessionId = envelope.stream.kind === 'session' ? this.sessionKey(envelope.stream.id) : null
     this.cursors.set(eventStreamKey(envelope.stream), envelope.cursor)
+    if (!this.serverId && streams.has(serverStore.getActiveServerId()) &&
+      ['sessions.updated', 'sessions.activity'].includes(envelope.channel)) return
+    // Management and workspace panels are bound to the focused server. Never
+    // feed another endpoint's auth, files or terminals into those global stores.
+    if (this.serverId && this.serverId !== serverStore.getActiveServerId() &&
+      ['provider.auth', 'packages.progress', 'resources.updated', 'workspace.files', 'workspace.git',
+        'terminal.created', 'terminal.updated', 'terminal.exited', 'terminal.deleted'].includes(envelope.channel)) return
     switch (envelope.channel) {
       case 'pi.event':
         if (sessionId) this.handlePiEvent(sessionId, envelope.payload as unknown as PiEventPayload)
@@ -345,8 +399,9 @@ class PiEventStream {
         break
       case 'command.updated':
         if (isCommandRecord(envelope.payload)) {
-          piCommandStore.upsert(envelope.payload)
-          window.dispatchEvent(new CustomEvent('piui:command-updated', { detail: envelope.payload }))
+          this.commandStore.upsert(envelope.payload)
+          const detail = scopeSessionResult<CommandRecord>(envelope.payload, this.serverId)
+          window.dispatchEvent(new CustomEvent('piui:command-updated', { detail: this.serverId ? { ...detail, id: makeSessionKey(this.serverId, detail.id) } : detail }))
         }
         break
       case 'extension.ui':
@@ -373,7 +428,7 @@ class PiEventStream {
         const payload = envelope.payload as { sessionId?: string } | undefined
         if (sessionId || payload?.sessionId) {
           window.dispatchEvent(new CustomEvent('piui:registry-updated', {
-            detail: { sessionId: sessionId ?? payload?.sessionId },
+            detail: { sessionId: sessionId ?? (payload?.sessionId ? this.sessionKey(payload.sessionId) : undefined) },
           }))
         }
         break
@@ -398,6 +453,7 @@ class PiEventStream {
   }
 
   private handleSessionsUpdated(payload: SessionsUpdatedPayload | undefined): void {
+    payload = scopeSessionResult(payload, this.serverId)
     if (payload?.replaced && payload.sourceSessionId && payload.targetSessionId) {
       if (payload.reason === 'runtime-reuse') {
         // runtime 复用（ensureAttached 偷同目录空闲 runtime）：源 session 的
@@ -411,12 +467,11 @@ class PiEventStream {
       // different session id. Drop the old session's cursors and keyed
       // data; panes re-subscribe and reload under the new id when they
       // follow piui:session-replaced (their connect effect owns ref counts).
-      this.cursors.delete(eventStreamKey({ kind: 'session', id: payload.sourceSessionId }))
-      this.branchRefreshTimers.delete(payload.sourceSessionId)
-      this.stateRefreshTimers.delete(payload.sourceSessionId)
+      this.cursors.delete(eventStreamKey({ kind: 'session', id: splitSessionKey(payload.sourceSessionId).sessionId }))
+      this.clearRefreshTimers(payload.sourceSessionId)
       piBranchStore.clear(payload.sourceSessionId)
       piSessionStateStore.clear(payload.sourceSessionId)
-      piCommandStore.clearSession(payload.sourceSessionId)
+      this.commandStore.clearSession(splitSessionKey(payload.sourceSessionId).sessionId)
       window.dispatchEvent(new CustomEvent('piui:session-replaced', { detail: payload }))
     }
     // 事件驱动刷新：SessionContext/useSessions 订阅 piui:sessions-changed 会
@@ -427,10 +482,10 @@ class PiEventStream {
   private handleExtensionUiEvent(sessionId: string, event: PiExtensionUiEvent): void {
     switch (event.type) {
       case 'requested':
-        extensionUiStore.requestOpened(event.request)
+        extensionUiStore.requestOpened({ ...event.request, sessionId })
         // Surface as pending action on the sidebar (awaiting permission/answer)
         activeSessionStore.addPendingRequest(
-          event.request.requestId,
+          isScopedSessionKey(sessionId) ? `${sessionId}:${event.request.requestId}` : event.request.requestId,
           sessionId,
           event.request.kind === 'confirm' ? 'permission' : 'question',
           event.request.title,
@@ -438,7 +493,7 @@ class PiEventStream {
         break
       case 'settled':
         extensionUiStore.requestSettled(sessionId, event.requestId)
-        activeSessionStore.resolvePendingRequest(event.requestId)
+        activeSessionStore.resolvePendingRequest(isScopedSessionKey(sessionId) ? `${sessionId}:${event.requestId}` : event.requestId)
         break
       case 'state':
         extensionUiStore.statePatched(sessionId, event.patch)
@@ -470,13 +525,13 @@ class PiEventStream {
         break
       }
       case 'tuiAttach':
-        extensionTuiStore.attach(event.sessionId, event.attach)
+        extensionTuiStore.attach(sessionId, event.attach)
         break
       case 'tuiDetach':
-        extensionTuiStore.detach(event.sessionId, event.key)
+        extensionTuiStore.detach(sessionId, event.key)
         break
       case 'tuiFrame':
-        extensionTuiStore.frame(event.sessionId, event.data)
+        extensionTuiStore.frame(sessionId, event.data)
         break
     }
   }
@@ -486,7 +541,7 @@ class PiEventStream {
    * Feeds activeSessionStore so the sidebar shows working/retrying dots.
    */
   private handleActivitySnapshot(snapshot: SessionsActivitySnapshot): void {
-    const active = snapshot?.sessions ?? {}
+    const active = Object.fromEntries(Object.entries(snapshot?.sessions ?? {}).map(([id, status]) => [this.sessionKey(id), status]))
     for (const [sessionId, status] of Object.entries(active)) {
       if (!this.knownActiveSessions.has(sessionId)) notifySessionStarted(sessionId)
       activeSessionStore.updateStatus(sessionId, activityToSessionStatus(status))
@@ -517,7 +572,7 @@ class PiEventStream {
         break
       case 'tool_execution_end':
         if ('toolCallId' in event && typeof event.toolCallId === 'string') {
-          liveToolOutputStore.delete(event.toolCallId)
+          liveToolOutputStore.delete(event.toolCallId, sessionId)
         }
         this.scheduleBranchRefresh(sessionId)
         break
@@ -595,9 +650,9 @@ class PiEventStream {
     if (!stream) return
     if (cursor) this.cursors.set(key, cursor)
     if (stream.kind === 'session') {
-      void loadPiSessionData(stream.id).catch(() => undefined)
-      // resync 时同样主动拉一次运行时 state（branch 与 state 一起恢复）
-      this.scheduleStateRefresh(stream.id)
+      void loadPiSessionData(this.sessionKey(stream.id)).catch(() => undefined)
+      // Restore branch and state together after a replay gap.
+      this.scheduleStateRefresh(this.sessionKey(stream.id))
     } else if (stream.kind === 'server') {
       window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
     } else if (stream.kind === 'provider') {
@@ -638,12 +693,36 @@ class PiEventStream {
   }
 
   private hasSubscriptions(): boolean {
-    return this.refCounts.size > 0 || this.workspaceRefCounts.size > 0 || getTrackedManagementProviders().length > 0
+    return this.serverRefs > 0 || this.refCounts.size > 0 || this.workspaceRefCounts.size > 0 || this.providers().length > 0
   }
 }
 
 export const piEventStream = new PiEventStream()
+const streams = new Map<string, { stream: PiEventStream; revision: number }>()
+
+export function getPiEventStream(serverId: string): PiEventStream {
+  let entry = streams.get(serverId)
+  if (!entry) {
+    entry = { stream: new PiEventStream(serverId), revision: getServerRevision(serverId) }
+    streams.set(serverId, entry)
+  }
+  return entry.stream
+}
+
 serverStore.onServerChange(() => piEventStream.handleServerChange())
+serverStore.subscribe(() => {
+  for (const [id, entry] of streams) {
+    const revision = getServerRevision(id)
+    if (revision === entry.revision) continue
+    entry.revision = revision
+    entry.stream.invalidate()
+    piBranchStore.clearServer(id)
+    piSessionStateStore.clearServer(id)
+    getPiModelsStore(id).clear()
+    piSessionInfoStore.replaceForServer(id, [])
+    window.dispatchEvent(new CustomEvent('piui:server-invalidated', { detail: { serverId: id } }))
+  }
+})
 
 function isCommandRecord(value: unknown): value is CommandRecord {
   if (!isJsonObject(value)) return false
@@ -665,8 +744,8 @@ function activityToSessionStatus(status: SessionActivityStatus): SessionStatus {
   return { type: 'busy' }
 }
 
-function wsEventsUrl(): string {
-  const base = getApiBase()
+function wsEventsUrl(serverId?: string): string {
+  const base = getApiBase(serverId)
   if (base) return base.replace(/^http/, 'ws') + '/api/v1/events'
   const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
   return `${protocol}://${location.host}/api/v1/events`

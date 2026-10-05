@@ -1,4 +1,5 @@
 import type { UiSession } from '../types/session'
+import { sessionKeyToServerId } from '../utils/sessionKey'
 import type { SessionInfo } from '@earendil-works/pi-coding-agent'
 
 export function piSessionInfoToUiSession(item: SessionInfo): UiSession | null {
@@ -36,11 +37,11 @@ export function filterPiSessionList(sessions: UiSession[], search: string): UiSe
 export function linkPiSessionForks(sessions: UiSession[]): UiSession[] {
   const sessionByPath = new Map<string, UiSession>()
   for (const session of sessions) {
-    if (session.path) sessionByPath.set(pathKey(session.path), session)
+    if (session.path) sessionByPath.set(JSON.stringify([sessionKeyToServerId(session.id), pathKey(session.path)]), session)
   }
   return sessions.map(session => {
     if (!session.parentSessionPath) return session
-    const parent = sessionByPath.get(pathKey(session.parentSessionPath))
+    const parent = sessionByPath.get(JSON.stringify([sessionKeyToServerId(session.id), pathKey(session.parentSessionPath)]))
     if (!parent || parent.id === session.id) return session
     return {
       ...session,

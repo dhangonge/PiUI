@@ -104,7 +104,7 @@ describe('useSessions', () => {
       await result.current.remove('session-1')
     })
 
-    expect(deletePiSessionMock).toHaveBeenCalledWith('/workspace/demo', '/sessions/session-1.jsonl')
+    expect(deletePiSessionMock).toHaveBeenCalledWith('/workspace/demo', '/sessions/session-1.jsonl', undefined, undefined)
   })
 
   it('requests sessions with the scoped cwd', async () => {
