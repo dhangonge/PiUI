@@ -50,11 +50,21 @@ test("one server provides the web app and authenticated API on the same port", a
 
     const unauthorized = await fetch(`http://127.0.0.1:${port}/api/v1/host/health`)
     assert.equal(unauthorized.status, 401)
+    await unauthorized.arrayBuffer()
     const health = await fetch(`http://127.0.0.1:${port}/api/v1/host/health`, {
       headers: { authorization: "Bearer test-token" },
     })
     assert.equal(health.status, 200)
     assert.equal((await health.json() as { service?: string }).service, "piui-server")
+
+    // Finish the background catalog handshake before testing graceful shutdown.
+    const catalog = await fetch(`http://127.0.0.1:${port}/api/v1/pi/commands/session.listAll`, {
+      method: "POST",
+      headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+      body: "{}",
+    })
+    assert.equal(catalog.status, 200)
+    await catalog.arrayBuffer()
   } finally {
     await running.stop()
   }

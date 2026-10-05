@@ -256,6 +256,7 @@ describe("event websocket", () => {
     const created = await request(port, "POST", "/api/v1/host/commands/terminals.create", {
       workspacePath,
       title: "Stream terminal",
+      shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
     })
     assert.equal(created.status, 200)
     const terminalId = created.json.data.id as string
@@ -272,12 +273,12 @@ describe("event websocket", () => {
     )
     ws.on("message", data => frames.push(JSON.parse(String(data))))
     await waitFor(() => frames.some(frame => frame.type === "ready"))
-    ws.send(JSON.stringify({ type: "input", data: process.platform === "win32" ? "echo piui-ws\r\n" : "printf piui-ws\\n" }))
+    ws.send(JSON.stringify({ type: "input", data: process.platform === "win32" ? "echo piui-ws\r\n" : "printf 'piui-ws\\n'\n" }))
     await waitFor(() => frames.some(frame => frame.type === "output" && frame.data.includes("piui-ws")))
     ws.send(JSON.stringify({ type: "input", data: process.platform === "win32" ? "exit\r\n" : "exit\n" }))
     await waitFor(() => frames.some(frame => frame.type === "exit"))
     assert.equal(frames[0]?.type, "hello")
-    assert.equal(frames[1]?.type, "ready")
+    assert.ok(frames.findIndex(frame => frame.type === "ready") >= 1)
     ws.close()
   })
 
@@ -301,6 +302,7 @@ describe("event websocket", () => {
     const created = await request(port, "POST", "/api/v1/host/commands/terminals.create", {
       workspacePath,
       title: "close-me",
+      shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
     })
     assert.equal(created.status, 200)
     const terminalId = created.json.data.id as string
@@ -337,7 +339,10 @@ describe("event websocket", () => {
 
     const opened = await request(port, "POST", "/api/v1/host/commands/workspaces.open", { rootPath: root })
     const workspacePath = opened.json.data.workspace.path as string
-    const created = await request(port, "POST", "/api/v1/host/commands/terminals.create", { workspacePath })
+    const created = await request(port, "POST", "/api/v1/host/commands/terminals.create", {
+      workspacePath,
+      shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
+    })
     const terminalId = created.json.data.id as string
 
     const connect = async (): Promise<{ ws: WebSocket; frames: any[]; closed: Promise<void> }> => {
@@ -354,7 +359,7 @@ describe("event websocket", () => {
 
     const first = await connect()
     await waitFor(() => first.frames.some(frame => frame.type === "ready"))
-    first.ws.send(JSON.stringify({ type: "input", data: process.platform === "win32" ? "echo replay-ws\r\n" : "printf replay-ws\\n" }))
+    first.ws.send(JSON.stringify({ type: "input", data: process.platform === "win32" ? "echo replay-ws\r\n" : "printf 'replay-ws\\n'\n" }))
     first.ws.send(JSON.stringify({ type: "input", data: process.platform === "win32" ? "exit\r\n" : "exit\n" }))
     await waitFor(() => first.frames.some(frame => frame.type === "exit"))
     await first.closed

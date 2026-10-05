@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { clearMermaidRenderCache } from './mermaidRenderCache'
@@ -1071,12 +1071,14 @@ $$`
     const resizeId = JSON.parse(srcDoc.match(/const id=("[^"]+")/)?.[1] ?? 'null') as string | null
     expect(resizeId).not.toBeNull()
 
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        data: { type: 'piui-html-interaction', id: resizeId },
-        source: (frame as HTMLIFrameElement).contentWindow,
-      }),
-    )
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'piui-html-interaction', id: resizeId },
+          source: (frame as HTMLIFrameElement).contentWindow,
+        }),
+      )
+    })
     await waitFor(() => expect(sourceButton.className).toContain('[@media(hover:none)]:opacity-100'))
 
     fireEvent.pointerUp(frame, { pointerType: 'touch' })

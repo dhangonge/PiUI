@@ -18,7 +18,10 @@ it("ends a stalled HTTP request at the shutdown deadline without forcing exit", 
     socket.once("connect", resolve)
     socket.once("error", reject)
   })
+  const requestStarted = new Promise<void>(resolve => app.server.once("request", () => resolve()))
+  socket.resume()
   socket.write("POST /api/v1/host/commands/workspaces.open HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 100\r\n\r\n{")
+  await requestStarted
 
   let timedOut = false
   let forcedExit = false

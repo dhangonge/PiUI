@@ -72,6 +72,7 @@ import { SessionNavigationContext, type SessionNavigationContextValue } from '..
 import { paneLayoutStore } from '../../store/paneLayoutStore'
 import { notificationStore } from '../../store/notificationStore'
 import { useServerStore } from '../../hooks/useServerStore'
+import { serverStore } from '../../store/serverStore'
 import { sessionKeyToServerId } from '../../utils/sessionKey'
 import { useManagementEvents } from '../../pi/managementEventStore'
 import { getInternalDragSnapshot, subscribeInternalDrag, subscribeInternalDrop } from '../../lib/internalDragCore'
@@ -1428,8 +1429,9 @@ export function PiChatPane({
   // ============================================
   const splitPaneEnabled = displayMode === 'split' || paneCount > 1 || Boolean(onSplitPane)
   const handlePaneFocus = useCallback(() => {
+    if (boundServerId && serverStore.getActiveServerId() !== boundServerId) serverStore.setActiveServer(boundServerId)
     paneLayoutStore.focusPane(paneId)
-  }, [paneId])
+  }, [paneId, boundServerId])
 
   const overlayRef = useRef<PaneDropOverlayHandle>(null)
   const paneRootRef = useRef<HTMLDivElement>(null)
@@ -1571,9 +1573,9 @@ export function PiChatPane({
     () => ({
       navigateToSession: (sid, dir) => navigatePaneToSession?.(paneId, sid, dir),
       currentSessionId: sessionId,
-      currentDirectory: currentDirectory ?? undefined,
+      currentDirectory: inputRootPath,
     }),
-    [navigatePaneToSession, paneId, sessionId, currentDirectory],
+    [navigatePaneToSession, paneId, sessionId, inputRootPath],
   )
 
   const chatContent = (
@@ -1747,7 +1749,9 @@ export function PiChatPane({
               }`
             : 'relative h-full flex flex-col overflow-hidden bg-bg-100'
         }
-        onClick={handlePaneFocus}
+        onPointerDownCapture={handlePaneFocus}
+        onFocusCapture={handlePaneFocus}
+        onClickCapture={handlePaneFocus}
       >
         {showCompactShell && (
           <PaneHeader
