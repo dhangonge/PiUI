@@ -42,6 +42,8 @@ jobs:
           java-version: 17
 
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
 
       - name: Drop Windows-only patch
         run: rm -f patches/@lydell+node-pty-win32-x64+*.patch

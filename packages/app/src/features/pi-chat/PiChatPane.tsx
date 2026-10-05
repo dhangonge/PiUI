@@ -542,7 +542,7 @@ export function PiChatPane({
   // Current model from runtime state (native SDK shape); on home (no
   // session) fall back to the composer's persisted preferred model.
   const currentModel = state?.model as { provider?: string; id?: string } | null | undefined
-  const [homeModelKey, setHomeModelKey] = useState<string | null>(() => getPreferredModelKey())
+  const [homeModelKey, setHomeModelKey] = useState<string | null>(() => getPreferredModelKey(boundServerId))
   const [pendingModelKey, setPendingModelKey] = useState<string | null>(null)
   const selectedModelKey =
     pendingModelKey ?? (currentModel?.provider && currentModel?.id ? `${currentModel.provider}:${currentModel.id}` : homeModelKey)
@@ -563,14 +563,23 @@ export function PiChatPane({
   // On home there is no runtime state; the selector shows the persisted
   // variant preference for the home model, applied once the session exists.
   const [homeVariant, setHomeVariant] = useState<string | undefined>(() =>
-    homeModelKey ? getModelVariantPref(homeModelKey) : undefined,
+    homeModelKey ? getModelVariantPref(homeModelKey, boundServerId) : undefined,
   )
   const [pendingThinkingLevel, setPendingThinkingLevel] = useState<string | undefined>(undefined)
   // home 模型切换时重读持久化 variant 偏好（渲染期间调整 state）
+  const [modelScope, setModelScope] = useState(boundServerId)
+  if (modelScope !== boundServerId) {
+    setModelScope(boundServerId)
+    const preferred = getPreferredModelKey(boundServerId)
+    setHomeModelKey(preferred)
+    setHomeVariant(preferred ? getModelVariantPref(preferred, boundServerId) : undefined)
+    setPendingModelKey(null)
+    setPendingThinkingLevel(undefined)
+  }
   const [homeVariantForModel, setHomeVariantForModel] = useState(homeModelKey)
   if (homeModelKey !== homeVariantForModel) {
     setHomeVariantForModel(homeModelKey)
-    if (!sessionId) setHomeVariant(homeModelKey ? getModelVariantPref(homeModelKey) : undefined)
+    if (!sessionId) setHomeVariant(homeModelKey ? getModelVariantPref(homeModelKey, boundServerId) : undefined)
   }
   // sessionId 变化时重置 pending 状态（渲染期间调整 state，避免 effect 级联渲染）
   const [resetSessionId, setResetSessionId] = useState(sessionId)
@@ -587,7 +596,7 @@ export function PiChatPane({
       if (!variant) return
       if (!sessionId) {
         setHomeVariant(variant)
-        if (homeModelKey) saveModelVariantPref(homeModelKey, variant)
+        if (homeModelKey) saveModelVariantPref(homeModelKey, variant, boundServerId)
         return
       }
       setPendingThinkingLevel(variant)
@@ -599,15 +608,15 @@ export function PiChatPane({
           uiErrorHandler('set thinking level', error)
         })
     },
-    [sessionId, homeModelKey],
+    [sessionId, homeModelKey, boundServerId],
   )
 
   const handleModelChange = useCallback(
     (_modelKey: string, model: Model<Api>) => {
-      recordModelUsage(model)
+      recordModelUsage(model, boundServerId)
       const key = `${model.provider}:${model.id}`
       setHomeModelKey(key)
-      setPreferredModelKey(key)
+      setPreferredModelKey(key, boundServerId)
       if (!sessionId) return
       setPendingModelKey(key)
       setPendingThinkingLevel(undefined)
@@ -619,7 +628,7 @@ export function PiChatPane({
           uiErrorHandler('set model', error)
         })
     },
-    [sessionId],
+    [sessionId, boundServerId],
   )
 
   // Fork at a user message (pi TUI parity: branch BEFORE the message and
@@ -953,12 +962,12 @@ export function PiChatPane({
         // Apply the composer's preferred model and thinking level BEFORE the
         // first prompt — afterwards they'd queue behind the active turn and
         // the first turn would run with defaults.
-        const preferred = getPreferredModelKey()
+        const preferred = getPreferredModelKey(boundServerId)
         const preferredModel = preferred ? models.find(m => `${m.provider}:${m.id}` === preferred) : undefined
         if (preferredModel) {
           await setPiModel(targetSessionId, preferredModel.provider, preferredModel.id).catch(() => undefined)
         }
-        const preferredVariant = preferred ? getModelVariantPref(preferred) : undefined
+        const preferredVariant = preferred ? getModelVariantPref(preferred, boundServerId) : undefined
         if (preferredVariant) {
           await setPiThinkingLevel(targetSessionId, preferredVariant).catch(() => undefined)
         }

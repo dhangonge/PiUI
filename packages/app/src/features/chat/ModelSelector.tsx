@@ -23,6 +23,8 @@ import {
   toggleModelPin,
 } from '../../utils/modelUtils'
 import { useHiddenModelKeys } from '../../store/modelVisibilityStore'
+import { useSessionNavigation } from '../../contexts/SessionNavigationContext'
+import { sessionKeyToServerId } from '../../utils/sessionKey'
 
 // ============================================
 // Public types
@@ -65,14 +67,15 @@ function useFlatList(
   searchQuery: string,
   refreshTrigger: number,
   t: (key: string) => string,
+  serverId?: string,
 ) {
   return useMemo(() => {
     void refreshTrigger
 
     const visible = (model: ModelInfo) => !hiddenKeys.has(getModelKey(model))
     const groups = groupModelsByProvider(filteredModels)
-    const recent = searchQuery ? [] : getRecentModels(models, 5).filter(visible)
-    const pinned = searchQuery ? [] : getPinnedModels(models).filter(visible)
+    const recent = searchQuery ? [] : getRecentModels(models, 5, serverId).filter(visible)
+    const pinned = searchQuery ? [] : getPinnedModels(models, serverId).filter(visible)
 
     const flat: FlatListItem[] = []
     const addedKeys = new Set<string>()
@@ -107,7 +110,7 @@ function useFlatList(
     })
 
     return flat
-  }, [filteredModels, models, hiddenKeys, searchQuery, refreshTrigger, t])
+  }, [filteredModels, models, hiddenKeys, searchQuery, refreshTrigger, t, serverId])
 }
 
 // ============================================
@@ -142,6 +145,7 @@ interface ModelListPanelProps {
   preferTouchUi: boolean
   pinLabel: string
   unpinLabel: string
+  serverId?: string
 }
 
 const ModelListPanel = memo(function ModelListPanel({
@@ -172,6 +176,7 @@ const ModelListPanel = memo(function ModelListPanel({
   preferTouchUi,
   pinLabel,
   unpinLabel,
+  serverId,
 }: ModelListPanelProps) {
   return (
     <div ref={menuRef} className="flex flex-col min-h-0 pt-1.5">
@@ -230,7 +235,7 @@ const ModelListPanel = memo(function ModelListPanel({
               const isSelected = selectedModelKey === itemKey
               const isHL = itemIndices[highlightedIndex] === index
               const interactiveIndex = itemIndices.indexOf(index)
-              const pinned = isModelPinned(model)
+              const pinned = isModelPinned(model, serverId)
 
               return (
                 <div
@@ -377,7 +382,9 @@ export const ModelSelector = memo(
 
     // ---- Derived data ----
 
-    const hiddenModelKeys = useHiddenModelKeys()
+    const { currentSessionId } = useSessionNavigation()
+    const serverId = currentSessionId ? sessionKeyToServerId(currentSessionId) : undefined
+    const hiddenModelKeys = useHiddenModelKeys(serverId)
     const hiddenModelKeySet = useMemo(() => new Set(hiddenModelKeys), [hiddenModelKeys])
 
     const filteredModels = useMemo(() => {
@@ -393,7 +400,7 @@ export const ModelSelector = memo(
       )
     }, [models, searchQuery, hiddenModelKeySet])
 
-    const flatList = useFlatList(models, filteredModels, hiddenModelKeySet, searchQuery, refreshTrigger, t)
+    const flatList = useFlatList(models, filteredModels, hiddenModelKeySet, searchQuery, refreshTrigger, t, serverId)
 
     const itemIndices = useMemo(() => {
       return flatList.map((item, index) => (item.type === 'item' ? index : -1)).filter(i => i !== -1)
@@ -486,7 +493,7 @@ export const ModelSelector = memo(
     const handleSelect = useCallback(
       (model: ModelInfo) => {
         const key = getModelKey(model)
-        recordModelUsage(model)
+        recordModelUsage(model, serverId)
         onSelect(key, model)
         closeMenu({ focusTrigger: trigger !== 'toolbar' })
         if (trigger === 'toolbar') {
@@ -496,7 +503,7 @@ export const ModelSelector = memo(
         }
         setRefreshTrigger(c => c + 1)
       },
-      [onSelect, closeMenu, focusToolbarInput, trigger],
+      [onSelect, closeMenu, focusToolbarInput, trigger, serverId],
     )
 
     const handleTogglePin = useCallback((e: React.MouseEvent<HTMLButtonElement>, model: ModelInfo) => {
@@ -507,9 +514,9 @@ export const ModelSelector = memo(
         pendingFocusRestoreRef.current = null
         e.currentTarget.blur()
       }
-      toggleModelPin(model)
+      toggleModelPin(model, serverId)
       setRefreshTrigger(c => c + 1)
-    }, [])
+    }, [serverId])
 
     // ---- Long press to pin (touch devices) ----
 
@@ -520,11 +527,11 @@ export const ModelSelector = memo(
       longPressFiredRef.current = false
       longPressTimerRef.current = setTimeout(() => {
         longPressFiredRef.current = true
-        toggleModelPin(model)
+        toggleModelPin(model, serverId)
         setRefreshTrigger(c => c + 1)
         if (navigator.vibrate) navigator.vibrate(30)
       }, 500)
-    }, [])
+    }, [serverId])
 
     const handleTouchEnd = useCallback(() => {
       if (longPressTimerRef.current) {
@@ -887,6 +894,7 @@ export const ModelSelector = memo(
             preferTouchUi={preferTouchUi}
             pinLabel={t('modelSelector.pinToTop')}
             unpinLabel={t('modelSelector.unpin')}
+            serverId={serverId}
           />
         </DropdownMenu>
       </div>

@@ -30,15 +30,19 @@ const remoteServer = { id: 'remote', name: 'Remote', url: 'http://remote.test' }
 describe('ServersSettings', () => {
   const checkHealthMock = vi.fn()
   const setActiveServerMock = vi.fn()
+  const setDefaultServerMock = vi.fn()
 
   beforeEach(() => {
     checkHealthMock.mockReset()
     setActiveServerMock.mockReset()
+    setDefaultServerMock.mockReset()
     navigateHomeMock.mockReset()
     clearSessionMock.mockReset()
     useServerStoreMock.mockReturnValue({
       servers: [localServer, remoteServer],
       activeServer: localServer,
+      defaultServerId: null,
+      setDefaultServer: setDefaultServerMock,
       addServer: vi.fn(),
       removeServer: vi.fn(),
       updateServer: vi.fn(),
@@ -47,6 +51,13 @@ describe('ServersSettings', () => {
       checkAllHealth: vi.fn(),
       getHealth: vi.fn(() => null),
     })
+  })
+
+  it('sets the startup preference without changing the active connection', () => {
+    render(<ServersSettings />)
+    fireEvent.click(screen.getAllByRole('button', { name: 'servers.setDefaultServer' })[1])
+    expect(setDefaultServerMock).toHaveBeenCalledWith('remote')
+    expect(setActiveServerMock).not.toHaveBeenCalled()
   })
 
   it('switches servers even when health verification fails', async () => {

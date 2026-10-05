@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { serverStorage } from '../utils/perServerStorage'
+import { serverStorage, subscribePerServerStorageVersion } from '../utils/perServerStorage'
 import { getModelKey, type AnyModel } from '../utils/modelUtils'
 import { serverStore } from './serverStore'
 
@@ -7,8 +7,8 @@ type Listener = () => void
 
 const STORAGE_KEY_HIDDEN_MODELS = 'piui-hidden-model-keys'
 
-function loadHiddenModelKeys(): string[] {
-  const stored = serverStorage.getJSON<unknown>(STORAGE_KEY_HIDDEN_MODELS)
+function loadHiddenModelKeys(serverId?: string): string[] {
+  const stored = serverId ? serverStorage.getJSONFor<unknown>(STORAGE_KEY_HIDDEN_MODELS, serverId) : serverStorage.getJSON<unknown>(STORAGE_KEY_HIDDEN_MODELS)
   if (!Array.isArray(stored)) return []
   return stored.filter((item): item is string => typeof item === 'string')
 }
@@ -18,16 +18,23 @@ class ModelVisibilityStore {
   private listeners = new Set<Listener>()
   private snapshot: string[] = []
 
-  constructor() {
+  private readonly serverId?: string
+
+  constructor(serverId?: string) {
+    this.serverId = serverId
     this.reload()
-    serverStore.onServerChange(() => {
+    const reload = () => {
+      const previous = JSON.stringify(this.snapshot)
       this.reload()
-      this.emit()
-    })
+      if (JSON.stringify(this.snapshot) !== previous) this.emit()
+    }
+    if (!serverId) serverStore.onServerChange(reload)
+    subscribePerServerStorageVersion(reload)
   }
 
   private syncSnapshot() {
-    this.snapshot = Array.from(this.hiddenModelKeys).sort()
+    const next = Array.from(this.hiddenModelKeys).sort()
+    if (JSON.stringify(next) !== JSON.stringify(this.snapshot)) this.snapshot = next
   }
 
   private emit() {
@@ -36,12 +43,13 @@ class ModelVisibilityStore {
 
   private commit() {
     this.syncSnapshot()
-    serverStorage.setJSON(STORAGE_KEY_HIDDEN_MODELS, this.snapshot)
+    if (this.serverId) serverStorage.setJSONFor(STORAGE_KEY_HIDDEN_MODELS, this.snapshot, this.serverId)
+    else serverStorage.setJSON(STORAGE_KEY_HIDDEN_MODELS, this.snapshot)
     this.emit()
   }
 
   private reload() {
-    this.hiddenModelKeys = new Set(loadHiddenModelKeys())
+    this.hiddenModelKeys = new Set(loadHiddenModelKeys(this.serverId))
     this.syncSnapshot()
   }
 
@@ -88,6 +96,19 @@ class ModelVisibilityStore {
 
 export const modelVisibilityStore = new ModelVisibilityStore()
 
-export function useHiddenModelKeys(): string[] {
-  return useSyncExternalStore(modelVisibilityStore.subscribe, modelVisibilityStore.getSnapshot)
+const scopedStores = new Map<string, ModelVisibilityStore>()
+
+export function getModelVisibilityStore(serverId?: string): ModelVisibilityStore {
+  if (!serverId) return modelVisibilityStore
+  let store = scopedStores.get(serverId)
+  if (!store) {
+    store = new ModelVisibilityStore(serverId)
+    scopedStores.set(serverId, store)
+  }
+  return store
+}
+
+export function useHiddenModelKeys(serverId?: string): string[] {
+  const store = getModelVisibilityStore(serverId)
+  return useSyncExternalStore(store.subscribe, store.getSnapshot)
 }

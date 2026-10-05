@@ -59,7 +59,9 @@
     "multiServerModeDesc": "Subscribe to multiple servers. Browse sessions by server and keep independent conversations connected.",
     "multiServerModeOffHint": "Subscribe to a server in Settings to show its projects and sessions here.",
     "subscribe": "Subscribe",
-    "unsubscribe": "Unsubscribe"
+    "unsubscribe": "Unsubscribe",
+    "setDefaultServer": "Use at startup",
+    "clearDefaultServer": "Use last active server at startup"
   },
   "service": {
     "title": "Local PiUI Service",

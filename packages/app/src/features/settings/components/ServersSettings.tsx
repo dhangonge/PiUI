@@ -57,6 +57,8 @@ function ServerItem({
   onDelete,
   onEdit,
   onCheckHealth,
+  isStartupDefault,
+  onToggleDefault,
 }: {
   server: ServerConfig
   health: ServerHealth | null
@@ -65,6 +67,8 @@ function ServerItem({
   onDelete: () => void
   onEdit: (updates: { name: string; url: string; token?: string }) => void
   onCheckHealth: () => void
+  isStartupDefault: boolean
+  onToggleDefault: () => void
 }) {
   const { t } = useTranslation(['settings', 'common'])
   const [editing, setEditing] = useState(false)
@@ -144,6 +148,13 @@ function ServerItem({
           </div>
         </button>
         <div className="shrink-0 flex items-center gap-0.5">
+          <button type="button" aria-pressed={isStartupDefault}
+            aria-label={t(isStartupDefault ? 'servers.clearDefaultServer' : 'servers.setDefaultServer')}
+            title={t(isStartupDefault ? 'servers.clearDefaultServer' : 'servers.setDefaultServer')}
+            className={`p-1.5 rounded-md hover:bg-bg-200/70 ${isStartupDefault ? 'text-accent-main-100' : 'text-text-400'}`}
+            onClick={event => { event.stopPropagation(); onToggleDefault() }}>
+            <CheckIcon size={14} />
+          </button>
           {multiServer.enabled && <button type="button" aria-pressed={multiServer.subscribedServerIds.includes(server.id)}
             aria-label={t(multiServer.subscribedServerIds.includes(server.id) ? 'servers.unsubscribe' : 'servers.subscribe')}
             className="p-1.5 rounded-md text-accent-main-100 hover:bg-bg-200/70"
@@ -574,6 +585,8 @@ export function ServersSettings() {
   const {
     servers,
     activeServer,
+    defaultServerId,
+    setDefaultServer,
     addServer,
     removeServer,
     updateServer,
@@ -594,7 +607,7 @@ export function ServersSettings() {
     checkAllHealth()
   }, [checkAllHealth])
 
-  // 切换服务器：设置 active + 清理当前 session + 导航回首页
+  // Switching focus keeps other servers' sessions alive.
   const handleSelectServer = useCallback(
     (id: string) => {
       if (activeServer?.id === id) return // 没变，不做事
@@ -642,6 +655,8 @@ export function ServersSettings() {
             server={s}
             health={getHealth(s.id)}
             isActive={activeServer?.id === s.id}
+            isStartupDefault={defaultServerId === s.id}
+            onToggleDefault={() => setDefaultServer(defaultServerId === s.id ? null : s.id)}
             onSelect={() => handleSelectServer(s.id)}
             onDelete={() => removeServer(s.id)}
             onEdit={updates => {

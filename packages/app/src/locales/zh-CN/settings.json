@@ -59,7 +59,9 @@
     "multiServerModeDesc": "同时订阅多个服务器，按服务器浏览会话，并保持各个对话独立连接。",
     "multiServerModeOffHint": "请在设置中订阅服务器，以显示其项目和会话。",
     "subscribe": "订阅",
-    "unsubscribe": "取消订阅"
+    "unsubscribe": "取消订阅",
+    "setDefaultServer": "设为启动服务器",
+    "clearDefaultServer": "启动时使用上次活动服务器"
   },
   "service": {
     "title": "本地 PiUI 服务",

@@ -75,6 +75,8 @@ export function useServerStore() {
     servers,
     activeServer,
     activeServerGeneration,
+    defaultServerId: serverStore.getDefaultServerId?.() ?? null,
+    setDefaultServer: (id: string | null) => serverStore.setDefaultServer(id),
     healthMap,
     addServer,
     updateServer,
