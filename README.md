@@ -10,7 +10,7 @@ PiUI 是 Pi 原生 coding agent 的 Android 客户端。界面、session 浏览�
 
 - Node.js `>= 22.19.0`
 - npm
-- 已安装并可访问的 Pi SDK，或使用 PiUI 随附的 SDK
+- 默认使用 PiUI 固定的 Pi SDK `1.0.3`；外部 SDK 需单独通过兼容性验证
 - 对话需要配置 Pi 的 provider 凭据；测试和类型检查默认不会调用真实 LLM
 - 构建 APK 另需：JDK 17+、Android SDK（含 NDK `29.0.14206865`）、Rust 稳定版并带 `aarch64-linux-android` / `armv7-linux-androideabi` target
 
@@ -139,6 +139,17 @@ npm run pi-worker -- web --api-only
 会话、事件游标、命令、模型偏好、置顶、目录及终端快照按服务器隔离；文件、Git、provider 管理面板跟随当前焦点。Android 不启动或管理本地 agent runtime。
 
 本轮 OCUI 移植范围、验证方式和保留限制见 [同步记录](docs/OCUI_ANDROID_SYNC.md)。
+
+## 插件宿主适配（P0 + P1）
+
+已加入会话级主题、可见的 RPC 降级、组件回调错误隔离与 custom UI 取消处理。扩展诊断通过原有状态/通知通道显示，未将协议版本提升为 2；终端主题不会改变 Android 全局主题。
+
+- 这些修复主要在 server/worker；只安装新 APK 不会更新远端宿主。
+- 个人插件清单仅做版本/哈希快照和隔离验证，**没有自动启用整套个人配置**。
+- `PI_CODING_AGENT_DIR` 默认仍是 `~/.pi/agent`，为保持兼容没有修改。试用新宿主时应显式指定一个独立目录，再逐个配置插件；不要直接复制凭据、旧会话或自动补丁。
+- 初始化成功不代表插件功能全部适配。原生问答、任务卡片、远程评审和上下文视图属于后续阶段。
+
+完整实现、逐插件测试边界、可复现命令及签名 APK 记录见 [P0/P1 交付记录](docs/PLUGIN_HOST_P1.md)。
 
 ## Android 构建
 
@@ -284,17 +295,15 @@ git push origin dev
 
 ### 升级 Pi SDK
 
-升级 `@earendil-works/pi-*` SDK 时，不要只改 `package.json`，应使用同步脚本，它会同时更新依赖声明、`PI_PARITY_SDK_VERSION`、`BUNDLED_PI_SDK_VERSION`、测试断言和文档基线：
+当前发布基线固定为 `1.0.3`。升级前先用 `scripts/probe-pi-sdk.mjs` 对指定候选安装运行隔离契约测试，不直接追随全局 Pi 或 npm latest。
+
+同步脚本会更新依赖声明、`PI_PARITY_SDK_VERSION`、`BUNDLED_PI_SDK_VERSION`、测试断言和文档草稿；修改完成不等于验证通过。请显式指定候选版本，检查整个 SDK 家族均为精确版本，并审阅文档中的能力声明：
 
 ```bash
-# 自动取 npm 最新版
-node scripts/update-pi-sdk.mjs
-
-# 或指定版本
-node scripts/update-pi-sdk.mjs 0.x.x
+node scripts/update-pi-sdk.mjs <candidate-version>
 
 # 不重新 npm install（依赖已正确安装时使用）
-node scripts/update-pi-sdk.mjs 0.x.x --no-install
+node scripts/update-pi-sdk.mjs <candidate-version> --no-install
 ```
 
 然后运行 SDK 一致性校验：

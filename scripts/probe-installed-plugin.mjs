@@ -33,12 +33,20 @@ try {
   report.tools = registry.tools.map(tool => tool.name)
   report.commands = registry.extensions.flatMap(extension => extension.commands)
   if (name === '@juicesharp/rpiv-todo') {
-    const result = await session.invokeTool('todo', { action: 'create', subject: 'Sandbox task', description: 'Isolated test; no personal state' })
-    // Manual invokeTool intentionally bypasses agent events. Replay the documented
-    // post-tool event to exercise the real plugin's lazy widget path as well.
-    await session.runtime.session.extensionRunner.emit({ type: 'tool_execution_end', toolCallId: 'sandbox-fixture', toolName: 'todo', result, isError: false })
-    if (!session.extensionUi.listTuiPanels().some(panel => panel.kind === 'widget')) throw new Error('Todo widget did not mount')
-    report.exercise = 'created one isolated task and mounted its widget'
+    let rendered = false
+    const stopFrames = session.extensionUi.onEvent(event => {
+      if (event.type === 'tuiFrame' && event.data.includes('Sandbox task')) rendered = true
+    })
+    try {
+      const result = await session.invokeTool('todo', { action: 'create', subject: 'Sandbox task', description: 'Isolated test; no personal state' })
+      // Manual invokeTool intentionally bypasses agent events. Replay the documented
+      // post-tool event to exercise the real plugin's lazy widget path as well.
+      await session.runtime.session.extensionRunner.emit({ type: 'tool_execution_end', toolCallId: 'sandbox-fixture', toolName: 'todo', result, isError: false })
+      const deadline = Date.now() + 3000
+      while (!rendered && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20))
+      if (!session.extensionUi.listTuiPanels().some(panel => panel.kind === 'widget') || !rendered) throw new Error('Todo widget did not render its task')
+    } finally { stopFrames() }
+    report.exercise = 'created one isolated task and observed its rendered widget frame'
   }
   if (name === '@juicesharp/rpiv-ask-user-question') {
     const unsubscribe = session.extensionUi.onEvent(event => {
