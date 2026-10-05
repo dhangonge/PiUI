@@ -13,7 +13,7 @@ import { clearPiTimelineItemCache } from "./selectors/timelineCache"
 import { resetManagementEvents } from "./managementEventStore"
 import { refreshPiNativeStatus } from "./nativeStatus"
 import { piEventStream } from "./eventStream"
-import { abortInFlightPiRequests } from "./httpClient"
+import { abortUnboundPiRequests } from "./httpClient"
 import { activeSessionStore } from "../store/activeSessionStore"
 import { PROTOCOL_VERSION } from "@piui/protocol"
 
@@ -80,7 +80,7 @@ export function installPiBackendServerSwitch(): void {
   if (serverSwitchInstalled) return
   serverSwitchInstalled = true
   serverStore.onServerChange(() => {
-    abortInFlightPiRequests()
+    abortUnboundPiRequests()
     clearPiSessionIndex()
     clearPiTimelineItemCache()
     piBranchStore.clearAll()
