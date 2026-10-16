@@ -8,6 +8,8 @@ import type { PiBranchPage } from '../../pi/domain'
 let slashCommands: Command[] = []
 let historyTexts: string[] = []
 const completionsMock = vi.fn()
+let compactViewport = false
+let collapsedDockEnabled = false
 
 vi.mock('../../pi/transport/index.js', () => ({
   getPiCommandCompletions: (...args: unknown[]) => completionsMock(...args),
@@ -29,7 +31,7 @@ vi.mock('../attachment', () => ({
 
 vi.mock('./chatViewport', () => ({
   useChatViewport: () => ({
-    presentation: { surfaceVariant: 'desktop', isCompact: false },
+    presentation: { surfaceVariant: 'desktop', isCompact: compactViewport },
     interaction: {
       mode: 'pointer',
       touchCapable: false,
@@ -37,13 +39,13 @@ vi.mock('./chatViewport', () => ({
       rightPanelBehavior: 'docked',
       bottomPanelBehavior: 'docked',
       outlineInteraction: 'pointer',
-      enableCollapsedInputDock: false,
+      enableCollapsedInputDock: collapsedDockEnabled,
     },
   }),
   useChatViewportSelect: <S,>(selector: (value: unknown) => S) =>
     selector({
-      presentation: { surfaceVariant: 'desktop', isCompact: false },
-      interaction: { mode: 'pointer', touchCapable: false, sidebarBehavior: 'docked', rightPanelBehavior: 'docked', bottomPanelBehavior: 'docked', outlineInteraction: 'pointer', enableCollapsedInputDock: false },
+      presentation: { surfaceVariant: 'desktop', isCompact: compactViewport },
+      interaction: { mode: 'pointer', touchCapable: false, sidebarBehavior: 'docked', rightPanelBehavior: 'docked', bottomPanelBehavior: 'docked', outlineInteraction: 'pointer', enableCollapsedInputDock: collapsedDockEnabled },
     }),}))
 
 vi.mock('../mention', () => ({
@@ -118,11 +120,109 @@ vi.mock('../../store/keybindingStore', () => ({
   matchesKeybinding: (event: KeyboardEvent, key: string) => key === 'Enter' && event.key === 'Enter',
 }))
 
+describe('InputBox composer accessory', () => {
+  beforeEach(() => {
+    historyTexts = []
+    completionsMock.mockReset()
+    compactViewport = false
+    collapsedDockEnabled = false
+  })
+
+  it('renders the accessory inside the composer width container', () => {
+    render(
+      <InputBox
+        paneId="pane-test"
+        onSend={vi.fn()}
+        aboveComposer={<div data-testid="todo-card">Tasks</div>}
+      />,
+    )
+
+    const widthContainer = document.querySelector('[data-composer-width]')
+    expect(widthContainer).not.toBeNull()
+    const accessory = document.querySelector('[data-composer-accessory]')
+    expect(accessory).not.toBeNull()
+    expect(widthContainer!.contains(accessory)).toBe(true)
+    expect(widthContainer!.contains(screen.getByTestId('todo-card'))).toBe(true)
+  })
+
+  it('omits the accessory wrapper when nothing is rendered above the composer', () => {
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} />)
+    expect(document.querySelector('[data-composer-accessory]')).toBeNull()
+  })
+
+  it('keeps the accessory docked when the input bar collapses', () => {
+    collapsedDockEnabled = true
+    render(
+      <InputBox
+        paneId="pane-test"
+        onSend={vi.fn()}
+        isAtBottom={false}
+        aboveComposer={<div data-testid="todo-card">Tasks</div>}
+      />,
+    )
+
+    const dock = document.querySelector('[data-composer-dock]')
+    expect(dock?.getAttribute('data-composer-dock')).toBe('collapsed')
+    expect(dock!.contains(screen.getByTestId('todo-card'))).toBe(true)
+    expect(dock!.contains(document.querySelector('[data-composer-accessory]'))).toBe(true)
+  })
+
+  it('slides the accessory from its previous position when the dock toggles', () => {
+    collapsedDockEnabled = true
+    const animations: Keyframe[][] = []
+    const originalAnimate = Element.prototype.animate
+    Object.defineProperty(Element.prototype, 'animate', {
+      configurable: true,
+      writable: true,
+      value: (keyframes: Keyframe[]) => {
+        animations.push(keyframes)
+        return { cancel: () => {} } as unknown as Animation
+      },
+    })
+
+    try {
+      const { rerender } = render(
+        <InputBox
+          paneId="pane-test"
+          onSend={vi.fn()}
+          isAtBottom
+          aboveComposer={<div data-testid="todo-card">Tasks</div>}
+        />,
+      )
+
+      const accessory = document.querySelector('[data-composer-accessory]') as HTMLElement
+      // jsdom reports zero rects; pin a lower position so the FLIP delta is measurable
+      // (collapsing moves the accessory down, so it is offset up before settling).
+      accessory.getBoundingClientRect = () => ({ top: 120 }) as DOMRect
+      expect(animations).toHaveLength(0)
+
+      rerender(
+        <InputBox
+          paneId="pane-test"
+          onSend={vi.fn()}
+          isAtBottom={false}
+          aboveComposer={<div data-testid="todo-card">Tasks</div>}
+        />,
+      )
+
+      expect(document.querySelector('[data-composer-dock]')?.getAttribute('data-composer-dock')).toBe('collapsed')
+      expect(animations).toHaveLength(1)
+      expect(animations[0][0].transform).toBe('translateY(-120px)')
+      expect(animations[0][1].transform).toBe('translateY(0)')
+    } finally {
+      if (originalAnimate) Element.prototype.animate = originalAnimate
+      else delete (Element.prototype as unknown as Record<string, unknown>).animate
+    }
+  })
+})
+
 describe('InputBox slash command selection', () => {
   beforeEach(() => {
     slashCommands = []
     historyTexts = []
     completionsMock.mockReset()
+    compactViewport = false
+    collapsedDockEnabled = false
   })
 
   it('executes frontend commands immediately on selection', async () => {

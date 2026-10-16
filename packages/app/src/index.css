@@ -1238,7 +1238,28 @@ body {
   background-size: calc(1lh / round(1lh / 2px)) calc(1lh / round(1lh / 2px));
 }
 
+/* The accessory stays in the composer width container and its reserved dock height.
+   React renders nothing inside the wrapper when the widget is absent, so it is truly empty. */
+[data-composer-accessory]:empty {
+  display: none;
+}
+
+.todo-widget {
+  animation: todo-widget-enter 180ms ease-out;
+}
+
+@keyframes todo-widget-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .todo-widget {
+    animation: none;
+  }
+
+  .todo-widget-panel,
+  .todo-widget svg,
   [data-input-box],
   [data-floating-actions],
   .todo-swap-panel {

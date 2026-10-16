@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo, useSyncExternalStore, useLayoutEffect, memo, forwardRef, useImperativeHandle } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, useSyncExternalStore, useLayoutEffect, memo, forwardRef, useImperativeHandle, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AttachmentPreview, type Attachment } from '../attachment'
 import {
@@ -172,6 +172,8 @@ export interface InputBoxProps {
   modelSelectorRef?: React.RefObject<ModelSelectorHandle | null>
   rootPath?: string
   sessionId?: string | null
+  /** Shares composer width and moves with the collapsed input dock. */
+  aboveComposer?: ReactNode
   // Undo/Redo
   revertedText?: string
   revertedAttachments?: Attachment[]
@@ -225,6 +227,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   modelSelectorRef,
   rootPath = '',
   sessionId,
+  aboveComposer,
   revertedText,
   revertedAttachments,
   restoreMode = 'replace',
@@ -1588,6 +1591,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   return (
     <div className="w-full">
       <div
+        data-composer-width
         className={`mx-auto max-w-3xl transition-[max-width] duration-300 ease-in-out ${isCompact ? 'px-2' : 'px-4'} ${
           isCollapsed ? 'pointer-events-none' : 'pointer-events-auto'
         }`}
@@ -1596,6 +1600,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         <div
           ref={contentWrapRef}
           onPointerDown={handleContainerPointerDown}
+          data-composer-dock={isCollapsed ? 'collapsed' : 'expanded'}
           className={`relative flex flex-col gap-2 ${isCollapsed ? 'justify-end' : ''}`}
           style={
             isCollapsed && expandedHeight > 0
@@ -1603,6 +1608,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
               : { maxHeight: composerMaxHeight }
           }
         >
+          <ComposerAccessory collapsed={isCollapsed}>{aboveComposer}</ComposerAccessory>
           {/* FloatingActions — 
               展开态：absolute 定位在内容区上方，不占文档流，避免显隐变化影响高度导致滚动抖动
               收起态：正常文档流，紧贴胶囊上方
@@ -1859,3 +1865,29 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
 // ============================================
 
 export const InputBox = memo(InputBoxComponent)
+
+function ComposerAccessory({ collapsed, children }: { collapsed: boolean; children?: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const previousTop = useRef<number | undefined>(undefined)
+  const animation = useRef<Animation | undefined>(undefined)
+
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const top = element.getBoundingClientRect().top
+    const delta = previousTop.current === undefined ? 0 : previousTop.current - top
+    previousTop.current = top
+    animation.current?.cancel()
+    if (delta && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      animation.current = element.animate(
+        [{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }],
+        { duration: 260, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+      )
+    }
+  }, [collapsed])
+
+  useEffect(() => () => animation.current?.cancel(), [])
+
+  if (!children) return null
+  return <div ref={ref} data-composer-accessory className="shrink-0 min-w-0 pointer-events-auto">{children}</div>
+}

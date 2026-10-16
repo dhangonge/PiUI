@@ -1687,9 +1687,9 @@ export function PiChatPane({
 
       <div ref={inputBoxWrapperRef} className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
         <div className="pointer-events-auto">
-          <TodoWidget key={`${sessionId}:todo`} sessionId={sessionId} />
           <InputBox
             ref={inputBoxRef}
+            aboveComposer={<TodoWidget key={`${sessionId}:todo`} sessionId={sessionId} />}
             paneId={paneId}
             sessionId={sessionId}
             rootPath={inputRootPath}

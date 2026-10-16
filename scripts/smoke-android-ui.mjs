@@ -166,6 +166,80 @@ try {
   assert.equal(await evaluate(`document.querySelector('[data-chat-pane-root]').innerText.includes('Alpha-only task')`), false)
   assert.equal(await evaluate(`document.querySelector('[data-chat-pane-root]').innerText.includes('Model: opus')`), false)
   console.log('PASS: only the todo widget is mirrored beside the composer; other widgets stay out and owners stay isolated')
+  // Width parity with the composer itself (OpenCodeUI layout), and the small type scale.
+  const todoLayout = await evaluate(`(() => {
+    const card = document.querySelector('[data-todo-widget]')
+    const composer = document.querySelector('[data-composer-width] [data-input-box]')
+    if (!card || !composer) return null
+    const c = card.getBoundingClientRect()
+    const i = composer.getBoundingClientRect()
+    return { left: c.left, right: c.right, width: c.width, inputLeft: i.left, inputRight: i.right, inputWidth: i.width, fontSize: getComputedStyle(card).fontSize, dock: document.querySelector('[data-composer-dock]')?.dataset.composerDock }
+  })()`)
+  assert.ok(todoLayout, 'todo card and composer must both be mounted')
+  assert.ok(Math.abs(todoLayout.left - todoLayout.inputLeft) < 2 && Math.abs(todoLayout.right - todoLayout.inputRight) < 2, `todo card must share the composer width: ${JSON.stringify(todoLayout)}`)
+  assert.equal(todoLayout.fontSize, '12px')
+  assert.equal(todoLayout.dock, 'expanded')
+  console.log('PASS: todo card matches the composer width and uses the small type scale')
+
+  // Collapsed dock: scroll the chat away from the bottom; the card must ride along.
+  // Make sure the mobile sidebar overlay is out of the way first.
+  if (await evaluate(`!!document.querySelector('[aria-label="Collapse sidebar"]')`)) {
+    await evaluate(`document.querySelector('[aria-label="Collapse sidebar"]').click()`)
+  }
+  await waitFor(() => evaluate(`!!document.querySelector('[aria-label="Open sidebar"]')`), 'chat surface visible')
+  await call('Emulation.setDeviceMetricsOverride', { width: 412, height: 360, deviceScaleFactor: 1, mobile: true })
+  // Scroll the pane with a wheel gesture (marks the scroll as user-driven, so follow-stick
+  // does not pull it back) and a domain scroll event so the dock sees the departure.
+  await evaluate(`(() => { const el = document.querySelector('[data-chat-pane-root] [data-chat-scroll-root]'); el.dispatchEvent(new WheelEvent('wheel', { deltaY: -600, bubbles: true, cancelable: true })); el.scrollTop = 0; el.dispatchEvent(new Event('scroll')) })()`)
+  await waitFor(() => evaluate(`(document.querySelector('[data-chat-pane-root] [data-chat-scroll-root]')?.scrollTop ?? 0) < 20`), 'chat scrolled away from bottom')
+  // Blur the composer the way a real tap does (a synthesized mouse click does not move focus).
+  // The dock also waits out the 4s "just cleared" buffer before collapsing.
+  await evaluate(`document.querySelector('[data-chat-pane-root] textarea')?.blur()`)
+  await waitFor(() => evaluate(`document.activeElement?.tagName !== 'TEXTAREA'`), 'composer blurred')
+  await waitFor(() => evaluate(`document.querySelector('[data-composer-dock]')?.dataset.composerDock === 'collapsed'`), 'collapsed input dock', 12_000)
+  // The card must land directly above the collapsed action row + capsule.
+  await waitFor(() => evaluate(`(() => { const card = document.querySelector('[data-todo-widget]'); const actions = document.querySelector('[data-floating-actions]'); if (!card || !actions) return false; return Math.abs(actions.getBoundingClientRect().top - card.getBoundingClientRect().bottom) < 16 })()`), 'todo card settled above the actions row', 5_000)
+  assert.equal(await evaluate(`!!document.querySelector('[aria-label="Collapse sidebar"]')`), false, 'the tap must not reopen the sidebar')
+  const collapsedLayout = await evaluate(`(() => {
+    const card = document.querySelector('[data-todo-widget]')
+    const actions = document.querySelector('[data-floating-actions]')
+    const dock = document.querySelector('[data-composer-dock]')
+    if (!card || !actions || !dock) return null
+    const c = card.getBoundingClientRect()
+    const a = actions.getBoundingClientRect()
+    const d = dock.getBoundingClientRect()
+    return { cardTop: c.top, cardBottom: c.bottom, cardWidth: c.width, actionsTop: a.top, dockBottom: d.bottom, viewportHeight: window.innerHeight }
+  })()`)
+  assert.ok(collapsedLayout, 'todo card must stay mounted while the input bar is collapsed')
+  assert.ok(collapsedLayout.cardTop >= 0 && collapsedLayout.cardBottom <= collapsedLayout.viewportHeight, `todo card must stay fully on screen: ${JSON.stringify(collapsedLayout)}`)
+  assert.ok(collapsedLayout.cardBottom > collapsedLayout.viewportHeight * 0.4, `todo card must stay in the lower part of the screen: ${JSON.stringify(collapsedLayout)}`)
+  assert.ok(collapsedLayout.cardBottom <= collapsedLayout.actionsTop + 16, `todo card must stay docked above the collapsed controls: ${JSON.stringify(collapsedLayout)}`)
+  // The card stays interactive while the input bar is hidden.
+  assert.ok(await evaluate(`!!document.querySelector('[data-todo-widget] button[aria-expanded="true"]')`), 'todo card must start expanded')
+  await evaluate(`document.querySelector('[data-composer-dock]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
+  await evaluate(`document.querySelector('[data-todo-widget] button').click()`)
+  await waitFor(() => evaluate(`!!document.querySelector('[data-todo-widget] button[aria-expanded="false"]')`), 'todo card collapses while docked')
+  // Wait for the collapse transition to settle before measuring.
+  let previousHeight = -1
+  await waitFor(async () => {
+    const height = await evaluate(`document.querySelector('[data-todo-widget]').getBoundingClientRect().height`)
+    const stable = Math.abs(height - previousHeight) < 0.5
+    previousHeight = height
+    return stable
+  }, 'todo collapse animation settled', 5_000)
+  const collapsedCardHeight = previousHeight
+  assert.ok(collapsedCardHeight > 0 && collapsedCardHeight < 60, `collapsed todo card must keep its header only: ${collapsedCardHeight}`)
+  await evaluate(`document.querySelector('[data-todo-widget] button').click()`)
+  await waitFor(() => evaluate(`!!document.querySelector('[data-todo-widget] button[aria-expanded="true"]')`), 'todo card re-expands while docked')
+  console.log('PASS: todo card stays interactive and animated while the input bar is hidden')
+  const collapsedScreenshot = await call('Page.captureScreenshot', { format: 'png' })
+  const collapsedScreenshotPath = path.join(tmpdir(), `piui-todo-collapsed-${Date.now()}.png`)
+  writeFileSync(collapsedScreenshotPath, Buffer.from(collapsedScreenshot.data, 'base64'), { flag: 'wx' })
+  console.log(`Collapsed dock screenshot: ${collapsedScreenshotPath}`)
+  await call('Emulation.setDeviceMetricsOverride', { width: 412, height: 915, deviceScaleFactor: 1, mobile: true })
+  await evaluate(`(() => { const el = document.querySelector('[data-chat-pane-root] [data-chat-scroll-root]'); el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')) })()`)
+  await waitFor(() => evaluate(`document.querySelector('[data-composer-dock]')?.dataset.composerDock === 'expanded'`), 'expanded input dock after returning to the bottom', 9_000)
+  console.log('PASS: todo card stays docked above the collapsed composer')
   await evaluate(`document.querySelector('[aria-label="Collapse sidebar"]')?.click()`)
   await waitFor(() => evaluate(`!document.querySelector('[aria-label="Collapse sidebar"]')`), 'composer visible for widget screenshot')
   const todoScreenshot = await call('Page.captureScreenshot', { format: 'png' })

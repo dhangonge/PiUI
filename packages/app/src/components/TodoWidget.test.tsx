@@ -30,6 +30,30 @@ it('renders only todo widget rows in the shared list presentation', () => {
   expect(screen.queryByText(/Model: opus|Context 12%/)).toBeNull()
 })
 
+it('uses the composer-width card shell with the small type scale', () => {
+  extensionUiStore.statePatched('a::same', { kind: 'widget', key: 'rpiv-todos', lines: widgetLines })
+  const { container } = render(<TodoWidget sessionId="a::same" />)
+  const card = container.querySelector('[data-todo-widget]')
+  expect(card).not.toBeNull()
+  expect(card?.className).toContain('todo-widget')
+  expect(card?.className).toContain('text-[length:var(--fs-xs)]')
+  expect(card?.className).toContain('min-w-0')
+  expect(card?.className).not.toContain('mb-2')
+  // The rows use the compact density of the shared renderer, and every widget row survives.
+  expect(screen.getByText('Write notes').parentElement?.className).toContain('py-1.5')
+  expect([screen.getByText('Read config'), screen.getByText('Ship fix (shipping)'), screen.getByText('Write notes')]).toHaveLength(3)
+})
+
+it('animates the expanded panel with the shared motion variant', () => {
+  extensionUiStore.statePatched('a::same', { kind: 'widget', key: 'rpiv-todos', lines: widgetLines })
+  const { container } = render(<TodoWidget sessionId="a::same" />)
+  const panel = container.querySelector('.todo-widget-panel')
+  expect(panel).not.toBeNull()
+  expect(panel?.className).toContain('grid-rows-[1fr]')
+  fireEvent.click(screen.getByRole('button', { expanded: true }))
+  expect(container.querySelector('.todo-widget-panel')?.className).toContain('grid-rows-[0fr]')
+})
+
 it('collapses to its header and uses the app card shell', () => {
   extensionUiStore.statePatched('a::same', { kind: 'widget', key: 'rpiv-todos', lines: widgetLines })
   const { container } = render(<TodoWidget sessionId="a::same" />)
