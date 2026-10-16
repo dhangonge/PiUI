@@ -7,6 +7,8 @@
 > Pi SDK 参考代码：`/workspace/pi-mono/`
 
 > 当前实现的数据与远程 API 边界以 [`PI_SDK_API_MATRIX.md`](./PI_SDK_API_MATRIX.md) 为准。本文早期章节中的服务端 timeline/projection 草案已经废弃；浏览器现在直接消费 Pi native entries、native tree 和原始 JSON events，并只在 App 内派生 React 渲染对象。
+>
+> 第 4 章《研究结论》里的版本号（`OpenCodeUI 0.6.34`、`@opencode-ai/sdk ^1.16.0`、`@earendil-works/pi-coding-agent 0.81.1`）是研究当时的快照。`@opencode-ai/sdk` 已在 Phase 3 移除；Pi SDK 当前基线的权威来源是 `packages/protocol/src/version.ts` 的 `PI_PARITY_SDK_VERSION`，由 `npm run conformance:sdk` 门禁校验。
 
 ## 1. 文档目的
 

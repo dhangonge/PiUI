@@ -109,8 +109,10 @@ patchText('packages/protocol/src/index.test.ts', /(PI_PARITY_SDK_VERSION, ")\d+\
 
 // ---------------------------------------------------------------------------
 // 5. 文档基线
+// PI_SDK_API_MATRIX.md 的 Baseline 行由 scripts/check-doc-consistency.mjs 校验，
+// 必须在这里一起刷新，否则 validate 会失败。
 // ---------------------------------------------------------------------------
-for (const rel of ['docs/PIUI_MASTER_PLAN.md', 'docs/PI_UI_INTEGRATION.md']) {
+for (const rel of ['docs/PIUI_MASTER_PLAN.md', 'docs/PI_UI_INTEGRATION.md', 'docs/PI_SDK_API_MATRIX.md']) {
   const file = join(repoRoot, rel)
   if (!existsSync(file)) continue
   const text = readFileSync(file, 'utf8')

@@ -1,4 +1,6 @@
-# Changelog
+# Changelog（上游 OpenCodeUI 部分，已冻结）
+
+> 本文件是 fork 自上游 OpenCodeUI 时保留的历史记录，**不再维护**：PiUI 发版只在仓库根 `CHANGELOG.md` 追加条目（`packages/app/scripts/bump-version.mjs`）。这里的最高版本号（`v0.6.34`）属于上游编号体系，与 PiUI 的 `package.json` 版本无关，不要参照。
 
 ## [v0.6.34] - 2026-07-19
 

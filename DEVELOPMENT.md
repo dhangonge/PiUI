@@ -29,7 +29,7 @@ packages/pi-worker  唯一懂 Pi 的进程:命令表 → AgentSession
 1. **零数据转换**:worker→server→客户端的会话数据只做 JSON 结构化复制，不可序列化直接报错
 2. **零协议发明**:命令对齐 SDK 方法语义（prompt/steer/followUp/compact/fork/…)，事件就是 Pi 原生事件
 3. **零能力白名单**:Pi 能力注册进 registry，HTTP 只按 capability name 分发；扩展 tools/commands 由 Pi runtime 枚举
-4. **SDK 可替换**:worker 经 sdk-host 动态加载 SDK，默认 bundle 验证版（0.81.1),`PIUI_SDK_PATH` 可指外部版本
+4. **SDK 可替换**:worker 经 sdk-host 动态加载 SDK，默认 bundle 验证版（版本号见 `packages/protocol/src/version.ts` 的 `PI_PARITY_SDK_VERSION`），`PIUI_SDK_PATH` 可指外部版本
 5. **mock 在 worker 内**:server 不感知 driver;mock 会话写独立 JSONL 目录（PIUI_MOCK_DIR)，格式与 Pi 相同
 
 ### HTTP 面

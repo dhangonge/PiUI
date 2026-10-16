@@ -304,9 +304,9 @@ git push origin dev
 
 ### 升级 Pi SDK
 
-当前发布基线固定为 `1.3.0`。升级前先用 `scripts/probe-pi-sdk.mjs` 对指定候选安装运行隔离契约测试，不直接追随全局 Pi 或 npm latest。
+当前发布基线固定为 `1.3.0`（权威来源是 `packages/protocol/src/version.ts` 的 `PI_PARITY_SDK_VERSION`，由 `npm run conformance:sdk:check` 门禁校验）。升级前先用 `scripts/probe-pi-sdk.mjs` 对指定候选安装运行隔离契约测试，不直接追随全局 Pi 或 npm latest。
 
-同步脚本会更新依赖声明、`PI_PARITY_SDK_VERSION`、`BUNDLED_PI_SDK_VERSION`、测试断言和文档草稿；修改完成不等于验证通过。请显式指定候选版本，检查整个 SDK 家族均为精确版本，并审阅文档中的能力声明：
+同步脚本会更新依赖声明、`PI_PARITY_SDK_VERSION`、`BUNDLED_PI_SDK_VERSION`、测试断言、`docs/` 中声明的文档基线（含 [`PI_SDK_API_MATRIX.md`](docs/PI_SDK_API_MATRIX.md) 的 `Baseline` 行）和文档草稿；修改完成不等于验证通过。请显式指定候选版本，检查整个 SDK 家族均为精确版本，并审阅文档中的能力声明：
 
 ```bash
 node scripts/update-pi-sdk.mjs <candidate-version>
@@ -320,7 +320,10 @@ node scripts/update-pi-sdk.mjs <candidate-version> --no-install
 ```bash
 npm run conformance:sdk          # 全量验证
 npm run conformance:sdk:check    # 只检查版本一致性
+npm run check:docs               # 校验文档里的声明式版本与代码常量一致
 ```
+
+`npm run validate` 已包含上面两个 `:check` 门禁，CI 每次推送都会跑。
 
 ## 许可证
 

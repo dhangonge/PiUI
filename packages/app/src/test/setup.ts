@@ -1,6 +1,15 @@
 import '@testing-library/jest-dom/vitest'
 import '../i18n'
 
+// 继承的 NODE_ENV=production 会让 React 走 production 构建（没有 React.act），
+// 全套测试报 "React.act is not a function"。这里提前给出可行动的报错。
+if (process.env.NODE_ENV === 'production') {
+  throw new Error(
+    'NODE_ENV=production 时无法运行测试（React 会加载 production 构建）。' +
+    '请用：NODE_ENV=test npm run test:run -w @piui/app',
+  )
+}
+
 // Use the test window's full Storage API, not Node's process-wide storage.
 // Vitest exposes its JSDOM instance even when window is aliased to globalThis.
 const { jsdom } = globalThis as typeof globalThis & { jsdom: { window: Window } }

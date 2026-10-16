@@ -1,8 +1,10 @@
 # Pi SDK API Matrix
 
-Baseline: `@earendil-works/pi-coding-agent@0.81.1` with the local SDK export patch in `patches/`.
+Baseline: `@earendil-works/pi-coding-agent@1.3.0`（权威版本号见 `packages/protocol/src/version.ts` 的 `PI_PARITY_SDK_VERSION`；一致性由 `npm run conformance:sdk` 门禁）。1.3.0 已原生导出本文依赖的全部 API，无需 `patches/` 中的 SDK 补丁。
 
-Capability revision: `pi-0.81.1-r19`; worker IPC: v15.
+Worker IPC: `PI_WORKER_PROTOCOL_VERSION`（`packages/pi-worker/src/ipc.ts`，当前 `3`）。
+
+> 状态：当前有效。矩阵中的能力行在每次 SDK 升级后复验；本文只描述 PiUI 侧映射，不重复 PiUI 版本号。
 
 PiUI exposes serializable SDK behavior through HTTP, WebSocket, and worker IPC. SDK return values stay native on the transport; browser-only presentation fields are derived in the app. Function-valued dependency injection and TUI component factories remain inside the worker and are reported explicitly as `tui-only`; they are never advertised as browser RPC support.
 
@@ -88,7 +90,7 @@ These remain usable by extensions inside the isolated worker. JSON-serializable 
 
 ## SDK Export Integration
 
-The local Pi SDK fork exports `resolveProjectTrusted` and `applyHttpProxySettings`, adds native `SettingsManager.getHttpProxy()/setHttpProxy()`, and exposes the native command catalog through `AgentSession.getCommands()`. PiUI calls those APIs directly. Until that fork is published as a newer package version, `patch-package` applies the same compiled API additions to the pinned `0.81.1` dependency during install; no Pi behavior is reimplemented in PiUI.
+PiUI depends on the SDK's `resolveProjectTrusted` and `applyHttpProxySettings` exports, the native `SettingsManager.getHttpProxy()/setHttpProxy()` pair, and the native command catalog exposed through `AgentSession.getCommands()`. All four ship in the pinned `1.3.0` dependency, so no SDK patch is applied at install time; no Pi behavior is reimplemented in PiUI. (When these were fork-only additions, `patch-package` carried them on top of `0.81.1`.)
 
 ## Conformance
 
@@ -102,4 +104,4 @@ Release checks must include:
 - app native-entry/event adapter and dialog tests
 - live server file, Git, write, and chat-loop tests
 
-Any Pi SDK version change requires reviewing this matrix and changing the capability revision.
+Any Pi SDK version change requires reviewing this matrix and updating its `Baseline` line above.
