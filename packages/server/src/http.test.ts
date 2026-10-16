@@ -64,6 +64,40 @@ describe('http api', () => {
     assert.equal(accepted.json.service, 'piui-server')
   })
 
+  it('accepts client error reports and rejects malformed ones', async () => {
+    const app = createAppServer({ authToken: 'test-token' })
+    const port = await listen(app)
+    cleanups.push(() => app.dispose())
+
+    const endpoint = '/api/v1/host/client-log'
+    const payload = {
+      entries: [
+        {
+          source: 'react',
+          category: 'ui',
+          operation: 'render',
+          message: 'render exploded',
+          appVersion: '0.6.21',
+          url: 'https://piui.example/app',
+        },
+      ],
+    }
+
+    // 错误上报也要 token：它会把客户端文本写进 server 日志文件。
+    assert.equal((await request(port, 'POST', endpoint, { body: payload })).status, 401)
+
+    const accepted = await request(port, 'POST', endpoint, { body: payload, token: 'test-token' })
+    assert.equal(accepted.status, 200)
+    assert.equal(accepted.json.accepted, 1)
+
+    const malformed = await request(port, 'POST', endpoint, { body: { entries: 'nope' }, token: 'test-token' })
+    assert.equal(malformed.status, 400)
+    assert.equal(malformed.json.code, 'INVALID_REQUEST')
+
+    const wrongMethod = await request(port, 'GET', endpoint, { token: 'test-token' })
+    assert.equal(wrongMethod.status, 405)
+  })
+
   it('serves workspaces, files and git through the host surface', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'piui-http-host-'))
     writeFileSync(path.join(root, 'hello.txt'), 'hello piui', 'utf8')

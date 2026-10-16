@@ -17,6 +17,7 @@ import { WorkspaceStore } from './host/workspace-store.ts'
 import { WorkspaceWatcher } from './host/workspace-watcher.ts'
 import { MAX_JSON_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } from './host/security.ts'
 import { resolveAuthToken } from './host/auth-token.ts'
+import { reportClientErrors } from './host/client-log.ts'
 import { PathSafetyError } from './host/path-safety.ts'
 import { HostRuntime } from './host/command-table.ts'
 import { TerminalManager } from './host/terminal-manager.ts'
@@ -289,6 +290,12 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         return sendJson(res, 200, body)
       }
 
+      if (method === 'POST' && p === '/api/v1/host/client-log') {
+        // app 侧错误上报：只落日志文件，不入命令表（不需要 worker，也不该被注册表看见）。
+        const body = await readBody(req, scope.signal, MAX_JSON_BODY_BYTES)
+        return sendJson(res, 200, { ok: true, accepted: reportClientErrors(body) })
+      }
+
       if (method === 'GET' && p === '/api/v1/host/registry') {
         return sendJson(res, 200, host.registry())
       }
@@ -378,6 +385,7 @@ function allowedMethodsForPath(pathname: string): string | undefined {
   )
     return 'GET'
   if (pathname === '/api/v1/host/shutdown') return 'POST'
+  if (pathname === '/api/v1/host/client-log') return 'POST'
   if (
     /^\/api\/v1\/pi\/commands\/[^/]+$/.test(pathname) ||
     /^\/api\/v1\/pi\/sessions\/[^/]+\/commands\/[^/]+$/.test(pathname)

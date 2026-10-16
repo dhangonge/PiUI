@@ -9,7 +9,8 @@ import { DirectoryProvider, FullscreenProvider, SessionProvider } from './contex
 import { themeStore } from './store/themeStore'
 import { applyUrlTokenParam } from './store/serverStore'
 import { isTauri, isTauriMobile } from './utils/tauri'
-import { globalErrorHandler } from './utils/errorHandling'
+import { logError } from './utils/errorHandling'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { serviceStore } from './store/serviceStore'
 
 // Polyfill: randomUUID 在非 HTTPS 环境可能缺失（如局域网 HTTP）
@@ -76,14 +77,16 @@ function configureNativeShell() {
 
 configureNativeShell()
 
-// 全局错误处理 - 防止未捕获错误导致页面刷新
+// 全局错误处理 - 防止未捕获错误导致页面刷新。
+// 这两类错误 React 不会交给 ErrorBoundary（它们不是渲染期异常），
+// 所以直接进错误日志：设置 → 关于 → 诊断 可查，并尽力上报 server 日志文件。
 window.addEventListener('error', event => {
-  globalErrorHandler('uncaught error', event.error)
+  logError(event.error, { category: 'global', operation: 'uncaught error', source: 'window' })
   event.preventDefault()
 })
 
 window.addEventListener('unhandledrejection', event => {
-  globalErrorHandler('unhandled promise rejection', event.reason)
+  logError(event.reason, { category: 'global', operation: 'unhandled promise rejection', source: 'rejection' })
   event.preventDefault()
 })
 
@@ -92,15 +95,18 @@ const root = createRoot(document.getElementById('root')!)
 function bootstrap() {
   root.render(
     <StrictMode>
-      <Suspense fallback={null}>
-        <DirectoryProvider>
-          <SessionProvider>
-            <FullscreenProvider>
-              <App />
-            </FullscreenProvider>
-          </SessionProvider>
-        </DirectoryProvider>
-      </Suspense>
+      {/* ErrorBoundary 在 Suspense 外层：懒加载 chunk 失败也要有兜底，而不是白屏 */}
+      <ErrorBoundary>
+        <Suspense fallback={null}>
+          <DirectoryProvider>
+            <SessionProvider>
+              <FullscreenProvider>
+                <App />
+              </FullscreenProvider>
+            </SessionProvider>
+          </DirectoryProvider>
+        </Suspense>
+      </ErrorBoundary>
     </StrictMode>,
   )
 }

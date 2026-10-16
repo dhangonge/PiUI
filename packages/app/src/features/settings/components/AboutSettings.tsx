@@ -6,6 +6,7 @@ import { hasUpdateAvailable, updateStore, useUpdateStore, RELEASES_PAGE_URL } fr
 import { saveData } from '../../../utils/downloadUtils'
 import { exportSettingsBackup, importSettingsBackup, previewBackupMeta } from '../../../utils/settingsBackup'
 import { isTauri } from '../../../utils/tauri'
+import { DiagnosticsCard } from './DiagnosticsSettings'
 import { SettingsSection } from './SettingsUI'
 
 async function openExternalUrl(url: string): Promise<void> {
@@ -162,6 +163,8 @@ export function AboutSettings() {
           </div>
         )}
       </SettingsSection>
+
+      <DiagnosticsCard />
     </div>
   )
 }

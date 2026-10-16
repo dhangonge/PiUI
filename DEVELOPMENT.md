@@ -43,6 +43,7 @@ GET    /api/v1/host/health                       server 健康检查
 GET    /api/v1/host/registry                     当前 host capability registry
 POST   /api/v1/host/commands/:name               host command,如 workspaces.open/files.read/git.status
 GET    /api/v1/host/commands/:id                 Pi session 命令生命周期查询
+POST   /api/v1/host/client-log                   app 客户端错误上报，落到 server 日志文件
 
 WS     /api/v1/events                            stream 订阅 + cursor/replay/resync
 ```

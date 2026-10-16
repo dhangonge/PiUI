@@ -60,5 +60,13 @@
   "enterRun": "↵ 执行",
   "enterConfirmShort": "↵ 确认",
   "escCancel": "Esc 取消",
-  "reload": "重新加载"
+  "reload": "重新加载",
+  "errorBoundary": {
+    "title": "界面出错了",
+    "description": "渲染时发生未预期的错误。服务端的会话数据没有受影响。可以重试渲染或重新加载应用。这条错误已经记录在「设置 → 关于 → 诊断」里。",
+    "retry": "重试",
+    "reload": "重新加载",
+    "copyDetails": "复制详情",
+    "copied": "已复制"
+  }
 }

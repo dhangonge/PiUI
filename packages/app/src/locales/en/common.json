@@ -60,5 +60,13 @@
   "enterRun": "↵ run",
   "enterConfirmShort": "↵ confirm",
   "escCancel": "esc cancel",
-  "reload": "Reload"
+  "reload": "Reload",
+  "errorBoundary": {
+    "title": "Something went wrong",
+    "description": "The interface hit an unexpected error. Your session data on the server is untouched. Retry the render, or reload the app. The error has been recorded under Settings → About → Diagnostics.",
+    "retry": "Retry",
+    "reload": "Reload",
+    "copyDetails": "Copy details",
+    "copied": "Copied"
+  }
 }

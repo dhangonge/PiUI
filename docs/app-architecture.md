@@ -116,18 +116,34 @@ import { ExtensionUiDialogHost } from '../chat/ExtensionUiDialogHost.js'
 4. `features/chat/InputBox.tsx`、`components/MarkdownRenderer.tsx` —— 后者已有 1510 行测试，
    相对安全；前者 60% 覆盖。
 
+## 错误如何被看见
+
+app 打包后没有 devtools（Android WebView / Tauri 壳），所以错误必须主动留痕：
+
+1. `utils/errorHandling.ts` 的 `logError`（34 个调用点）→ 控制台 + `store/clientErrorLog.ts`。
+2. `store/clientErrorLog.ts`：内存环形缓冲 50 条 + localStorage 持久化；尽力上报
+   `POST /api/v1/host/client-log`（每次会话最多 30 条），server 落到
+   `<数据目录>/logs/piui-server-YYYY-MM-DD.log`。上报本身失败一律静默（坏掉的通知通道不能再制造错误）。
+3. 渲染期异常（React 不会交给 `logError`）→ `components/ErrorBoundary.tsx`，挂在 `main.tsx`
+   的 `Suspense` 外层，给出可重试的降级页而不是白屏。
+4. 用户在「设置 → 关于 → 诊断」里能看到本机最近 10 条、一键复制或清空。
+
+有意不做：自动弹 toast。34 个调用点里大量是「重试成功就无感」的场景，逐个弹会变成报错墙。
+
 ## 已知缺口
 
-- **测试覆盖**（2026-10 实测，app 全局 statements 44.6 / branches 37.3 / functions 41.7 / lines 46.7）：
+- **测试覆盖**（2026-10 实测，app 全局 statements 44.9 / branches 37.4 / functions 42.0 / lines 46.9）：
   `PiChatPane.tsx` 0%、`ChatArea.tsx` 4.3%、`Sidebar.tsx`/`Header.tsx`/`PaneHeader.tsx`/`EmptyState.tsx` 0%、
   `chatViewport.tsx` 24.4%。`features/pi-chat` 目录整体 3.9%，`features/chat` 44.8%，`src/pi` 58.5%。
   门槛只挡倒退（43/35/40/45），不挡「新写的容器逻辑没测试」。
-- **没有 error boundary**：删除零引用文件时发现 `components/ErrorBoundary.tsx` 从未被挂载过
-  （`main.tsx` 里没有用它），已作为死代码删除。也就是说渲染期异常目前没有任何兜底，
-  需要时应该重新实现一个真的挂上去。
-- **死代码已清理 5 个文件**（2026-10）：`components/ErrorBoundary.tsx`（66 行）、
+- **没有 error boundary** → 已修（2026-10）：删除零引用文件时发现旧 `components/ErrorBoundary.tsx`
+  从未被挂载过（`main.tsx` 里没有用它）。现在 `components/ErrorBoundary.tsx` 重写并真的挂上了。
+- **死代码已清理 5 个文件**（2026-10）：旧 `components/ErrorBoundary.tsx`（66 行，后被重写重新挂载）、
   `features/chat/virtual/messageGesture.ts`（34）、`hooks/useCancelHint.ts`（50）、
   `hooks/usePanelResizeStatus.ts`（21）、`utils/localServiceUrl.ts`（8）。判据是全仓零引用。
+- **无声失败仍然是多数**：34 个 `logError` 调用点全部是「记录但不告知用户」——有意不弹 toast，
+  否则界面会变成报错墙。需要用户当场看见的只有渲染崩溃（ErrorBoundary）。
+  `logError` 的 `silent` 参数现在只影响语义，不影响任何行为（既不影响控制台也不影响上报）。
 - **`features/chat` 的公开面不成体系**：`index.ts` 只导出五个组件，而 `pi-chat` 走深路径
   （`../chat/PaneHeader.js`、`../chat/chatViewport.js`）——深路径导入让「渲染层公开面」无法收敛，
   新增导出时优先补进 `index.ts`。

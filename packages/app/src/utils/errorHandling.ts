@@ -1,3 +1,6 @@
+import { recordClientError, type ClientErrorSource } from '../store/clientErrorLog'
+import { logger } from './logger'
+
 // ============================================
 // 统一错误处理工具
 // ============================================
@@ -21,29 +24,46 @@ export interface ErrorContext {
   operation: string
   silent?: boolean // 静默错误，不显示给用户
   details?: unknown // 额外的错误详情
+  /** 错误来源，用于客户端错误日志分类（默认 manual） */
+  source?: ClientErrorSource
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message || error.name
+  if (typeof error === 'string') return error
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message: unknown }).message
+    if (typeof message === 'string' && message) return message
+  }
+  if (error === undefined || error === null) return 'unknown error'
+  try {
+    return JSON.stringify(error) || String(error)
+  } catch {
+    return String(error)
+  }
 }
 
 /**
- * 统一的错误日志函数
+ * 统一的错误日志函数。
  *
- * 未来可以扩展为：
- * - 发送到错误监控服务
- * - 显示 toast 通知
- * - 根据错误类型做不同处理
+ * 生产构建里也必须留痕：打包后的 app 没有 devtools，`import.meta.env.DEV` 分支
+ * 会把所有错误吃掉。这里同时写控制台和客户端错误日志（设置 → 关于 → 诊断可见，
+ * 并尽力上报本地 server 的日志文件）。
+ *
+ * 有意不在这里弹 toast：34 个调用点里大量是「重试成功就无感」的场景，逐个弹
+ * 会把界面变成报错墙；需要用户看见的渲染崩溃由 ErrorBoundary 负责。
  */
 export function logError(error: unknown, context: ErrorContext): void {
-  const { category, operation, silent = false } = context
+  const { category, operation } = context
 
-  // 开发环境下始终输出到控制台
-  if (import.meta.env.DEV) {
-    console.error(`[${category}] ${operation}:`, error)
-  }
-
-  // 非静默错误，未来可以显示 toast
-  if (!silent) {
-    // TODO: 集成 toast 通知系统
-    // showToast({ type: 'error', message: `${operation} failed` })
-  }
+  logger.error(`[${category}] ${operation}:`, error)
+  recordClientError({
+    source: context.source ?? 'manual',
+    category,
+    operation,
+    message: errorMessage(error),
+    stack: error instanceof Error ? (error.stack ?? null) : null,
+  })
 }
 
 /**
@@ -78,7 +98,6 @@ export const parseErrorHandler = createErrorHandler('parse')
 export const sseErrorHandler = createErrorHandler('sse')
 export const fileErrorHandler = createErrorHandler('file')
 export const syntaxErrorHandler = createErrorHandler('syntax')
-export const globalErrorHandler = createErrorHandler('global')
 export const revertErrorHandler = createErrorHandler('revert')
 export const clipboardErrorHandler = createErrorHandler('clipboard')
 

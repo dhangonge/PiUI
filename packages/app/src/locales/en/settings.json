@@ -338,7 +338,15 @@
     "backupImportConfirm": "Importing a backup will replace the current local settings and reload the app. Continue?",
     "backupImportConfirmWithDate": "Import the backup created at {{date}}? This will replace the current local settings and reload the app.",
     "toastTitle": "New version available: {{version}}",
-    "toastBody": "Click to open About and view the release page."
+    "toastBody": "Click to open About and view the release page.",
+    "diagnosticsCardTitle": "Diagnostics",
+    "diagnosticsCardDesc": "Recent client-side errors recorded on this device. They are kept locally and reported to your own PiUI server log when it is reachable.",
+    "diagnosticsEmpty": "No errors recorded.",
+    "diagnosticsCount": "{{count}} error(s) recorded, newest first.",
+    "diagnosticsTruncated": "{{count}} older error(s) not shown.",
+    "diagnosticsCopy": "Copy all",
+    "diagnosticsCopied": "Copied",
+    "diagnosticsClear": "Clear"
   },
   "keybindings": {
     "title": "Keyboard Shortcuts",

@@ -338,7 +338,15 @@
     "backupImportConfirm": "导入备份会替换当前本地设置，并重新加载应用。要继续吗？",
     "backupImportConfirmWithDate": "要导入创建于 {{date}} 的备份吗？这会替换当前本地设置，并重新加载应用。",
     "toastTitle": "发现新版本：{{version}}",
-    "toastBody": "点击打开关于页，并查看发布页面。"
+    "toastBody": "点击打开关于页，并查看发布页面。",
+    "diagnosticsCardTitle": "诊断",
+    "diagnosticsCardDesc": "本设备最近记录的客户端错误。日志只留在本地，并在 server 可达时上报到你自己 server 的日志文件。",
+    "diagnosticsEmpty": "没有记录到错误。",
+    "diagnosticsCount": "共记录了 {{count}} 条错误，新的在前。",
+    "diagnosticsTruncated": "另有 {{count}} 条更早的错误未展示。",
+    "diagnosticsCopy": "复制全部",
+    "diagnosticsCopied": "已复制",
+    "diagnosticsClear": "清空"
   },
   "keybindings": {
     "title": "键盘快捷键",

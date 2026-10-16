@@ -67,6 +67,15 @@ export function logError(message: string): void {
   logToFile(message)
 }
 
+/**
+ * 客户端（浏览器/壳）错误上报：显式落盘。没开文件日志时退回控制台——
+ * bun 打包下 console 不走 stdout patch，不显式写就什么都留不下。
+ */
+export function logClientError(line: string): void {
+  logToFile(line)
+  if (!enabled) console.warn(line)
+}
+
 function cleanupOldLogs(): void {
   try {
     if (!logDir) return
