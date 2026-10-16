@@ -13,7 +13,8 @@
     "start": "node dist/bundle-entry.js web",
     "pi-worker": "node --import tsx src/bundle-entry.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test \"src/**/*.test.ts\""
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "test:coverage": "node ../../scripts/node-coverage.mjs"
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.14",

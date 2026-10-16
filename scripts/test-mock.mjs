@@ -18,14 +18,17 @@ const COMMAND_TIMEOUT_MS = Number(process.env.PIUI_TEST_COMMAND_TIMEOUT_MS) || 6
 
 const withCoverage = process.argv.includes("--coverage") || process.env.PIUI_TEST_COVERAGE === "1"
 
+// Node 侧三包用 node --test 内置覆盖率（度量范围校验与阈值写在
+// scripts/node-coverage.mjs），app 用 vitest coverage-v8。
+const testScript = withCoverage ? "test:coverage" : "test"
+
 const commands = [
   ["run", "build", "-w", "@piui/protocol"],
   ["run", "build", "-w", "@piui/pi-worker"],
   ["run", "build", "-w", "@piui/server"],
-  ["run", "test", "-w", "@piui/protocol"],
-  ["run", "test", "-w", "@piui/pi-worker"],
-  ["run", "test", "-w", "@piui/server"],
-  // --coverage 只加在 app 上：Node 侧三包覆盖率的度量与门槛还没建立。
+  ["run", testScript, "-w", "@piui/protocol"],
+  ["run", testScript, "-w", "@piui/pi-worker"],
+  ["run", testScript, "-w", "@piui/server"],
   withCoverage
     ? ["run", "test:run", "-w", "@piui/app", "--", "--coverage"]
     : ["run", "test:run", "-w", "@piui/app"],
