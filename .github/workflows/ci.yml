@@ -74,7 +74,9 @@ jobs:
   tauri-check:
     name: tauri check
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # clippy --all-targets 比原来的 cargo check 多编译测试目标，首次（无缓存）
+    # 会明显慢一截，放宽到 15 分钟。
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -84,6 +86,8 @@ jobs:
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -105,10 +109,10 @@ jobs:
       - name: Prepare empty tauri resources dir
         run: mkdir -p packages/app/src-tauri/resources
 
-      # Tauri 壳编译校验（cargo check + Rust 单元测试），不打包
-      - name: Cargo check
+      # Tauri 壳的静态检查（clippy -D warnings 同时覆盖编译）与 Rust 单元测试，不打包
+      - name: Cargo clippy
         working-directory: packages/app/src-tauri
-        run: cargo check
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Cargo test
         working-directory: packages/app/src-tauri

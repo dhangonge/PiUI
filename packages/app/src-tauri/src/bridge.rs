@@ -202,7 +202,7 @@ pub fn ws_bridge_send(
         .sender(&key)
         .ok_or_else(|| "WebSocket is not connected".to_string())?;
     sender
-        .send(Message::Text(data.into()))
+        .send(Message::Text(data))
         .map_err(|error| error.to_string())
 }
 
