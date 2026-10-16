@@ -30,7 +30,7 @@
     "format:check": "npm run format:check -w @piui/app",
     "preview": "npm run preview -w @piui/app",
     "check": "npm run lint && npm run test:run -w @piui/app && npm run build",
-    "validate": "npm run check:docs && npm run conformance:sdk:check && npm run typecheck && npm run lint && npm test && npm run build",
+    "validate": "npm run check:docs && npm run conformance:sdk:check && npm run check:size && npm run typecheck && npm run lint && npm test && npm run build",
     "conformance:sdk": "node scripts/sdk-conformance.mjs",
     "conformance:sdk:check": "node scripts/sdk-conformance.mjs --check-only",
     "check:docs": "node scripts/check-doc-consistency.mjs",
@@ -41,7 +41,8 @@
     "tauri:android:dev": "npm run tauri:android:dev -w @piui/app",
     "tauri:android:build": "npm run tauri:android:build -w @piui/app",
     "release:prepare": "npm run release:prepare -w @piui/app",
-    "release:bump": "node packages/app/scripts/bump-version.mjs"
+    "release:bump": "node packages/app/scripts/bump-version.mjs",
+    "check:size": "node scripts/check-file-size.mjs"
   },
   "engines": {
     "node": ">=22.19.0"

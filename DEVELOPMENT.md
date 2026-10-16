@@ -100,6 +100,7 @@ Host 区也使用 registry/dispatch，不保留 workspace/files/git REST shortcu
 | `eslint.config.js`（根） | Node 侧包（protocol / pi-worker / server）+ `scripts/` 的 lint 基线 |
 | `packages/app/eslint.config.js` | app 自己的配置（React hooks / refresh 规则），继承同样的 warn 策略 |
 | `packages/app/.prettierrc.json` | prettier 目前只覆盖 app（Node 侧包是分号风格，单独迁移） |
+| `docs/app-architecture.md` | app 的分层、依赖方向、新代码放哪、单文件行数上限（配 `npm run check:size`） |
 
 门禁入口：
 
