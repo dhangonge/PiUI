@@ -68,7 +68,9 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
 
   // 标准化 directory 路径 (移除末尾斜杠，统一正斜杠)
   const normalizedDirectory = normalizeToForwardSlash(directory) || undefined
-  const connectionRevision = useSyncExternalStore(serverStore.subscribe.bind(serverStore), () => serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration())
+  const connectionRevision = useSyncExternalStore(serverStore.subscribe.bind(serverStore), () =>
+    serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration(),
+  )
 
   const [sessions, setSessions] = useState<UiSession[]>([])
   const [isLoading, setIsLoading] = useState(enabled)
@@ -138,7 +140,9 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
         for (let retryAttempt = 0; ; retryAttempt++) {
           try {
             const nativeSessions = normalizedDirectory
-              ? await (serverId ? loadPiSessionsForCwd(normalizedDirectory, retryAbort.signal, serverId) : loadPiSessionsForCwd(normalizedDirectory))
+              ? await (serverId
+                  ? loadPiSessionsForCwd(normalizedDirectory, retryAbort.signal, serverId)
+                  : loadPiSessionsForCwd(normalizedDirectory))
               : await (serverId ? loadPiSessions(retryAbort.signal, serverId) : loadPiSessions())
             const mapped = nativeSessions
               .map(piSessionInfoToUiSession)

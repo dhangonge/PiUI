@@ -59,10 +59,7 @@ vi.mock('../../utils/modelUtils', () => ({
   toggleModelPin: vi.fn(),
 }))
 
-const MODELS: ModelInfo[] = [
-  sdkModel('gpt-4.1', 'GPT-4.1', true),
-  sdkModel('gpt-4o-mini', 'GPT-4o Mini', false),
-]
+const MODELS: ModelInfo[] = [sdkModel('gpt-4.1', 'GPT-4.1', true), sdkModel('gpt-4o-mini', 'GPT-4o Mini', false)]
 
 describe('ModelSelector', () => {
   it('opens menu and selects a model', () => {

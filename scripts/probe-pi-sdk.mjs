@@ -13,7 +13,10 @@ const entry = pathToFileURL(join(sdkDir, 'dist/index.js'))
 let aiEntry
 for (let directory = sdkDir; directory !== dirname(directory); directory = dirname(directory)) {
   const candidate = join(directory, 'node_modules/@earendil-works/pi-ai/dist/index.js')
-  if (existsSync(candidate)) { aiEntry = candidate; break }
+  if (existsSync(candidate)) {
+    aiEntry = candidate
+    break
+  }
 }
 assert.ok(aiEntry, 'Pi AI must resolve from the selected SDK dependency family')
 const root = mkdtempSync(join(tmpdir(), 'piui-sdk-contract-'))
@@ -28,7 +31,9 @@ try {
   const faux = ai.fauxProvider({ provider: 'piui-probe', api: 'piui-probe' })
   faux.setResponses([ai.fauxAssistantMessage('offline contract answer')])
   modelRuntime = await sdk.ModelRuntime.create({
-    credentials: new ai.InMemoryCredentialStore(), modelsPath: null, allowModelNetwork: false,
+    credentials: new ai.InMemoryCredentialStore(),
+    modelsPath: null,
+    allowModelNetwork: false,
   })
   modelRuntime.registerNativeProvider(faux.provider)
   await modelRuntime.refresh({ allowNetwork: false })
@@ -45,15 +50,23 @@ try {
       getPrompts: () => ({ prompts: [], diagnostics: [] }),
       getThemes: () => ({ themes: [], diagnostics: [] }),
       getAgentsFiles: () => ({ agentsFiles: [] }),
-      getSystemPrompt: () => '', getAppendSystemPrompt: () => [],
-      extendResources() {}, async reload() {},
+      getSystemPrompt: () => '',
+      getAppendSystemPrompt: () => [],
+      extendResources() {},
+      async reload() {},
     }
     const services = { cwd, agentDir: root, modelRuntime, settingsManager, resourceLoader, diagnostics: [] }
     return {
-      ...await sdk.createAgentSessionFromServices({
-        services, sessionManager, sessionStartEvent, model: faux.getModel(), thinkingLevel: 'off', noTools: 'all',
-      }),
-      services, diagnostics: [],
+      ...(await sdk.createAgentSessionFromServices({
+        services,
+        sessionManager,
+        sessionStartEvent,
+        model: faux.getModel(),
+        thinkingLevel: 'off',
+        noTools: 'all',
+      })),
+      services,
+      diagnostics: [],
     }
   }
   runtime = await sdk.createAgentSessionRuntime(createRuntime, { cwd, agentDir: root, sessionManager: manager })
@@ -90,7 +103,9 @@ try {
     // Never overwrite a fixture: the caller must choose a new destination.
     writeFileSync(process.env.PIUI_PROBE_FIXTURE, sourceText, { flag: 'wx' })
   }
-  console.log(`PASS SDK ${sdk.VERSION}: module/session contracts, offline prompt, cancel, rebind, new/switch/fork/reload, persisted history`)
+  console.log(
+    `PASS SDK ${sdk.VERSION}: module/session contracts, offline prompt, cancel, rebind, new/switch/fork/reload, persisted history`,
+  )
 } finally {
   await runtime?.dispose()
   await modelRuntime?.dispose?.()

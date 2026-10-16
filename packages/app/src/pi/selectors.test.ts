@@ -41,7 +41,9 @@ function page(entries: SessionEntry[]): PiBranchPage {
 
 describe('selectPiTimelineItems bash grouping', () => {
   it('merges consecutive bash executions into one tool group', () => {
-    const items = selectPiTimelineItems(page([bashEntry('b1', 'ls'), bashEntry('b2', 'pwd'), bashEntry('b3', 'git status')]))
+    const items = selectPiTimelineItems(
+      page([bashEntry('b1', 'ls'), bashEntry('b2', 'pwd'), bashEntry('b3', 'git status')]),
+    )
     expect(items).toHaveLength(1)
     const group = items[0] as PiBashExecutionGroupItem
     expect(group.kind).toBe('bash_execution_group')
@@ -89,15 +91,16 @@ describe('selectPiTimelineItems bash grouping', () => {
 })
 
 describe('selectPiTimelineItems custom messages', () => {
-  const customEntry = (id: string, display: boolean) => ({
-    type: 'custom_message',
-    id,
-    parentId: null,
-    timestamp: '2026-01-01T00:00:00Z',
-    customType: 'plannotator-framing',
-    content: '[PLANNOTATOR - PLANNING PHASE] model-only context',
-    display,
-  } as unknown as SessionEntry)
+  const customEntry = (id: string, display: boolean) =>
+    ({
+      type: 'custom_message',
+      id,
+      parentId: null,
+      timestamp: '2026-01-01T00:00:00Z',
+      customType: 'plannotator-framing',
+      content: '[PLANNOTATOR - PLANNING PHASE] model-only context',
+      display,
+    }) as unknown as SessionEntry
 
   it('skips hook messages hidden from the conversation (display=false)', () => {
     const items = selectPiTimelineItems(page([userEntry('u1', 'hi'), customEntry('c1', false)]))
@@ -118,22 +121,30 @@ describe('selectPiTimelineItems custom messages', () => {
 })
 
 describe('selectPiTimelineItems live/persisted key handover', () => {
-  const assistantEntry = (id: string, text: string) => ({
-    type: 'message',
-    id,
-    parentId: null,
-    timestamp: '2026-01-01T00:00:00Z',
-    message: {
-      role: 'assistant',
-      content: [{ type: 'text', text }],
-      api: 'anthropic-messages',
-      provider: 'anthropic',
-      model: 'm',
-      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-      stopReason: 'stop',
-      timestamp: Date.now(),
-    },
-  }) as SessionEntry
+  const assistantEntry = (id: string, text: string) =>
+    ({
+      type: 'message',
+      id,
+      parentId: null,
+      timestamp: '2026-01-01T00:00:00Z',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+        api: 'anthropic-messages',
+        provider: 'anthropic',
+        model: 'm',
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: 'stop',
+        timestamp: Date.now(),
+      },
+    }) as SessionEntry
 
   function branchWith(checkpoint: PiBranchPage['checkpoint'], client?: PiBranchPage['client']): PiBranchPage {
     const entries = [userEntry('u1', 'hi'), assistantEntry('a1', 'done')]
@@ -161,7 +172,14 @@ describe('selectPiTimelineItems live/persisted key handover', () => {
             api: 'anthropic-messages',
             provider: 'anthropic',
             model: 'm',
-            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+            usage: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
             stopReason: 'stop',
             timestamp: Date.now(),
           },
@@ -190,7 +208,14 @@ describe('selectPiTimelineItems live/persisted key handover', () => {
           api: 'anthropic-messages',
           provider: 'anthropic',
           model: 'm',
-          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
           stopReason: 'stop',
           timestamp: Date.now(),
         },

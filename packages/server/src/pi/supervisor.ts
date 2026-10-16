@@ -1,15 +1,7 @@
-import { getPiWorkerEntryUrl, type WorkerEvent, type WorkerHello, type WorkerHostCall } from "@piui/pi-worker"
-import type { JsonObject, JsonValue } from "@piui/protocol"
-import {
-  WorkerSession,
-  type WorkerClientOptions,
-  type WorkerHost,
-} from "./worker-client.ts"
-import {
-  SessionLeaseManager,
-  type SessionLease,
-  type SessionReplacementReservation,
-} from "./session-lease.ts"
+import { getPiWorkerEntryUrl, type WorkerEvent, type WorkerHello, type WorkerHostCall } from '@piui/pi-worker'
+import type { JsonObject, JsonValue } from '@piui/protocol'
+import { WorkerSession, type WorkerClientOptions, type WorkerHost } from './worker-client.ts'
+import { SessionLeaseManager, type SessionLease, type SessionReplacementReservation } from './session-lease.ts'
 
 export interface RuntimeSupervisorOptions {
   workerEntry?: URL
@@ -58,7 +50,9 @@ export class RuntimeSupervisor {
       // 立即预孵化新 worker：崩溃后不等下一个请求才惰性重建。否则崩溃
       // 后的第一次访问要同时承担「spawn + 握手 + 命令」，且期间其他请求
       // 会打到已死的 host 上。预孵化让恢复对客户端近乎透明。
-      void this.ensureRuntimeHost().getHandshake().catch(() => undefined)
+      void this.ensureRuntimeHost()
+        .getHandshake()
+        .catch(() => undefined)
     })
     host.onEvent(event => {
       for (const listener of this.eventListeners) listener(event)
@@ -67,15 +61,19 @@ export class RuntimeSupervisor {
     return host
   }
 
-  async catalogCommand(type: string, params?: JsonObject, options: { retry?: boolean; idempotent?: boolean; signal?: AbortSignal } = {}): Promise<JsonValue | undefined> {
-    if (this.disposed) throw new Error("Runtime supervisor is disposed")
+  async catalogCommand(
+    type: string,
+    params?: JsonObject,
+    options: { retry?: boolean; idempotent?: boolean; signal?: AbortSignal } = {},
+  ): Promise<JsonValue | undefined> {
+    if (this.disposed) throw new Error('Runtime supervisor is disposed')
     try {
       return await this.ensureRuntimeHost().command(type, params, options.signal)
     } catch (error) {
       const code = errorCode(error)
-      if (code !== "WORKER_RESULT_UNKNOWN" && code !== "REQUEST_ABORTED") throw error
+      if (code !== 'WORKER_RESULT_UNKNOWN' && code !== 'REQUEST_ABORTED') throw error
       if (this.disposed) throw error
-      if (code === "REQUEST_ABORTED" || !options.retry || !options.idempotent) throw error
+      if (code === 'REQUEST_ABORTED' || !options.retry || !options.idempotent) throw error
       // 命令失败（超时/进程崩溃）：崩溃时 runtimeHost 已被 onCrash 丢弃，
       // 重试会自动孵化新进程；进程还活着时（纯超时）重试同一进程。
       return this.ensureRuntimeHost().command(type, params, options.signal)
@@ -89,7 +87,7 @@ export class RuntimeSupervisor {
 
   /** 共享 worker 进程的握手（真实 SDK 版本、verified、回退标记），供 health 上报。 */
   getCatalogHandshake(): Promise<WorkerHello> {
-    if (this.disposed) return Promise.reject(new Error("Runtime supervisor is disposed"))
+    if (this.disposed) return Promise.reject(new Error('Runtime supervisor is disposed'))
     return this.ensureRuntimeHost().getHandshake()
   }
 
@@ -107,7 +105,7 @@ export class RuntimeSupervisor {
   }
 
   open(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession> {
-    if (this.disposed) return Promise.reject(new Error("Runtime supervisor is disposed"))
+    if (this.disposed) return Promise.reject(new Error('Runtime supervisor is disposed'))
     const opening = this.performOpen(cwd, sessionFile, signal)
     this.pendingOpens.add(opening)
     void opening.finally(() => this.pendingOpens.delete(opening)).catch(() => undefined)
@@ -118,7 +116,7 @@ export class RuntimeSupervisor {
     let lease: SessionLease | undefined = sessionFile ? await this.leases.acquire(sessionFile) : undefined
     if (this.disposed) {
       lease?.release()
-      throw new Error("Runtime supervisor is disposed")
+      throw new Error('Runtime supervisor is disposed')
     }
     let runtime: WorkerSession
     try {
@@ -131,7 +129,7 @@ export class RuntimeSupervisor {
       if (this.disposed) {
         await runtime.dispose()
         lease?.release()
-        throw new Error("Runtime supervisor is disposed")
+        throw new Error('Runtime supervisor is disposed')
       }
       const runtimeSessionFile = sessionFile ?? runtime.getSessionFile() ?? `memory:${runtime.getSessionId()}`
       if (lease) await lease.refresh(runtimeSessionFile, runtime.getSessionId())
@@ -139,38 +137,35 @@ export class RuntimeSupervisor {
       if (this.disposed) {
         await runtime.dispose()
         lease.release()
-        throw new Error("Runtime supervisor is disposed")
+        throw new Error('Runtime supervisor is disposed')
       }
       const release = once(() => lease?.release())
       if (lease) this.runtimeLeases.set(runtime, lease)
       const reservations = new Map<string, SessionReplacementReservation>()
       runtime.setHostCallHandler(async (call: WorkerHostCall) => {
-        if (call.type === "extensionReplacement.reserve") {
+        if (call.type === 'extensionReplacement.reserve') {
           if (call.sourceSessionId !== runtime.getSessionId()) {
-            throw Object.assign(new Error("Extension replacement source no longer owns the runtime"), {
-              code: "RUNTIME_REPLACED",
+            throw Object.assign(new Error('Extension replacement source no longer owns the runtime'), {
+              code: 'RUNTIME_REPLACED',
             })
           }
           if (reservations.has(call.reservationId)) return
           if (!lease?.reserveReplacement) {
-            throw Object.assign(new Error("Runtime lease manager cannot reserve replacements"), {
-              code: "CAPABILITY_DISABLED",
+            throw Object.assign(new Error('Runtime lease manager cannot reserve replacements'), {
+              code: 'CAPABILITY_DISABLED',
             })
           }
-          reservations.set(
-            call.reservationId,
-            await lease.reserveReplacement(call.targetSessionFile),
-          )
+          reservations.set(call.reservationId, await lease.reserveReplacement(call.targetSessionFile))
           return
         }
-        if (call.type === "extensionReplacement.commit") {
+        if (call.type === 'extensionReplacement.commit') {
           if (call.replacement.sourceSessionId !== runtime.getSessionId()) {
-            throw Object.assign(new Error("Extension replacement source no longer owns the runtime"), {
-              code: "RUNTIME_REPLACED",
+            throw Object.assign(new Error('Extension replacement source no longer owns the runtime'), {
+              code: 'RUNTIME_REPLACED',
             })
           }
           const reservation = reservations.get(call.reservationId)
-          if (!reservation) throw Object.assign(new Error("Replacement reservation not found"), { code: "INTERNAL" })
+          if (!reservation) throw Object.assign(new Error('Replacement reservation not found'), { code: 'INTERNAL' })
           const replacement = call.replacement as { targetSessionFile?: string | null; targetSessionId?: string }
           try {
             await reservation.commit(replacement.targetSessionFile, replacement.targetSessionId)
@@ -178,19 +173,23 @@ export class RuntimeSupervisor {
           } catch (error) {
             reservation.rollback()
             reservations.delete(call.reservationId)
-            setImmediate(() => { void runtime.dispose() })
+            setImmediate(() => {
+              void runtime.dispose()
+            })
             throw error
           }
           return
         }
-        if (call.type === "extensionReplacement.abort") {
+        if (call.type === 'extensionReplacement.abort') {
           reservations.get(call.reservationId)?.rollback()
           reservations.delete(call.reservationId)
           return
         }
-        if (call.type === "extensionShutdown") {
+        if (call.type === 'extensionShutdown') {
           if (call.sessionId !== runtime.getSessionId()) return
-          setImmediate(() => { void runtime.dispose() })
+          setImmediate(() => {
+            void runtime.dispose()
+          })
         }
       })
       runtime.onClose(() => {
@@ -231,10 +230,7 @@ export class RuntimeSupervisor {
     // 不要并发发 session.close——dispose 命令会让调度器 closing，后到的
     // session.close 全被拒成 RUNTIME_CLOSING，纯噪音。
     const pendingOpens = [...this.pendingOpens]
-    await Promise.allSettled([
-      this.runtimeHost?.dispose() ?? Promise.resolve(),
-      ...pendingOpens,
-    ])
+    await Promise.allSettled([this.runtimeHost?.dispose() ?? Promise.resolve(), ...pendingOpens])
     // 进程已死，句柄 dispose 只做本地清理（onClose 释放 lease）
     if (this.active.size > 0) {
       await Promise.allSettled([...this.active].map(runtime => runtime.dispose()))
@@ -247,7 +243,7 @@ export class RuntimeSupervisor {
 }
 
 function errorCode(error: unknown): string | undefined {
-  return error && typeof error === "object" && "code" in error ? String(error.code) : undefined
+  return error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined
 }
 
 function once(run: () => void): () => void {

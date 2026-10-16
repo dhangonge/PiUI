@@ -66,7 +66,10 @@ function ContextDetailsBody({ contextLimit }: { contextLimit: number }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const messageEntries = useMemo(
-    () => (branch?.items ?? []).filter(isMessageEntry).filter(e => e.message.role === 'user' || e.message.role === 'assistant'),
+    () =>
+      (branch?.items ?? [])
+        .filter(isMessageEntry)
+        .filter(e => e.message.role === 'user' || e.message.role === 'assistant'),
     [branch],
   )
 
@@ -110,16 +113,13 @@ function ContextDetailsBody({ contextLimit }: { contextLimit: number }) {
             label={t('contextDetails.messages')}
             value={`${counts.all} (user ${counts.user}, assistant ${counts.assistant})`}
           />
-          <Stat
-            label={t('contextDetails.provider')}
-            value={lastAssistantWithTokens?.message.provider ?? '—'}
-          />
-          <Stat
-            label={t('contextDetails.model')}
-            value={lastAssistantWithTokens?.message.model ?? '—'}
-          />
+          <Stat label={t('contextDetails.provider')} value={lastAssistantWithTokens?.message.provider ?? '—'} />
+          <Stat label={t('contextDetails.model')} value={lastAssistantWithTokens?.message.model ?? '—'} />
           <Stat label={t('contextDetails.contextLimit')} value={formatTokens(contextLimit)} />
-          <Stat label={t('contextDetails.totalTokens')} value={stats.contextUsed ? formatTokens(stats.contextUsed) : '—'} />
+          <Stat
+            label={t('contextDetails.totalTokens')}
+            value={stats.contextUsed ? formatTokens(stats.contextUsed) : '—'}
+          />
           <Stat
             label={t('contextDetails.usage')}
             value={
@@ -141,7 +141,10 @@ function ContextDetailsBody({ contextLimit }: { contextLimit: number }) {
               label={t('contextDetails.cacheRW')}
               value={`${formatTokens(contextUsage.cacheRead)} / ${formatTokens(contextUsage.cacheWrite)}`}
             />
-            <Stat label={t('contextDetails.totalCost')} value={formatCost(lastAssistantWithTokens!.message.usage.cost.total)} />
+            <Stat
+              label={t('contextDetails.totalCost')}
+              value={formatCost(lastAssistantWithTokens!.message.usage.cost.total)}
+            />
           </div>
         )}
 
@@ -157,7 +160,9 @@ function ContextDetailsBody({ contextLimit }: { contextLimit: number }) {
       </div>
 
       <div className="mt-6">
-        <div className="text-[length:var(--fs-xs)] font-medium text-text-400 mb-2">{t('contextDetails.rawMessages')}</div>
+        <div className="text-[length:var(--fs-xs)] font-medium text-text-400 mb-2">
+          {t('contextDetails.rawMessages')}
+        </div>
         <div className="space-y-1">
           {messageEntries.map(entry => {
             const message = entry.message

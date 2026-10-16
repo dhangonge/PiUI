@@ -10,14 +10,23 @@ import {
   useReactFlow,
   type NodeProps,
 } from '@xyflow/react'
-import { Bot, ChevronDown, ChevronUp, FileText, Focus, GitBranch, Maximize2, Minus, Plus, Search, UserRound, Wrench } from 'lucide-react'
+import {
+  Bot,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  Focus,
+  GitBranch,
+  Maximize2,
+  Minus,
+  Plus,
+  Search,
+  UserRound,
+  Wrench,
+} from 'lucide-react'
 import '@xyflow/react/dist/style.css'
 import { IconButton } from './ui/IconButton'
-import {
-  type SessionGraphNode,
-  type SessionTreeGraph,
-  type SessionTreeNodeData,
-} from './sessionTreeGraph'
+import { type SessionGraphNode, type SessionTreeGraph, type SessionTreeNodeData } from './sessionTreeGraph'
 
 interface SessionTreeCanvasProps {
   sessionId: string
@@ -61,12 +70,24 @@ const SessionEntryNode = memo(function SessionEntryNode({ data, selected }: Node
 
   if (data.compact) {
     return (
-      <div className={`relative flex h-full w-[240px] cursor-pointer items-center gap-2 overflow-hidden rounded-lg border bg-bg-100 px-2.5 transition-colors ${stateClass}`} title={data.preview}>
+      <div
+        className={`relative flex h-full w-[240px] cursor-pointer items-center gap-2 overflow-hidden rounded-lg border bg-bg-100 px-2.5 transition-colors ${stateClass}`}
+        title={data.preview}
+      >
         <Handle type="target" position={Position.Top} className={handleClass} />
-        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${chip}`} aria-hidden="true"><Icon size={12} /></span>
-        <span className="shrink-0 text-[length:var(--fs-xs)] font-medium text-text-300">{data.label || roleLabel(data, t)}</span>
+        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${chip}`} aria-hidden="true">
+          <Icon size={12} />
+        </span>
+        <span className="shrink-0 text-[length:var(--fs-xs)] font-medium text-text-300">
+          {data.label || roleLabel(data, t)}
+        </span>
         <span className="min-w-0 flex-1 truncate text-[length:var(--fs-xs)] text-text-500">{data.preview}</span>
-        {data.currentLeaf ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-main-100" aria-label={t('sessionTree.currentShort')} /> : null}
+        {data.currentLeaf ? (
+          <span
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-main-100"
+            aria-label={t('sessionTree.currentShort')}
+          />
+        ) : null}
         <Handle type="source" position={Position.Bottom} className={handleClass} />
       </div>
     )
@@ -79,7 +100,9 @@ const SessionEntryNode = memo(function SessionEntryNode({ data, selected }: Node
     >
       <Handle type="target" position={Position.Top} className={handleClass} />
       <div className="flex min-w-0 items-center gap-1.5 px-2.5 pt-2">
-        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${chip}`} aria-hidden="true"><Icon size={12} /></span>
+        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${chip}`} aria-hidden="true">
+          <Icon size={12} />
+        </span>
         <span className="min-w-0 truncate text-[length:var(--fs-xs)] font-medium text-text-400">
           {data.label || roleLabel(data, t)}
         </span>
@@ -95,13 +118,21 @@ const SessionEntryNode = memo(function SessionEntryNode({ data, selected }: Node
       </p>
       <div className="flex min-h-5 items-center gap-2.5 px-2.5 pb-1.5 pt-1 text-[length:var(--fs-xs)] text-text-500">
         {data.toolCount > 0 ? (
-          <span className={`inline-flex items-center gap-1 tabular-nums ${data.hasToolError ? 'text-danger-100' : 'text-text-500'}`} title={t('sessionTree.toolCount', { count: data.toolCount })}>
-            <Wrench size={10} aria-hidden="true" />{data.toolCount}
+          <span
+            className={`inline-flex items-center gap-1 tabular-nums ${data.hasToolError ? 'text-danger-100' : 'text-text-500'}`}
+            title={t('sessionTree.toolCount', { count: data.toolCount })}
+          >
+            <Wrench size={10} aria-hidden="true" />
+            {data.toolCount}
           </span>
         ) : null}
         {data.branchCount > 1 ? (
-          <span className="inline-flex shrink-0 items-center gap-1 tabular-nums" title={t('sessionTree.branches', { count: data.branchCount })}>
-            <GitBranch size={10} aria-hidden="true" />{data.branchCount}
+          <span
+            className="inline-flex shrink-0 items-center gap-1 tabular-nums"
+            title={t('sessionTree.branches', { count: data.branchCount })}
+          >
+            <GitBranch size={10} aria-hidden="true" />
+            {data.branchCount}
           </span>
         ) : null}
       </div>
@@ -130,18 +161,31 @@ function CanvasContent({
   const focusedLeafRef = useRef<string | null>(null)
   const fittedEmptyTreeRef = useRef(false)
   const normalizedQuery = query.trim().toLocaleLowerCase()
-  const nodes = useMemo(() => graph.nodes.map(node => ({
-    ...node,
-    selected: node.id === selectedEntryId,
-    ariaLabel: `${node.data.label || roleLabel(node.data, t)}: ${node.data.preview}`,
-    className: normalizedQuery && !`${node.data.label ?? ''} ${node.data.preview}`.toLocaleLowerCase().includes(normalizedQuery)
-      ? 'opacity-25'
-      : node.id === pendingEntryId ? 'animate-pulse' : undefined,
-  })), [graph.nodes, normalizedQuery, pendingEntryId, selectedEntryId, t])
-  const matchedNodes = useMemo(() => normalizedQuery
-    ? nodes.filter(node => `${node.data.label ?? ''} ${node.data.preview}`.toLocaleLowerCase().includes(normalizedQuery))
-    : nodes,
-  [nodes, normalizedQuery])
+  const nodes = useMemo(
+    () =>
+      graph.nodes.map(node => ({
+        ...node,
+        selected: node.id === selectedEntryId,
+        ariaLabel: `${node.data.label || roleLabel(node.data, t)}: ${node.data.preview}`,
+        className:
+          normalizedQuery &&
+          !`${node.data.label ?? ''} ${node.data.preview}`.toLocaleLowerCase().includes(normalizedQuery)
+            ? 'opacity-25'
+            : node.id === pendingEntryId
+              ? 'animate-pulse'
+              : undefined,
+      })),
+    [graph.nodes, normalizedQuery, pendingEntryId, selectedEntryId, t],
+  )
+  const matchedNodes = useMemo(
+    () =>
+      normalizedQuery
+        ? nodes.filter(node =>
+            `${node.data.label ?? ''} ${node.data.preview}`.toLocaleLowerCase().includes(normalizedQuery),
+          )
+        : nodes,
+    [nodes, normalizedQuery],
+  )
 
   useEffect(() => {
     const root = rootRef.current
@@ -206,7 +250,11 @@ function CanvasContent({
       {/* 通栏工具条：与文件面板头部同款（h-10、内嵌图标搜索框、幽灵按钮、inset 细线） */}
       <div className="relative flex h-10 shrink-0 items-center gap-2 px-3">
         <div className="group relative min-w-0 flex-1">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-400 transition-colors group-focus-within:text-accent-main-100" aria-hidden="true" />
+          <Search
+            size={14}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-400 transition-colors group-focus-within:text-accent-main-100"
+            aria-hidden="true"
+          />
           <input
             value={query}
             onChange={event => {
@@ -229,10 +277,7 @@ function CanvasContent({
             autoComplete="off"
             className="w-full rounded-lg border border-transparent bg-bg-200/40 py-1 pl-[30px] pr-[88px] text-[length:var(--fs-xs)] text-text-100 transition-all placeholder:text-text-400/70 hover:bg-bg-200/60 focus:border-border-200 focus:bg-bg-000 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-border-200 focus-visible:outline-none"
           />
-          <span
-            className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5"
-            aria-live="polite"
-          >
+          <span className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5" aria-live="polite">
             <span className="min-w-[2.5rem] px-1 text-right tabular-nums text-[length:var(--fs-xs)] text-text-500">
               {normalizedQuery ? `${matchIndex + 1}/${matchedNodes.length}` : nodes.length}
             </span>
@@ -293,20 +338,38 @@ function CanvasContent({
         </ReactFlow>
 
         <div className="absolute bottom-2 left-2 z-10 flex items-center rounded-md border border-border-200 bg-bg-100/95 p-0.5 shadow-sm">
-          <IconButton aria-label={t('sessionTree.zoomOut')} title={t('sessionTree.zoomOut')} size="sm" onClick={() => void zoomOut({ duration: 150 })}>
+          <IconButton
+            aria-label={t('sessionTree.zoomOut')}
+            title={t('sessionTree.zoomOut')}
+            size="sm"
+            onClick={() => void zoomOut({ duration: 150 })}
+          >
             <Minus size={14} />
           </IconButton>
-          <IconButton aria-label={t('sessionTree.zoomIn')} title={t('sessionTree.zoomIn')} size="sm" onClick={() => void zoomIn({ duration: 150 })}>
+          <IconButton
+            aria-label={t('sessionTree.zoomIn')}
+            title={t('sessionTree.zoomIn')}
+            size="sm"
+            onClick={() => void zoomIn({ duration: 150 })}
+          >
             <Plus size={14} />
           </IconButton>
           <span className="mx-0.5 h-4 w-px bg-border-200" aria-hidden="true" />
-          <IconButton aria-label={t('sessionTree.fitView')} title={t('sessionTree.fitView')} size="sm" onClick={() => void fitView({ padding: 0.2, minZoom: 0.25, maxZoom: 1.2, duration: 200 })}>
+          <IconButton
+            aria-label={t('sessionTree.fitView')}
+            title={t('sessionTree.fitView')}
+            size="sm"
+            onClick={() => void fitView({ padding: 0.2, minZoom: 0.25, maxZoom: 1.2, duration: 200 })}
+          >
             <Maximize2 size={14} />
           </IconButton>
         </div>
 
         {loading && nodes.length === 0 ? (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[length:var(--fs-sm)] text-text-400" role="status">
+          <div
+            className="pointer-events-none absolute inset-0 flex items-center justify-center text-[length:var(--fs-sm)] text-text-400"
+            role="status"
+          >
             {t('sessionTree.loading')}
           </div>
         ) : null}
@@ -316,7 +379,10 @@ function CanvasContent({
           </div>
         ) : null}
         {error ? (
-          <div className="absolute bottom-2 left-2 right-2 rounded-md border border-danger-100/30 bg-bg-100 px-3 py-2 text-[length:var(--fs-xs)] text-danger-100" role="alert">
+          <div
+            className="absolute bottom-2 left-2 right-2 rounded-md border border-danger-100/30 bg-bg-100 px-3 py-2 text-[length:var(--fs-xs)] text-danger-100"
+            role="alert"
+          >
             {error}
           </div>
         ) : null}

@@ -29,9 +29,13 @@ const STATUS_BY_GLYPH: Record<string, TodoItem['status']> = {
 export function TodoWidget({ sessionId }: { sessionId: string | null }) {
   const { t } = useTranslation(['message', 'components'])
   const [collapsed, setCollapsed] = useState(false)
-  const snapshot = useSyncExternalStore(extensionUiStore.subscribe, extensionUiStore.getSnapshot, extensionUiStore.getSnapshot)
+  const snapshot = useSyncExternalStore(
+    extensionUiStore.subscribe,
+    extensionUiStore.getSnapshot,
+    extensionUiStore.getSnapshot,
+  )
   const widgets = useMemo(
-    () => (sessionId ? snapshot.sessions[sessionId]?.state.widgets ?? {} : {}),
+    () => (sessionId ? (snapshot.sessions[sessionId]?.state.widgets ?? {}) : {}),
     [sessionId, snapshot],
   )
   const parsed = useMemo(() => {
@@ -51,7 +55,10 @@ export function TodoWidget({ sessionId }: { sessionId: string | null }) {
   const total = parsed.counts?.total ?? parsed.todos.length
 
   return (
-    <div data-todo-widget className="todo-widget shrink-0 min-w-0 overflow-hidden rounded-xl border border-border-200/60 bg-bg-100 shadow-float text-[length:var(--fs-xs)] leading-5">
+    <div
+      data-todo-widget
+      className="todo-widget shrink-0 min-w-0 overflow-hidden rounded-xl border border-border-200/60 bg-bg-100 shadow-float text-[length:var(--fs-xs)] leading-5"
+    >
       <button
         type="button"
         aria-expanded={!collapsed}

@@ -140,7 +140,8 @@ function App() {
   // Runtime replacement (fork/new/import): panes follow the new session id
   useEffect(() => {
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sourceSessionId?: string; targetSessionId?: string; targetCwd?: string }>).detail
+      const detail = (event as CustomEvent<{ sourceSessionId?: string; targetSessionId?: string; targetCwd?: string }>)
+        .detail
       if (!detail?.sourceSessionId || !detail.targetSessionId) return
       paneLayoutStore.remapSession(detail.sourceSessionId, detail.targetSessionId)
       if (routeSessionId === detail.sourceSessionId) {
@@ -327,7 +328,8 @@ function App() {
     const scrollLeft = pager.scrollLeft
 
     // -1 (滑向左栏) 到 0 (对话页) 到 1 (滑向右栏)
-    const rawProgress = (scrollLeft - mobileChatScrollLeft) / (scrollLeft < mobileChatScrollLeft ? mobileLeftPanelWidth : mobilePageWidth)
+    const rawProgress =
+      (scrollLeft - mobileChatScrollLeft) / (scrollLeft < mobileChatScrollLeft ? mobileLeftPanelWidth : mobilePageWidth)
     const progress = Math.max(-1, Math.min(1, rawProgress))
     const absProgress = Math.abs(progress)
     const rightProgress = Math.max(0, progress)
@@ -487,7 +489,14 @@ function App() {
     if (sidebarExpanded) setSidebarExpanded(false)
     scrollMobilePagerTo('right')
     layoutStore.openRightPanel()
-  }, [ensureMobileRightPanelRendered, isMobilePanelLayout, rightPanelOpen, scrollMobilePagerTo, setSidebarExpanded, sidebarExpanded])
+  }, [
+    ensureMobileRightPanelRendered,
+    isMobilePanelLayout,
+    rightPanelOpen,
+    scrollMobilePagerTo,
+    setSidebarExpanded,
+    sidebarExpanded,
+  ])
 
   // Pi 全局模式：无 currentDirectory 时使用 pane 对应 session 的真实目录
   // 空目录时 resolveWorkspacePath 会落到 server 默认 workspace，FileExplorer 仍可 list
@@ -576,9 +585,7 @@ function App() {
       focusInput: () => {
         // 优先聚焦 focused pane 的输入框（分屏时多个输入框）
         const pid = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
-        const root = pid
-          ? document.querySelector<HTMLElement>(`[data-pane-id="${pid}"]`)
-          : document
+        const root = pid ? document.querySelector<HTMLElement>(`[data-pane-id="${pid}"]`) : document
         const input = (root ?? document).querySelector<HTMLTextAreaElement>('[data-input-box] textarea')
         input?.focus()
       },
@@ -586,12 +593,12 @@ function App() {
       archiveSession: capabilities.sessionArchive ? () => focusedController?.archiveSession() : undefined,
       previousSession: () => focusedController?.previousSession(),
       nextSession: () => focusedController?.nextSession(),
-       toggleTerminal: () => {
-         layoutStore.toggleBottomPanel()
-       },
-       newTerminal: () => {
-         window.dispatchEvent(new Event('piui:new-terminal'))
-       },
+      toggleTerminal: () => {
+        layoutStore.toggleBottomPanel()
+      },
+      newTerminal: () => {
+        window.dispatchEvent(new Event('piui:new-terminal'))
+      },
       selectModel: () => focusedController?.openModelSelector(),
       toggleAgent: () => focusedController?.toggleAgent(),
       cancelMessage: () => focusedController?.cancelMessage(),
@@ -715,14 +722,18 @@ function App() {
         shortcut: getShortcut('newSession'),
         action: () => focusedController?.newSession(),
       },
-      ...(capabilities.sessionArchive ? [{
-        id: 'archiveSession',
-        label: t('commands:archiveSession'),
-        description: t('commands:archiveSessionDesc'),
-        category: t('commands:categories.session'),
-        shortcut: getShortcut('archiveSession'),
-        action: () => focusedController?.archiveSession(),
-      }] : []),
+      ...(capabilities.sessionArchive
+        ? [
+            {
+              id: 'archiveSession',
+              label: t('commands:archiveSession'),
+              description: t('commands:archiveSessionDesc'),
+              category: t('commands:categories.session'),
+              shortcut: getShortcut('archiveSession'),
+              action: () => focusedController?.archiveSession(),
+            },
+          ]
+        : []),
       {
         id: 'previousSession',
         label: t('commands:previousSession'),
@@ -866,7 +877,6 @@ function App() {
     capabilities.sessionArchive,
   ])
 
-
   return (
     <div className="relative flex h-full flex-col bg-bg-100 overflow-hidden">
       <DesktopTitlebar />
@@ -932,14 +942,17 @@ function App() {
                     aria-hidden={mobileActivePage !== 'chat'}
                     inert={mobileActivePage !== 'chat'}
                     style={{
-                      transform: 'translate3d(var(--mobile-chat-offset-x, 0px), 0, 0) rotateY(var(--mobile-chat-rotate-y, 0deg)) scale(var(--mobile-chat-scale, 1))',
+                      transform:
+                        'translate3d(var(--mobile-chat-offset-x, 0px), 0, 0) rotateY(var(--mobile-chat-rotate-y, 0deg)) scale(var(--mobile-chat-scale, 1))',
                       transformOrigin: 'var(--mobile-chat-transform-origin, 50% 50%)',
                       transformStyle: 'preserve-3d',
                       backfaceVisibility: 'hidden',
                       willChange: 'transform',
                     }}
                   >
-                    <div className={`flex-1 min-h-0 px-4 ${paneLayout.isSplit && !paneLayout.fullscreenPaneId ? 'py-2' : ''}`}>
+                    <div
+                      className={`flex-1 min-h-0 px-4 ${paneLayout.isSplit && !paneLayout.fullscreenPaneId ? 'py-2' : ''}`}
+                    >
                       <SplitContainer
                         node={paneLayout.root}
                         renderLeaf={renderPaneLeaf}
@@ -985,13 +998,17 @@ function App() {
                 </section>
               </div>
 
-              <BottomPanel directory={focusedDirectory} onNavigateSession={handleSelectSession} onNewChat={handleNewSession} />
+              <BottomPanel
+                directory={focusedDirectory}
+                onNavigateSession={handleSelectSession}
+                onNewChat={handleNewSession}
+              />
             </>
           ) : (
             <>
               <Sidebar
                 isOpen={sidebarExpanded}
-                    selectedSessionId={paneLayout.focusedSessionId}
+                selectedSessionId={paneLayout.focusedSessionId}
                 onSelectSession={handleSelectSession}
                 onNewSession={handleNewSession}
                 onOpen={handleOpenSidebar}
@@ -1008,7 +1025,11 @@ function App() {
                   className="flex-1 flex flex-col min-w-0 overflow-hidden"
                   style={{ minWidth: `${CHAT_SURFACE_MIN_WIDTH}px` }}
                 >
-                  <div className={paneLayout.isSplit && !paneLayout.fullscreenPaneId ? 'flex-1 min-h-0 p-2' : 'flex-1 min-h-0'}>
+                  <div
+                    className={
+                      paneLayout.isSplit && !paneLayout.fullscreenPaneId ? 'flex-1 min-h-0 p-2' : 'flex-1 min-h-0'
+                    }
+                  >
                     <SplitContainer
                       node={paneLayout.root}
                       renderLeaf={renderPaneLeaf}
@@ -1016,7 +1037,11 @@ function App() {
                     />
                   </div>
 
-                  <BottomPanel directory={focusedDirectory} onNavigateSession={handleSelectSession} onNewChat={handleNewSession} />
+                  <BottomPanel
+                    directory={focusedDirectory}
+                    onNavigateSession={handleSelectSession}
+                    onNewChat={handleNewSession}
+                  />
                 </div>
 
                 <RightPanel

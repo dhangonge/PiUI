@@ -37,10 +37,12 @@ export type PiTodoItem = {
 }
 
 function extractTodosFromExecution(callArguments: unknown, resultDetails: unknown): PiTodoItem[] {
-  const input = callArguments && typeof callArguments === 'object' ? (callArguments as Record<string, unknown>) : undefined
-  const details = resultDetails && typeof resultDetails === 'object' && !Array.isArray(resultDetails)
-    ? (resultDetails as Record<string, unknown>)
-    : undefined
+  const input =
+    callArguments && typeof callArguments === 'object' ? (callArguments as Record<string, unknown>) : undefined
+  const details =
+    resultDetails && typeof resultDetails === 'object' && !Array.isArray(resultDetails)
+      ? (resultDetails as Record<string, unknown>)
+      : undefined
   return (details?.todos as PiTodoItem[]) || (input?.todos as PiTodoItem[]) || []
 }
 
@@ -136,7 +138,8 @@ export function usePiSessionTitle(sessionId: string | null): string | null {
   const sessionInfos = usePiSessionInfos()
   return useMemo(() => {
     if (!sessionId) return null
-    const stateName = typeof state?.sessionName === 'string' && state.sessionName.trim() ? state.sessionName.trim() : null
+    const stateName =
+      typeof state?.sessionName === 'string' && state.sessionName.trim() ? state.sessionName.trim() : null
     if (stateName) return stateName
     const info = sessionInfos.find(item => item.id === sessionId)
     return info?.name?.trim() || info?.firstMessage?.trim() || null

@@ -19,21 +19,25 @@ export async function listHostWorkspaces(signal?: AbortSignal, serverId?: string
   return data.workspaces
 }
 
-export async function openHostWorkspace(rootPath?: string, displayName?: string, signal?: AbortSignal, serverId?: string): Promise<HostWorkspace> {
+export async function openHostWorkspace(
+  rootPath?: string,
+  displayName?: string,
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<HostWorkspace> {
   const params: { rootPath?: string; displayName?: string } = {}
   if (rootPath) params.rootPath = rootPath
   if (displayName) params.displayName = displayName
-  const data = await postHostCommand<{ workspace: HostWorkspace }>(
-    'workspaces.open',
-    params,
-    signal,
-    serverId,
-  )
+  const data = await postHostCommand<{ workspace: HostWorkspace }>('workspaces.open', params, signal, serverId)
   if (!serverId || serverId === serverStore.getActiveServerId()) trackPiWorkspace(data.workspace.path)
   return data.workspace
 }
 
-export async function watchHostWorkspace(workspacePath: string, signal?: AbortSignal, serverId?: string): Promise<void> {
+export async function watchHostWorkspace(
+  workspacePath: string,
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<void> {
   await postHostCommand<{ ok: boolean }>('workspaces.watch', { workspacePath }, signal, serverId)
 }
 
@@ -41,7 +45,7 @@ const workspaceResolutionPromises = new Map<string, Promise<string | null>>()
 const defaultWorkspacePromises = new Map<string, Promise<string | null>>()
 
 function captureWorkspaceRevision(serverId?: string): () => void {
-  const revision = () => serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration()
+  const revision = () => (serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration())
   const initial = revision()
   return () => {
     if (revision() !== initial) throw new DOMException('Workspace server changed', 'AbortError')

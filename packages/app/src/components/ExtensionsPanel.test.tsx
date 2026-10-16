@@ -11,8 +11,16 @@ describe('extension status presentation', () => {
   beforeEach(() => extensionUiStore.reset())
 
   it('renders themed status and widgets without control sequences or HTML execution', () => {
-    extensionUiStore.statePatched('a::same', { kind: 'status', key: 'mcp', text: '\u001b[38;2;10;20;30mConnected\u001b[0m' })
-    extensionUiStore.statePatched('a::same', { kind: 'widget', key: 'todo', lines: ['\u001b[1mTask\u001b[22m', '<script>literal</script>'] })
+    extensionUiStore.statePatched('a::same', {
+      kind: 'status',
+      key: 'mcp',
+      text: '\u001b[38;2;10;20;30mConnected\u001b[0m',
+    })
+    extensionUiStore.statePatched('a::same', {
+      kind: 'widget',
+      key: 'todo',
+      lines: ['\u001b[1mTask\u001b[22m', '<script>literal</script>'],
+    })
     const { container } = render(<ExtensionsPanel sessionId="a::same" />)
     expect(screen.getByText(/Connected/)).toBeTruthy()
     expect(container.textContent).toContain('Task')
@@ -33,6 +41,8 @@ describe('extension status presentation', () => {
   })
 
   it('strips OSC commands, cursor controls and C0 bytes while preserving text layout', () => {
-    expect(stripAnsi('\u001b]8;;https://example.com\u0007link\u001b]8;;\u001b\\\u001b[2J\u0000\n\ttext')).toBe('link\n\ttext')
+    expect(stripAnsi('\u001b]8;;https://example.com\u0007link\u001b]8;;\u001b\\\u001b[2J\u0000\n\ttext')).toBe(
+      'link\n\ttext',
+    )
   })
 })

@@ -146,7 +146,11 @@ export function getModelVariantPrefs(serverId = serverStore.getActiveServerId())
 /**
  * 保存模型的 variant 偏好
  */
-export function saveModelVariantPref(modelKey: string, variant: string | undefined, serverId = serverStore.getActiveServerId()): void {
+export function saveModelVariantPref(
+  modelKey: string,
+  variant: string | undefined,
+  serverId = serverStore.getActiveServerId(),
+): void {
   const prefs = getModelVariantPrefs(serverId)
 
   if (variant) {

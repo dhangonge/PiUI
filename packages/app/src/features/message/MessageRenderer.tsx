@@ -8,12 +8,7 @@ import { useDisclosureScrollLock } from '../../hooks'
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 import { useNow } from '../../hooks/useNow'
 import { useTheme } from '../../hooks/useTheme'
-import {
-  TextPartView,
-  ReasoningPartView,
-  MessageErrorView,
-  ToolGroup,
-} from './parts'
+import { TextPartView, ReasoningPartView, MessageErrorView, ToolGroup } from './parts'
 import { PiSystemItemView } from './parts/PiSystemItemViews'
 import { MSG_SPACING } from './messageSpacing'
 import { MessageExpandPanel, useMessageExpandRender } from './messageExpand'
@@ -46,10 +41,7 @@ import {
   markEntryGrowComplete,
   shouldPlayEntryGrow,
 } from '../../utils/entryGrow'
-import {
-  formatDuration,
-  formatProcessDuration,
-} from '../../utils/formatUtils'
+import { formatDuration, formatProcessDuration } from '../../utils/formatUtils'
 import { lockScrollAroundAnchor } from '../../utils/scrollUtils'
 import { useUiDisclosureState } from '../../utils/uiDisclosureState'
 
@@ -80,12 +72,7 @@ const ProcessCollapseHeader = memo(function ProcessCollapseHeader({
   if (liveMs != null && liveMs !== lastLiveMs) {
     setLastLiveMs(liveMs)
   }
-  const displayMs =
-    liveMs != null
-      ? liveMs
-      : durationMs != null && durationMs > 0
-        ? durationMs
-        : lastLiveMs
+  const displayMs = liveMs != null ? liveMs : durationMs != null && durationMs > 0 ? durationMs : lastLiveMs
   // Working/Worked：整秒无小数；超过 1 分钟带 m（如 3m 12s）
   const durationLabel = formatProcessDuration(displayMs)
   const label = isActive
@@ -353,7 +340,11 @@ function useEntryGrowAnimation(
     el.style.height = '0px'
     el.style.clipPath = 'inset(0 -100% 0 -100%)'
     let cancelled = false
-    const controls = animate(el, { height: `${targetHeight}px` }, { duration: ENTRY_GROW_DURATION_MS / 1000, ease: 'easeOut' })
+    const controls = animate(
+      el,
+      { height: `${targetHeight}px` },
+      { duration: ENTRY_GROW_DURATION_MS / 1000, ease: 'easeOut' },
+    )
     void Promise.resolve(controls).then(
       () => {
         if (cancelled) return
@@ -361,7 +352,9 @@ function useEntryGrowAnimation(
         el.style.clipPath = ''
         finish()
       },
-      () => { /* Cleanup handles cancelled animations. */ },
+      () => {
+        /* Cleanup handles cancelled animations. */
+      },
     )
     return () => {
       cancelled = true
@@ -382,7 +375,8 @@ function useEntryGrowAnimation(
 /** 默认预览 8 行 */
 const COLLAPSE_PREVIEW_LINES = 8
 const LEADING_RELAXED = 1.625
-const USER_HTML_ARTIFACT_PATTERN = /(?:```(?:html|htm)\b|<!doctype\s+html\b|<html\b|<style\b|<script\b|<canvas\b|\son[a-z]+\s*=)/i
+const USER_HTML_ARTIFACT_PATTERN =
+  /(?:```(?:html|htm)\b|<!doctype\s+html\b|<html\b|<style\b|<script\b|<canvas\b|\son[a-z]+\s*=)/i
 
 // 折叠状态缓存：消息是否溢出
 const overflowStateCache = new Map<string, boolean>()
@@ -448,9 +442,7 @@ const CollapsibleUserText = memo(function CollapsibleUserText({
           }}
           className={`m-0 break-words text-[length:var(--fs-base)] text-text-100 leading-relaxed${
             renderMarkdown ? '' : ' whitespace-pre-wrap'
-          }${
-            isCollapsed ? ' overflow-hidden' : ''
-          }`}
+          }${isCollapsed ? ' overflow-hidden' : ''}`}
           style={
             isCollapsed
               ? {
@@ -558,7 +550,9 @@ const UserMessageView = memo(function UserMessageView({
 
   // 文本块拼接；图片块走附件胶囊渲染（AttachmentItem 通用消费）
   const textBlocks = blocks.filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
-  const imageBlocks = blocks.filter((block): block is Extract<typeof block, { type: 'image' }> => block.type === 'image')
+  const imageBlocks = blocks.filter(
+    (block): block is Extract<typeof block, { type: 'image' }> => block.type === 'image',
+  )
   const messageText = textBlocks.map(block => block.text).join('')
   const hasUserHtmlArtifact = renderUserMarkdown && USER_HTML_ARTIFACT_PATTERN.test(messageText)
 
@@ -737,59 +731,57 @@ const AssistantMessageView = memo(function AssistantMessageView({
       {/* 流式增高走自然撑开 + 贴底 scroll：不做 height 补间，避免每帧
           layout/remeasure 以及锁高追赶造成的内容重叠/空白 */}
       <div className={`flex flex-col ${MSG_SPACING.stack}`}>
-          {renderItems.map((renderItem: RenderItem) => {
-            if (renderItem.type === 'tool-group') {
+        {renderItems.map((renderItem: RenderItem) => {
+          if (renderItem.type === 'tool-group') {
+            return (
+              <ToolGroup
+                key={`${item.entryId}:tg:${renderItem.firstIndex}`}
+                groupId={item.entryId}
+                startedAt={item.timestamp}
+                executions={renderItem.executions}
+                isStreaming={isStreaming}
+                modelLabel={modelLabel}
+              />
+            )
+          }
+
+          const block = renderItem.block
+          switch (block.type) {
+            case 'text':
               return (
-                <ToolGroup
-                  key={`${item.entryId}:tg:${renderItem.firstIndex}`}
-                  groupId={item.entryId}
-                  startedAt={item.timestamp}
-                  executions={renderItem.executions}
-                  isStreaming={isStreaming}
-                  modelLabel={modelLabel}
+                <TextPartView key={`${item.entryId}:${renderItem.blockIndex}`} part={block} isStreaming={isStreaming} />
+              )
+            case 'thinking': {
+              const thinkingDone = endedReasoningIndexes.has(renderItem.blockIndex)
+              return (
+                <ReasoningPartView
+                  key={`${item.entryId}:${renderItem.blockIndex}`}
+                  part={block}
+                  partKey={`${item.entryId}:${renderItem.blockIndex}`}
+                  isStreaming={isStreaming && !thinkingDone}
                 />
               )
             }
-
-            const block = renderItem.block
-            switch (block.type) {
-              case 'text':
-                return (
-                  <TextPartView
-                    key={`${item.entryId}:${renderItem.blockIndex}`}
-                    part={block}
-                    isStreaming={isStreaming}
-                  />
-                )
-              case 'thinking': {
-                const thinkingDone = endedReasoningIndexes.has(renderItem.blockIndex)
-                return (
-                  <ReasoningPartView
-                    key={`${item.entryId}:${renderItem.blockIndex}`}
-                    part={block}
-                    partKey={`${item.entryId}:${renderItem.blockIndex}`}
-                    isStreaming={isStreaming && !thinkingDone}
-                  />
-                )
-              }
-              default:
-                return null
-            }
-          })}
-        </div>
+            default:
+              return null
+          }
+        })}
+      </div>
 
       {/* Message-level error：过程壳内不重复挂错误 */}
       {messageError && processContentScope !== 'process' && processContentScope !== 'inline' && (
         <MessageErrorView error={messageError} stateKey={`message:${item.entryId}:error`} />
       )}
 
-      {processContentScope !== 'process' && processContentScope !== 'inline' && (showTurnDurationFooter || showCompletedAtFooter) && (
-        <div className="flex items-center gap-3 py-0.5 text-[length:var(--fs-xxs)] text-text-500">
-          {showTurnDurationFooter && (
-            <span>{t('stepFinish.totalDuration', { duration: formatDuration(turnDuration!) })}</span>
-          )}
-        </div>
-      )}
+      {processContentScope !== 'process' &&
+        processContentScope !== 'inline' &&
+        (showTurnDurationFooter || showCompletedAtFooter) && (
+          <div className="flex items-center gap-3 py-0.5 text-[length:var(--fs-xxs)] text-text-500">
+            {showTurnDurationFooter && (
+              <span>{t('stepFinish.totalDuration', { duration: formatDuration(turnDuration!) })}</span>
+            )}
+          </div>
+        )}
 
       {showMessageActions && hasCopyableText && (
         <div className={actionBarClass}>

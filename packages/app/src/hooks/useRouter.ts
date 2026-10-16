@@ -132,9 +132,10 @@ export function useRouter() {
     const currentRoute = getSnapshot()
     const previousServerId = currentRoute.serverId
     sessionId = bindSession(sessionId)
-    const fallback = previousServerId === sessionKeyToServerId(sessionId)
-      ? currentRoute.directory
-      : serverStorage.getFor(STORAGE_KEY_LAST_DIRECTORY, sessionKeyToServerId(sessionId)) ?? undefined
+    const fallback =
+      previousServerId === sessionKeyToServerId(sessionId)
+        ? currentRoute.directory
+        : (serverStorage.getFor(STORAGE_KEY_LAST_DIRECTORY, sessionKeyToServerId(sessionId)) ?? undefined)
     const dir = directory !== undefined ? normalizeToForwardSlash(directory) || undefined : fallback
     const next = { sessionId, directory: dir }
     const newHash = buildHash(sessionId, dir)
@@ -162,9 +163,10 @@ export function useRouter() {
     const currentRoute = getSnapshot()
     const previousServerId = currentRoute.serverId
     if (sessionId) sessionId = bindSession(sessionId)
-    const fallback = !sessionId || previousServerId === sessionKeyToServerId(sessionId)
-      ? currentRoute.directory
-      : serverStorage.getFor(STORAGE_KEY_LAST_DIRECTORY, sessionKeyToServerId(sessionId)) ?? undefined
+    const fallback =
+      !sessionId || previousServerId === sessionKeyToServerId(sessionId)
+        ? currentRoute.directory
+        : (serverStorage.getFor(STORAGE_KEY_LAST_DIRECTORY, sessionKeyToServerId(sessionId)) ?? undefined)
     const dir = directory !== undefined ? normalizeToForwardSlash(directory) || undefined : fallback
     const newHash = buildHash(sessionId, dir)
     window.history.replaceState(null, '', newHash)

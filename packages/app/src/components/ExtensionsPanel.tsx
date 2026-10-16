@@ -37,16 +37,24 @@ export function ExtensionsPanel({ sessionId }: { sessionId: string | null }) {
     commandFeedbackStore.getSnapshot,
   )
   const state = sessionId ? snapshot.sessions[sessionId]?.state : undefined
-  const pending = sessionId ? snapshot.sessions[sessionId]?.pending ?? [] : []
-  const panels = sessionId ? tuiSnapshot.sessions[sessionId]?.panels ?? [] : []
-  const feedback = sessionId ? feedbackSnapshot.sessions[sessionId] ?? [] : []
+  const pending = sessionId ? (snapshot.sessions[sessionId]?.pending ?? []) : []
+  const panels = sessionId ? (tuiSnapshot.sessions[sessionId]?.panels ?? []) : []
+  const feedback = sessionId ? (feedbackSnapshot.sessions[sessionId] ?? []) : []
 
   if (!sessionId) {
-    return <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">{t('rightPanel.noActiveSession')}</div>
+    return (
+      <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
+        {t('rightPanel.noActiveSession')}
+      </div>
+    )
   }
 
   const statuses = state ? Object.entries(state.statuses) : []
-  const widgets = state ? Object.entries(state.widgets).filter(([key]) => !panels.some(panel => panel.kind === 'widget' && panel.key === key)) : []
+  const widgets = state
+    ? Object.entries(state.widgets).filter(
+        ([key]) => !panels.some(panel => panel.kind === 'widget' && panel.key === key),
+      )
+    : []
   const hasWorking = Boolean(state?.workingMessage || state?.workingIndicator || state?.title)
 
   if (!state && pending.length === 0 && panels.length === 0 && feedback.length === 0) {
@@ -66,7 +74,11 @@ export function ExtensionsPanel({ sessionId }: { sessionId: string | null }) {
         <section className="flex flex-col gap-2">
           <SectionLabel>{t('extensionsPanel.dialogs', 'Dialog')}</SectionLabel>
           {sortedPending.map(request => (
-            <ExtensionUiDialogCard key={`${request.sessionId}:${request.workerGeneration ?? ''}:${request.requestId}`} request={request} compact />
+            <ExtensionUiDialogCard
+              key={`${request.sessionId}:${request.workerGeneration ?? ''}:${request.requestId}`}
+              request={request}
+              compact
+            />
           ))}
         </section>
       )}
@@ -97,9 +109,7 @@ export function ExtensionsPanel({ sessionId }: { sessionId: string | null }) {
         <section>
           <SectionLabel>
             {t('extensionsPanel.tui', 'Extension TUI')}
-            <span className="ml-1 text-text-500/60">
-              ({panels.map(panel => panel.key).join(', ')})
-            </span>
+            <span className="ml-1 text-text-500/60">({panels.map(panel => panel.key).join(', ')})</span>
           </SectionLabel>
           <div className="rounded-md border border-border-200/60 bg-bg-000/60 overflow-hidden">
             <ExtensionTuiView sessionId={sessionId} className="w-full min-h-24 max-h-[60vh] px-1.5 py-1" />
@@ -168,7 +178,9 @@ function CommandFeedbackItem({ entry }: { entry: CommandFeedbackEntry }) {
           {config.label}
         </span>
         {isNotify ? (
-          <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-sm)] text-text-100">[extension]</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-sm)] text-text-100">
+            [extension]
+          </span>
         ) : (
           <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-sm)] text-text-100">
             /{entry.command}

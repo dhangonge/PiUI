@@ -22,7 +22,12 @@ interface ReasoningPartViewProps {
   isStreaming?: boolean
 }
 
-export const ReasoningPartView = memo(function ReasoningPartView({ part, partKey, time, isStreaming }: ReasoningPartViewProps) {
+export const ReasoningPartView = memo(function ReasoningPartView({
+  part,
+  partKey,
+  time,
+  isStreaming,
+}: ReasoningPartViewProps) {
   const { t } = useTranslation('message')
   const { reasoningDisplayMode } = useTheme()
   const rawText = part.thinking || ''
@@ -168,9 +173,7 @@ export const ReasoningPartView = memo(function ReasoningPartView({ part, partKey
           <div ref={summaryContainerRef} className="relative min-w-0 flex-1 overflow-hidden">
             <span className="relative block min-w-0 max-w-full">
               {expanded ? (
-                <span className={expandedMetaClassName}>
-                  {expandedMetaText}
-                </span>
+                <span className={expandedMetaClassName}>{expandedMetaText}</span>
               ) : isMarkdownMode ? (
                 <div className={`min-w-0 text-[length:var(--fs-sm)] leading-5 ${collapsedMarkdownClassName}`}>
                   <MarkdownRenderer
@@ -180,14 +183,7 @@ export const ReasoningPartView = memo(function ReasoningPartView({ part, partKey
                   />
                 </div>
               ) : (
-                <span
-                  className={[
-                    'block min-w-0 italic',
-                    summaryClassName,
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                >
+                <span className={['block min-w-0 italic', summaryClassName].filter(Boolean).join(' ')}>
                   {summaryText}
                 </span>
               )}
@@ -214,14 +210,19 @@ export const ReasoningPartView = memo(function ReasoningPartView({ part, partKey
                 <MarkdownRenderer content={displayText} variant="reasoning" isStreaming={isPartStreaming} />
               </div>
             ) : (
-              <div className={`${MSG_SPACING.body} text-[length:var(--fs-sm)] leading-6 italic whitespace-pre-wrap break-words overflow-x-hidden text-text-300`}>
+              <div
+                className={`${MSG_SPACING.body} text-[length:var(--fs-sm)] leading-6 italic whitespace-pre-wrap break-words overflow-x-hidden text-text-300`}
+              >
                 {displayText}
               </div>
             ))}
         </MessageExpandPanel>
       </div>
     ) : (
-      <div ref={summaryContainerRef} className={`relative min-w-0 overflow-hidden ${MSG_SPACING.header} text-[length:var(--fs-sm)]`}>
+      <div
+        ref={summaryContainerRef}
+        className={`relative min-w-0 overflow-hidden ${MSG_SPACING.header} text-[length:var(--fs-sm)]`}
+      >
         {isMarkdownMode ? (
           <MarkdownRenderer content={displayText} variant="reasoning" isStreaming={isPartStreaming} />
         ) : (

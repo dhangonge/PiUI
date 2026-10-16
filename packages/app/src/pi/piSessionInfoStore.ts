@@ -22,7 +22,10 @@ class PiSessionInfoStore {
   }
 
   replaceForServer(serverId: string, sessions: SessionInfo[]): SessionInfo[] {
-    this.all = [...this.all.filter(item => isScopedSessionKey(item.id) && sessionKeyToServerId(item.id) !== serverId), ...sessions]
+    this.all = [
+      ...this.all.filter(item => isScopedSessionKey(item.id) && sessionKeyToServerId(item.id) !== serverId),
+      ...sessions,
+    ]
     for (const key of this.byCwd.keys()) if (key.startsWith(`${serverId}::`)) this.byCwd.delete(key)
     this.notify()
     return sessions

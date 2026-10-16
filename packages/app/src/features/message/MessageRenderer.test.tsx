@@ -35,7 +35,17 @@ vi.mock('../../hooks/useTheme', () => ({
   useTheme: () => ({
     collapseUserMessages: mockCollapseUserMessages,
     renderUserMarkdown: mockRenderUserMarkdown,
-    stepFinishDisplay: { latestOnly: true, turnDuration: false, tokens: true, cache: true, cost: true, duration: true, agent: false, model: false, completedAt: false },
+    stepFinishDisplay: {
+      latestOnly: true,
+      turnDuration: false,
+      tokens: true,
+      cache: true,
+      cost: true,
+      duration: true,
+      agent: false,
+      model: false,
+      completedAt: false,
+    },
     actionsOnLatestAssistantOnly: true,
     descriptiveToolSteps: false,
     immersiveMode: false,
@@ -59,7 +69,13 @@ vi.mock('./parts', () => ({
 }))
 
 function rawEntry(id: string): SessionMessageEntry {
-  return { type: 'message', id, parentId: null, timestamp: '2026-01-01T00:00:01Z', message: { role: 'user', content: '', timestamp: 1 } }
+  return {
+    type: 'message',
+    id,
+    parentId: null,
+    timestamp: '2026-01-01T00:00:01Z',
+    message: { role: 'user', content: '', timestamp: 1 },
+  }
 }
 
 function createAssistantItem(text: string): PiAssistantMessageItem {
@@ -74,7 +90,14 @@ function createAssistantItem(text: string): PiAssistantMessageItem {
       api: 'anthropic-messages',
       provider: 'anthropic',
       model: 'model-1',
-      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
       stopReason: 'stop',
       timestamp: 1,
     },
@@ -173,17 +196,25 @@ describe('entry animation lifecycle', () => {
     const item = { ...createUserTextItem('animated'), timestamp: Date.now() }
     const complete = vi.fn()
     render(<MessageRenderer item={item} onEntryGrowComplete={complete} />)
-    await act(async () => { await Promise.resolve() })
+    await act(async () => {
+      await Promise.resolve()
+    })
     expect(isEntryGrowComplete(item.entryId)).toBe(true)
     expect(complete).toHaveBeenCalledWith(item.entryId)
   })
 
   it('stops the first animation during StrictMode replay', async () => {
     const item = { ...createUserTextItem('strict animation'), timestamp: Date.now() }
-    const { container, unmount } = render(<StrictMode><MessageRenderer item={item} /></StrictMode>)
+    const { container, unmount } = render(
+      <StrictMode>
+        <MessageRenderer item={item} />
+      </StrictMode>,
+    )
     const controls = animation.animate.mock.results[0]?.value
     expect(controls?.stop).toHaveBeenCalledOnce()
-    await act(async () => { await Promise.resolve() })
+    await act(async () => {
+      await Promise.resolve()
+    })
     expect(container.querySelector('[style*="clip-path"]')).toBeNull()
     unmount()
     expect(isEntryGrowComplete(item.entryId)).toBe(true)
@@ -218,7 +249,14 @@ describe('process content split', () => {
         api: 'anthropic-messages',
         provider: 'anthropic',
         model: 'model-1',
-        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
         stopReason: 'stop',
         timestamp: 2,
       },

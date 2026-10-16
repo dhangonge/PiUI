@@ -1,67 +1,65 @@
-import type { JsonObject, JsonValue } from "./json.js"
-import type { ExtensionUiDialogResponse } from "./extension-ui.js"
+import type { JsonObject, JsonValue } from './json.js'
+import type { ExtensionUiDialogResponse } from './extension-ui.js'
 
 export const CORE_COMMAND_TYPES = [
-  "prompt",
-  "steer",
-  "followUp",
-  "sendUserMessage",
-  "abort",
-  "newSession",
-  "switchSession",
-  "fork",
-  "importSession",
-  "setSessionName",
-  "setModel",
-  "cycleModel",
-  "setScopedModels",
-  "setThinkingLevel",
-  "cycleThinkingLevel",
-  "setSteeringMode",
-  "setFollowUpMode",
-  "clearQueue",
-  "compact",
-  "abortCompaction",
-  "abortBranchSummary",
-  "setAutoCompaction",
-  "setAutoRetry",
-  "abortRetry",
-  "bash",
-  "abortBash",
-  "setActiveTools",
-  "invokeTool",
-  "invokeCommand",
-  "navigateTree",
-  "setLabel",
-  "sendCustomMessage",
-  "appendCustomEntry",
-  "exportHtml",
-  "exportJsonl",
-  "waitForIdle",
-  "reload",
-  "respondExtensionUi",
-  "setExtensionEditorState",
+  'prompt',
+  'steer',
+  'followUp',
+  'sendUserMessage',
+  'abort',
+  'newSession',
+  'switchSession',
+  'fork',
+  'importSession',
+  'setSessionName',
+  'setModel',
+  'cycleModel',
+  'setScopedModels',
+  'setThinkingLevel',
+  'cycleThinkingLevel',
+  'setSteeringMode',
+  'setFollowUpMode',
+  'clearQueue',
+  'compact',
+  'abortCompaction',
+  'abortBranchSummary',
+  'setAutoCompaction',
+  'setAutoRetry',
+  'abortRetry',
+  'bash',
+  'abortBash',
+  'setActiveTools',
+  'invokeTool',
+  'invokeCommand',
+  'navigateTree',
+  'setLabel',
+  'sendCustomMessage',
+  'appendCustomEntry',
+  'exportHtml',
+  'exportJsonl',
+  'waitForIdle',
+  'reload',
+  'respondExtensionUi',
+  'setExtensionEditorState',
 ] as const
 
 export type CoreCommandType = (typeof CORE_COMMAND_TYPES)[number]
 
-export type QueueDeliveryMode = "all" | "one-at-a-time"
+export type QueueDeliveryMode = 'all' | 'one-at-a-time'
 
 export type ImageInput = {
-  type: "image"
+  type: 'image'
   data: string
   mimeType: string
 }
 
-export type CustomMessageContent =
-  | { type: "text"; text: string }
-  | { type: "image"; data: string; mimeType: string }
+export type CustomMessageContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
 
 export type PromptParams = {
   text: string
   images?: ImageInput[]
   expandPromptTemplates?: boolean
-  streamingBehavior?: "steer" | "followUp"
+  streamingBehavior?: 'steer' | 'followUp'
 }
 
 export type SteerParams = {
@@ -77,7 +75,7 @@ export type FollowUpParams = {
 export type SendUserMessageParams = {
   text: string
   images?: ImageInput[]
-  deliverAs?: "steer" | "followUp"
+  deliverAs?: 'steer' | 'followUp'
 }
 
 export type NewSessionParams = {
@@ -92,7 +90,7 @@ export type SwitchSessionParams = {
 export type ForkParams = {
   entryId: string
   /** 缺省 "at"（worker 侧补默认值） */
-  position?: "before" | "at"
+  position?: 'before' | 'at'
 }
 
 export type ImportSessionParams = {
@@ -110,7 +108,7 @@ export type SetModelParams = {
 }
 
 export type CycleModelParams = {
-  direction?: "forward" | "backward"
+  direction?: 'forward' | 'backward'
 }
 
 export type SetScopedModelsParams = {
@@ -173,7 +171,7 @@ export type SendCustomMessageParams = {
   display: boolean
   details?: JsonValue
   triggerTurn?: boolean
-  deliverAs?: "steer" | "followUp" | "nextTurn"
+  deliverAs?: 'steer' | 'followUp' | 'nextTurn'
 }
 
 export type AppendCustomEntryParams = {
@@ -243,7 +241,7 @@ export type CoreCommandParams = {
   reload: Record<string, never>
   respondExtensionUi: RespondExtensionUiParams
   setExtensionEditorState: SetExtensionEditorStateParams
-  "extensionUi.tuiInput": ExtensionTuiInputParams
-  "extensionUi.tuiResize": ExtensionTuiResizeParams
-  "extensionUi.tuiRedraw": Record<string, never>
+  'extensionUi.tuiInput': ExtensionTuiInputParams
+  'extensionUi.tuiResize': ExtensionTuiResizeParams
+  'extensionUi.tuiRedraw': Record<string, never>
 }

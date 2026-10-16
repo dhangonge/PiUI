@@ -95,9 +95,10 @@ export function receiveProviderAuthEvent(event: ProviderAuthEvent, sessionId?: s
         providerId: event.providerId,
         sessionId: sessionId ?? current?.sessionId,
         event,
-        notifications: event.type === 'notification'
-          ? [...(current?.notifications ?? []), event.event]
-          : current?.notifications ?? [],
+        notifications:
+          event.type === 'notification'
+            ? [...(current?.notifications ?? []), event.event]
+            : (current?.notifications ?? []),
       },
     },
   })

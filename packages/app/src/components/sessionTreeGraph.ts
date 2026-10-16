@@ -56,7 +56,10 @@ function textFromNative(value: JsonValue | undefined): string {
 }
 
 function normalizePreview(value: string): string {
-  const normalized = value.replace(/[\t\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
+  const normalized = value
+    .replace(/[\t\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
   return normalized.length > 180 ? `${normalized.slice(0, 177)}…` : normalized
 }
 
@@ -69,15 +72,18 @@ export function sessionTreeEntryPreview(entry: NativeEntry, typeLabel: (type: st
     if (role === 'assistant') {
       if (text) return text
       if (message.stopReason === 'aborted') return typeLabel('assistant_aborted')
-      if (typeof message.errorMessage === 'string' && message.errorMessage) return normalizePreview(message.errorMessage)
+      if (typeof message.errorMessage === 'string' && message.errorMessage)
+        return normalizePreview(message.errorMessage)
       return typeLabel('assistant_empty')
     }
     return text || role || typeLabel(type)
   }
   if (type === 'model_change') return `${String(entry.provider ?? '')}/${String(entry.modelId ?? '')}`
   if (type === 'thinking_level_change') return String(entry.thinkingLevel ?? typeLabel(type))
-  if (type === 'compaction' || type === 'branch_summary') return normalizePreview(String(entry.summary ?? typeLabel(type)))
-  if (type === 'custom_message') return normalizePreview(textFromNative(entry.content) || String(entry.customType ?? typeLabel(type)))
+  if (type === 'compaction' || type === 'branch_summary')
+    return normalizePreview(String(entry.summary ?? typeLabel(type)))
+  if (type === 'custom_message')
+    return normalizePreview(textFromNative(entry.content) || String(entry.customType ?? typeLabel(type)))
   if (type === 'custom') return String(entry.customType ?? typeLabel(type))
   if (type === 'label') return String(entry.label ?? typeLabel(type))
   if (type === 'session_info') return String(entry.name ?? typeLabel(type))
@@ -156,28 +162,40 @@ export function isTreeVisibleEntry(entry: NativeEntry, currentLeafId: string | n
       if (message.role === 'toolResult') return false
       if (message.role === 'assistant') {
         const hasText = textFromNative(message.content).trim().length > 0
-        const isErrorOrAborted = typeof message.stopReason === 'string' &&
-          message.stopReason !== 'stop' && message.stopReason !== 'toolUse'
+        const isErrorOrAborted =
+          typeof message.stopReason === 'string' && message.stopReason !== 'stop' && message.stopReason !== 'toolUse'
         return hasText || isErrorOrAborted
       }
       return true
     }
-    return type !== 'label' && type !== 'custom' && type !== 'model_change' &&
-      type !== 'thinking_level_change' && type !== 'session_info' && type !== 'active_tools_change'
+    return (
+      type !== 'label' &&
+      type !== 'custom' &&
+      type !== 'model_change' &&
+      type !== 'thinking_level_change' &&
+      type !== 'session_info' &&
+      type !== 'active_tools_change'
+    )
   }
   if (type === 'message') {
     const message = asRecord(entry.message)
     if (message.role === 'toolResult') return false
     if (message.role === 'assistant') {
       const hasText = textFromNative(message.content).trim().length > 0
-      const isErrorOrAborted = typeof message.stopReason === 'string' &&
-        message.stopReason !== 'stop' && message.stopReason !== 'toolUse'
+      const isErrorOrAborted =
+        typeof message.stopReason === 'string' && message.stopReason !== 'stop' && message.stopReason !== 'toolUse'
       return hasText || isErrorOrAborted
     }
     return true
   }
-  return type !== 'label' && type !== 'custom' && type !== 'model_change' &&
-    type !== 'thinking_level_change' && type !== 'session_info' && type !== 'active_tools_change'
+  return (
+    type !== 'label' &&
+    type !== 'custom' &&
+    type !== 'model_change' &&
+    type !== 'thinking_level_change' &&
+    type !== 'session_info' &&
+    type !== 'active_tools_change'
+  )
 }
 
 export function buildSessionTreeGraph(

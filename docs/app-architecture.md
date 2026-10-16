@@ -24,13 +24,13 @@ src/pi/**                   Pi 状态层：eventStream、selectors、store、hoo
 
 ## 两层分别是什么
 
-| | `features/pi-chat` | `features/chat` |
-|---|---|---|
-| 规模 | 3 文件 / 1906 行（`PiChatPane.tsx` 1800） | 43 文件 / 14.4k 行 |
-| 角色 | 容器：一个 pane 的完整生命周期 | 渲染层：聊天面的可复用组件 |
-| 挂载点 | 仅 `src/App.tsx:512`（`renderPaneLeaf`） | 被 `pi-chat` 与 App 复用 |
+|          | `features/pi-chat`                                                                                                       | `features/chat`                                                                                                                                                     |
+| -------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 规模     | 3 文件 / 1906 行（`PiChatPane.tsx` 1800）                                                                                | 43 文件 / 14.4k 行                                                                                                                                                  |
+| 角色     | 容器：一个 pane 的完整生命周期                                                                                           | 渲染层：聊天面的可复用组件                                                                                                                                          |
+| 挂载点   | 仅 `src/App.tsx:512`（`renderPaneLeaf`）                                                                                 | 被 `pi-chat` 与 App 复用                                                                                                                                            |
 | 典型内容 | 打开/关闭 runtime、订阅事件流、`prompt`/`steer`/`followUp`/`fork`/redo、拖拽落点、草稿、大纲、扩展 UI 应答、项目信任提示 | `ChatArea`、`InputBox`、`Sidebar`、`Header`、`PaneHeader`、`PaneDropOverlay`、`chatViewport`、`SplitContainer`、`chatPageModel`、`EmptyState`、`ExtensionUiDialog*` |
-| 公开面 | `PiChatPane`、`ProjectTrustPrompt`、`attachmentToImage` | `features/chat/index.ts` 的五个导出 + 若干深路径（`PaneHeader.js`、`chatViewport.js`…） |
+| 公开面   | `PiChatPane`、`ProjectTrustPrompt`、`attachmentToImage`                                                                  | `features/chat/index.ts` 的五个导出 + 若干深路径（`PaneHeader.js`、`chatViewport.js`…）                                                                             |
 
 `features/pi-chat/PiChatPane.tsx:5-13` 从这里引入视图件：
 
@@ -60,22 +60,22 @@ import { ExtensionUiDialogHost } from '../chat/ExtensionUiDialogHost.js'
 
 允许的方向：
 
-| 从 | 到 | 状态 |
-|---|---|---|
+| 从                 | 到                                                                       | 状态                                     |
+| ------------------ | ------------------------------------------------------------------------ | ---------------------------------------- |
 | `features/pi-chat` | `features/chat`、`features/message`、`components`、`src/pi`、`src/store` | 允许（当前 `PiChatPane.tsx` 正是这么用） |
-| `features/chat` | `src/pi/**`、`src/store/**`、`src/components`、`features/message` | 允许（当前分别有 17 处 / 12 处） |
-| `features/chat` | `features/pi-chat` | **禁止**（ESLint 报错） |
-| 任意其他位置 | `features/pi-chat` | **禁止**，仅 `App.tsx` |
+| `features/chat`    | `src/pi/**`、`src/store/**`、`src/components`、`features/message`        | 允许（当前分别有 17 处 / 12 处）         |
+| `features/chat`    | `features/pi-chat`                                                       | **禁止**（ESLint 报错）                  |
+| 任意其他位置       | `features/pi-chat`                                                       | **禁止**，仅 `App.tsx`                   |
 
 ## 新代码放哪
 
-| 你要写的东西 | 放这里 |
-|---|---|
-| 新的消息/工具卡渲染 | `features/message/**`（`parts/`、`tools/renderers/`） |
-| 聊天面新部件（面板、头部、输入框部件、侧栏） | `features/chat/**`；会被别的 pane/页面复用的放 `src/components/**` |
-| 新的 Pi 会话行为（命令、事件派生、状态机） | `src/pi/**`：`store/`（状态）、`hooks/`（订阅）、`controllers/`（命令）、`selectors/`（派生） |
-| 只在单个 pane 内成立的编排逻辑 | `features/pi-chat/**`（目前都在 `PiChatPane.tsx`，新逻辑优先抽 hook 而不是继续堆在这个文件里） |
-| 需要 pane 布局、路由、跨 pane 协调的逻辑 | `App.tsx`（并且只在这里挂 `PiChatPane`） |
+| 你要写的东西                                 | 放这里                                                                                         |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 新的消息/工具卡渲染                          | `features/message/**`（`parts/`、`tools/renderers/`）                                          |
+| 聊天面新部件（面板、头部、输入框部件、侧栏） | `features/chat/**`；会被别的 pane/页面复用的放 `src/components/**`                             |
+| 新的 Pi 会话行为（命令、事件派生、状态机）   | `src/pi/**`：`store/`（状态）、`hooks/`（订阅）、`controllers/`（命令）、`selectors/`（派生）  |
+| 只在单个 pane 内成立的编排逻辑               | `features/pi-chat/**`（目前都在 `PiChatPane.tsx`，新逻辑优先抽 hook 而不是继续堆在这个文件里） |
+| 需要 pane 布局、路由、跨 pane 协调的逻辑     | `App.tsx`（并且只在这里挂 `PiChatPane`）                                                       |
 
 判据很简单：**这段代码会不会被第二个 pane 复用？会不会发命令或订阅事件？** 会 → 放下面一层；
 不会 → 放当前容器。命令与事件永远只经 `src/pi/**`。

@@ -39,62 +39,74 @@ describe('ExtensionUiDialogHost', () => {
     fireEvent.click(screen.getByText('build'))
     fireEvent.click(screen.getByRole('button', { name: /submit|提交/i }))
 
-    await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalledWith(
-      'session-1',
-      'request-1',
-      expect.objectContaining({ value: 'build', responseId: expect.any(String) }),
-    ))
+    await waitFor(() =>
+      expect(respondPiExtensionUi).toHaveBeenCalledWith(
+        'session-1',
+        'request-1',
+        expect.objectContaining({ value: 'build', responseId: expect.any(String) }),
+      ),
+    )
   })
 
   it('submits confirmed=true for a confirm request', async () => {
-    extensionUiStore.requestOpened(selectRequest({
-      requestId: 'request-confirm',
-      kind: 'confirm',
-      title: 'Delete file?',
-      message: 'This cannot be undone',
-      options: undefined,
-    } as never))
+    extensionUiStore.requestOpened(
+      selectRequest({
+        requestId: 'request-confirm',
+        kind: 'confirm',
+        title: 'Delete file?',
+        message: 'This cannot be undone',
+        options: undefined,
+      } as never),
+    )
     render(<ExtensionUiDialogHost sessionId="session-1" />)
 
     expect(screen.getByText('This cannot be undone')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /confirm|确认/i }))
 
-    await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalledWith(
-      'session-1',
-      'request-confirm',
-      expect.objectContaining({ confirmed: true }),
-    ))
+    await waitFor(() =>
+      expect(respondPiExtensionUi).toHaveBeenCalledWith(
+        'session-1',
+        'request-confirm',
+        expect.objectContaining({ confirmed: true }),
+      ),
+    )
   })
 
   it('submits input values and keeps the title compact', async () => {
-    extensionUiStore.requestOpened(selectRequest({
-      requestId: 'request-input',
-      kind: 'input',
-      title: 'A very long extension title that should stay on one line',
-      options: undefined,
-      placeholder: 'Environment name',
-    } as never))
+    extensionUiStore.requestOpened(
+      selectRequest({
+        requestId: 'request-input',
+        kind: 'input',
+        title: 'A very long extension title that should stay on one line',
+        options: undefined,
+        placeholder: 'Environment name',
+      } as never),
+    )
     render(<ExtensionUiDialogHost sessionId="session-1" />)
 
     const input = screen.getByPlaceholderText('Environment name')
     fireEvent.change(input, { target: { value: 'preview-windows' } })
     fireEvent.click(screen.getByRole('button', { name: /submit|提交/i }))
 
-    await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalledWith(
-      'session-1',
-      'request-input',
-      expect.objectContaining({ value: 'preview-windows' }),
-    ))
+    await waitFor(() =>
+      expect(respondPiExtensionUi).toHaveBeenCalledWith(
+        'session-1',
+        'request-input',
+        expect.objectContaining({ value: 'preview-windows' }),
+      ),
+    )
   })
 
   it('submits multi-line editor content', async () => {
-    extensionUiStore.requestOpened(selectRequest({
-      requestId: 'request-editor',
-      kind: 'editor',
-      title: 'Edit release notes',
-      options: undefined,
-      prefill: 'line one\nline two',
-    } as never))
+    extensionUiStore.requestOpened(
+      selectRequest({
+        requestId: 'request-editor',
+        kind: 'editor',
+        title: 'Edit release notes',
+        options: undefined,
+        prefill: 'line one\nline two',
+      } as never),
+    )
     render(<ExtensionUiDialogHost sessionId="session-1" />)
 
     const editor = screen.getByRole('textbox')
@@ -102,11 +114,13 @@ describe('ExtensionUiDialogHost', () => {
     fireEvent.change(editor, { target: { value: 'updated\ncontent' } })
     fireEvent.click(screen.getByRole('button', { name: /submit|提交/i }))
 
-    await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalledWith(
-      'session-1',
-      'request-editor',
-      expect.objectContaining({ value: 'updated\ncontent' }),
-    ))
+    await waitFor(() =>
+      expect(respondPiExtensionUi).toHaveBeenCalledWith(
+        'session-1',
+        'request-editor',
+        expect.objectContaining({ value: 'updated\ncontent' }),
+      ),
+    )
   })
 
   it('shows only the current session pending requests', () => {
@@ -118,11 +132,13 @@ describe('ExtensionUiDialogHost', () => {
 
   it('shows queue count when multiple requests are pending', () => {
     extensionUiStore.requestOpened(selectRequest())
-    extensionUiStore.requestOpened(selectRequest({
-      requestId: 'request-2',
-      title: 'Second question',
-      createdAt: '2026-01-01T00:01:00.000Z',
-    }))
+    extensionUiStore.requestOpened(
+      selectRequest({
+        requestId: 'request-2',
+        title: 'Second question',
+        createdAt: '2026-01-01T00:01:00.000Z',
+      }),
+    )
     render(<ExtensionUiDialogHost sessionId="session-1" />)
 
     expect(screen.getByText('Choose mode')).toBeInTheDocument()
@@ -131,11 +147,13 @@ describe('ExtensionUiDialogHost', () => {
 
   it('switches to the next queued request via the pager', () => {
     extensionUiStore.requestOpened(selectRequest())
-    extensionUiStore.requestOpened(selectRequest({
-      requestId: 'request-2',
-      title: 'Second question',
-      createdAt: '2026-01-01T00:01:00.000Z',
-    }))
+    extensionUiStore.requestOpened(
+      selectRequest({
+        requestId: 'request-2',
+        title: 'Second question',
+        createdAt: '2026-01-01T00:01:00.000Z',
+      }),
+    )
     render(<ExtensionUiDialogHost sessionId="session-1" />)
 
     // 切换到下一个：只是换显示，两个请求都还在队列里
@@ -151,11 +169,13 @@ describe('ExtensionUiDialogHost', () => {
 
   it('processing the current request advances to the next one', async () => {
     extensionUiStore.requestOpened(selectRequest())
-    extensionUiStore.requestOpened(selectRequest({
-      requestId: 'request-2',
-      title: 'Second question',
-      createdAt: '2026-01-01T00:01:00.000Z',
-    }))
+    extensionUiStore.requestOpened(
+      selectRequest({
+        requestId: 'request-2',
+        title: 'Second question',
+        createdAt: '2026-01-01T00:01:00.000Z',
+      }),
+    )
     render(<ExtensionUiDialogHost sessionId="session-1" />)
 
     // 处理第一个（提交选择），队列前移后自动显示下一个
@@ -191,11 +211,13 @@ describe('ExtensionUiDialogHost', () => {
       // 展开状态下点击选项仍正常选中并提交
       fireEvent.click(screen.getByTitle(longOption))
       fireEvent.click(screen.getByRole('button', { name: /submit|提交/i }))
-      await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalledWith(
-        'session-1',
-        'request-1',
-        expect.objectContaining({ value: longOption }),
-      ))
+      await waitFor(() =>
+        expect(respondPiExtensionUi).toHaveBeenCalledWith(
+          'session-1',
+          'request-1',
+          expect.objectContaining({ value: longOption }),
+        ),
+      )
     } finally {
       if (originalScrollWidth) {
         Object.defineProperty(HTMLElement.prototype, 'scrollWidth', originalScrollWidth)
@@ -218,7 +240,13 @@ describe('ExtensionUiDialogHost', () => {
     expect(screen.getByRole('textbox')).toHaveValue('kept answer')
     expect(respondPiExtensionUi).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: /submit|提交/i }))
-    await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalledWith('session-1', 'request-1', expect.objectContaining({ value: 'kept answer' })))
+    await waitFor(() =>
+      expect(respondPiExtensionUi).toHaveBeenCalledWith(
+        'session-1',
+        'request-1',
+        expect.objectContaining({ value: 'kept answer' }),
+      ),
+    )
   })
 
   it('resets draft ownership for the same request ID on another server', async () => {
@@ -228,7 +256,13 @@ describe('ExtensionUiDialogHost', () => {
     fireEvent.click(screen.getByText('A second'))
     rerender(<ExtensionUiDialogHost sessionId="b::same" />)
     fireEvent.click(screen.getByRole('button', { name: /submit|提交/i }))
-    await waitFor(() => expect(respondPiExtensionUi).toHaveBeenCalledWith('b::same', 'request-1', expect.objectContaining({ value: 'B first' })))
+    await waitFor(() =>
+      expect(respondPiExtensionUi).toHaveBeenCalledWith(
+        'b::same',
+        'request-1',
+        expect.objectContaining({ value: 'B first' }),
+      ),
+    )
   })
 
   it('clears the settled request from the store after submit', async () => {

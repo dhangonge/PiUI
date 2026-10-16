@@ -1,6 +1,6 @@
-import { existsSync, realpathSync, statSync } from "node:fs"
-import path from "node:path"
-import type { WorkspaceDto } from "@piui/protocol"
+import { existsSync, realpathSync, statSync } from 'node:fs'
+import path from 'node:path'
+import type { WorkspaceDto } from '@piui/protocol'
 
 export interface WorkspaceRecord {
   displayName: string
@@ -47,7 +47,7 @@ export class WorkspaceStore {
         throw workspaceReplaced(record.canonicalRoot)
       }
     } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "WORKSPACE_REPLACED") throw error
+      if (error instanceof Error && 'code' in error && error.code === 'WORKSPACE_REPLACED') throw error
       throw workspaceReplaced(record.canonicalRoot)
     }
   }
@@ -62,13 +62,13 @@ export class WorkspaceStore {
     const inputKey = workspacePathKey(resolved)
     if (!existsSync(resolved)) {
       throw Object.assign(new Error(`workspace root not found: ${resolved}`), {
-        code: "WORKSPACE_NOT_FOUND" as const,
+        code: 'WORKSPACE_NOT_FOUND' as const,
       })
     }
     const st = statSync(resolved)
     if (!st.isDirectory()) {
-      throw Object.assign(new Error("workspace root must be a directory"), {
-        code: "INVALID_REQUEST" as const,
+      throw Object.assign(new Error('workspace root must be a directory'), {
+        code: 'INVALID_REQUEST' as const,
       })
     }
     const abs = realpathSync.native(resolved)
@@ -77,8 +77,11 @@ export class WorkspaceStore {
     this.closed.delete(inputKey)
     this.closed.delete(key)
     const prior = this.byInputPath.get(inputKey)
-    if (prior && (workspacePathKey(prior.canonicalRoot) !== key ||
-      prior.rootIdentity !== undefined && prior.rootIdentity !== rootIdentity)) {
+    if (
+      prior &&
+      (workspacePathKey(prior.canonicalRoot) !== key ||
+        (prior.rootIdentity !== undefined && prior.rootIdentity !== rootIdentity))
+    ) {
       throw workspaceReplaced(resolved)
     }
     if (prior) {
@@ -130,12 +133,12 @@ function fileIdentity(stat: { dev: number; ino: number }): string {
 }
 
 function workspaceReplaced(rootPath: string): Error {
-  return Object.assign(new Error(`workspace root was replaced: ${rootPath}`), { code: "WORKSPACE_REPLACED" })
+  return Object.assign(new Error(`workspace root was replaced: ${rootPath}`), { code: 'WORKSPACE_REPLACED' })
 }
 
 /** Two paths name one workspace when their keys match. */
 export function workspacePathKey(rootPath: string, platform = process.platform): string {
-  return platform === "win32" ? rootPath.toLowerCase() : rootPath
+  return platform === 'win32' ? rootPath.toLowerCase() : rootPath
 }
 
 function toDto(r: WorkspaceRecord): WorkspaceDto {

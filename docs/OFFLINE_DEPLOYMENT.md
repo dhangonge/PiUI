@@ -10,14 +10,14 @@
 
 ## 组成与版本
 
-| 项目 | Linux ARM64 | Android Termux ARM64 |
-| --- | --- | --- |
-| Pi SDK / CLI | 1.3.0 | 1.3.0 |
-| Node | 官方 24.21.0 | Termux nodejs-lts 24.18.0-1 |
-| npm | 官方 Node 包自带 11.19.0 | 相同 npm JS，使用 Android Node |
-| rg / fd | Debian 12 的 ripgrep 13.0.0 / fd 8.6.0 | Termux ripgrep 15.2.0 / fd 10.5.0 |
-| PTY | @lydell/node-pty-linux-arm64 1.2.0-beta.14 | node-pty 1.1.0 源码，NDK 交叉编译 N-API 8 |
-| C 运行库 | 系统 glibc >= 2.36；面向 Debian 12+ / Ubuntu 24.04+ | Android bionic；不能使用 Linux glibc 包 |
+| 项目         | Linux ARM64                                         | Android Termux ARM64                      |
+| ------------ | --------------------------------------------------- | ----------------------------------------- |
+| Pi SDK / CLI | 1.3.0                                               | 1.3.0                                     |
+| Node         | 官方 24.21.0                                        | Termux nodejs-lts 24.18.0-1               |
+| npm          | 官方 Node 包自带 11.19.0                            | 相同 npm JS，使用 Android Node            |
+| rg / fd      | Debian 12 的 ripgrep 13.0.0 / fd 8.6.0              | Termux ripgrep 15.2.0 / fd 10.5.0         |
+| PTY          | @lydell/node-pty-linux-arm64 1.2.0-beta.14          | node-pty 1.1.0 源码，NDK 交叉编译 N-API 8 |
+| C 运行库     | 系统 glibc >= 2.36；面向 Debian 12+ / Ubuntu 24.04+ | Android bionic；不能使用 Linux glibc 包   |
 
 Android PTY 构建使用 NDK 28.0.13004108、API 24、node-addon-api 8.5.0 头文件，静态链接 C++ 运行库；产物只依赖 Android libc/libm/libdl。其上游源码声明 node-addon-api ^7.1.0 是构建依赖，当前固定头文件组合已经实测加载和 PTY 操作。
 

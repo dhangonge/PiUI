@@ -28,9 +28,7 @@ describe('QueuedUserMessageQueue', () => {
     expect(screen.getByText('Then summarize the failures')).toBeInTheDocument()
     expect(screen.getAllByRole('status')).toHaveLength(2)
 
-    rerender(
-      <QueuedUserMessageQueue kind="current" items={[]} maxWidthClass="max-w-2xl" paddingClass="px-5" />,
-    )
+    rerender(<QueuedUserMessageQueue kind="current" items={[]} maxWidthClass="max-w-2xl" paddingClass="px-5" />)
     expect(container.querySelector('[data-message-queue]')).not.toBeInTheDocument()
   })
 })

@@ -41,7 +41,9 @@ vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => getCurrentWindowMock(),
 }))
 
-function installWindowApiMock(overrides: Partial<Record<'minimize' | 'toggleMaximize' | 'close' | 'isMaximized' | 'onResized', unknown>> = {}) {
+function installWindowApiMock(
+  overrides: Partial<Record<'minimize' | 'toggleMaximize' | 'close' | 'isMaximized' | 'onResized', unknown>> = {},
+) {
   const calls: Record<string, unknown[]> = {}
   const win = {
     minimize: vi.fn(() => {

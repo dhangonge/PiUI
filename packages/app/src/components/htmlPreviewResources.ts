@@ -181,11 +181,7 @@ async function replaceSrcset(
   ).join(',')
 }
 
-export async function resolveHtmlPreviewResources(
-  html: string,
-  htmlPath: string,
-  directory?: string,
-): Promise<string> {
+export async function resolveHtmlPreviewResources(html: string, htmlPath: string, directory?: string): Promise<string> {
   const parsed = new DOMParser().parseFromString(html, 'text/html')
   const requests = new Map<string, Promise<FileReadResponse | null>>()
   const loadRaw = (path: string) => {
@@ -234,7 +230,10 @@ export async function resolveHtmlPreviewResources(
       const style = parsed.createElement('style')
       style.setAttribute('data-piui-resolved-css', '')
       if (link.media) style.media = link.media
-      style.textContent = (await replaceCssUrls(fileContentToText(content), path, directory, load)).replace(/<\/style/gi, '<\\/style')
+      style.textContent = (await replaceCssUrls(fileContentToText(content), path, directory, load)).replace(
+        /<\/style/gi,
+        '<\\/style',
+      )
       link.replaceWith(style)
     }),
   )

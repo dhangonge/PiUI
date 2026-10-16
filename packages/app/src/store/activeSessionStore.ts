@@ -159,11 +159,12 @@ class ActiveSessionStore {
         continue
       }
 
-      nextMap[sessionId] = status.type === 'retry'
-        ? { ...status }
-        : status.type === 'compacting'
-          ? { type: 'compacting' }
-          : { type: 'busy' }
+      nextMap[sessionId] =
+        status.type === 'retry'
+          ? { ...status }
+          : status.type === 'compacting'
+            ? { type: 'compacting' }
+            : { type: 'busy' }
     }
 
     return nextMap
@@ -335,12 +336,14 @@ class ActiveSessionStore {
     this.syncPiSummaries([summary])
   }
 
-  syncPiSummaries(summaries: Array<{
-    id: string
-    title?: string
-    directory?: string
-    state?: 'running' | 'idle' | 'compacting' | 'retrying'
-  }>) {
+  syncPiSummaries(
+    summaries: Array<{
+      id: string
+      title?: string
+      directory?: string
+      state?: 'running' | 'idle' | 'compacting' | 'retrying'
+    }>,
+  ) {
     const nextMap = { ...this.state.statusMap }
     let changed = false
 

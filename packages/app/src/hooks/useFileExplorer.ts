@@ -92,22 +92,28 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     let cancelled = false
     canonicalWorkspaceRef.current = null
     if (directory) {
-      void resolveWorkspacePath(directory).then(workspacePath => {
-        if (!cancelled) canonicalWorkspaceRef.current = workspacePath
-      }).catch(() => undefined)
+      void resolveWorkspacePath(directory)
+        .then(workspacePath => {
+          if (!cancelled) canonicalWorkspaceRef.current = workspacePath
+        })
+        .catch(() => undefined)
     }
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [directory])
 
   useEffect(() => {
     if (!directory) return
     let cancelled = false
     let workspacePath: string | null = null
-    void resolveWorkspacePath(directory).then(resolved => {
-      if (cancelled || !resolved) return
-      workspacePath = resolved
-      piEventStream.connectWorkspace(resolved)
-    }).catch(() => undefined)
+    void resolveWorkspacePath(directory)
+      .then(resolved => {
+        if (cancelled || !resolved) return
+        workspacePath = resolved
+        piEventStream.connectWorkspace(resolved)
+      })
+      .catch(() => undefined)
     return () => {
       cancelled = true
       if (workspacePath) piEventStream.disconnectWorkspace(workspacePath)
@@ -321,13 +327,16 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     [tree, loadChildren, updateExpandedPaths],
   )
 
-  const collapsePath = useCallback((path: string) => {
-    updateExpandedPaths(prev => {
-      const next = new Set(prev)
-      next.delete(path)
-      return next
-    })
-  }, [updateExpandedPaths])
+  const collapsePath = useCallback(
+    (path: string) => {
+      updateExpandedPaths(prev => {
+        const next = new Set(prev)
+        next.delete(path)
+        return next
+      })
+    },
+    [updateExpandedPaths],
+  )
 
   // 加载文件预览
   const loadPreview = useCallback(
@@ -375,19 +384,26 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
     previewPathRef.current = null
   }, [])
 
-  const savePreview = useCallback(async (path: string, text: string, etag?: string, force = false) => {
-    if (!directory) throw new Error('No workspace is available')
-    const current = previewCacheRef.current.get(path) ?? previewContent
-    if (!current || current.type !== 'text') throw new Error('Only text files can be edited')
-    const saved = await saveFile(path, {
-      ...current,
-      content: text,
-      etag: force ? undefined : etag ?? current.etag,
-    }, directory)
-    previewCacheRef.current.set(path, saved)
-    if (previewPathRef.current === path) setPreviewContent(saved)
-    return saved
-  }, [directory, previewContent])
+  const savePreview = useCallback(
+    async (path: string, text: string, etag?: string, force = false) => {
+      if (!directory) throw new Error('No workspace is available')
+      const current = previewCacheRef.current.get(path) ?? previewContent
+      if (!current || current.type !== 'text') throw new Error('Only text files can be edited')
+      const saved = await saveFile(
+        path,
+        {
+          ...current,
+          content: text,
+          etag: force ? undefined : (etag ?? current.etag),
+        },
+        directory,
+      )
+      previewCacheRef.current.set(path, saved)
+      if (previewPathRef.current === path) setPreviewContent(saved)
+      return saved
+    },
+    [directory, previewContent],
+  )
 
   // 刷新
   const refresh = useCallback(async () => {
@@ -411,11 +427,13 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
   useEffect(() => {
     if (!directory) return
     const filesChanged = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        workspacePath: string
-        changes: Array<{ path: string; type: 'file' | 'directory' }>
-        rescan: boolean
-      }>).detail
+      const detail = (
+        event as CustomEvent<{
+          workspacePath: string
+          changes: Array<{ path: string; type: 'file' | 'directory' }>
+          rescan: boolean
+        }>
+      ).detail
       if (!detail) return
       if (!canonicalWorkspaceRef.current || detail.workspacePath !== canonicalWorkspaceRef.current) return
       invalidateWorkspaceFileCaches(directory)
@@ -426,10 +444,12 @@ export function useFileExplorer(options: UseFileExplorerOptions = {}): UseFileEx
         if (previewPath) void loadPreview(previewPath)
         return
       }
-      const parents = new Set(detail.changes.map(change => {
-        const separator = change.path.lastIndexOf('/')
-        return separator < 0 ? '' : change.path.slice(0, separator)
-      }))
+      const parents = new Set(
+        detail.changes.map(change => {
+          const separator = change.path.lastIndexOf('/')
+          return separator < 0 ? '' : change.path.slice(0, separator)
+        }),
+      )
       if (parents.has('')) void loadRoot()
       for (const parent of parents) {
         if (!parent) continue

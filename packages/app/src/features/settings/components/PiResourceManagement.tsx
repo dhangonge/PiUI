@@ -17,7 +17,13 @@ import { SettingsSection, SettingsDisclosure, settingsFieldClass } from './Setti
  * Skills, prompt templates and AGENTS/CLAUDE context come from the native
  * skills.list / prompts.list / agentsFiles.list (SDK resource loader).
  */
-export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: string | null; workspacePath: string }) {
+export function PiResourceManagement({
+  sessionId,
+  workspacePath,
+}: {
+  sessionId: string | null
+  workspacePath: string
+}) {
   const { t } = useTranslation(['settings', 'common'])
   const [registry, setRegistry] = useState<RegistrySnapshot | null>(null)
   const [skills, setSkills] = useState<Skill[] | null>(null)
@@ -29,7 +35,11 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
   const [error, setError] = useState<string | null>(null)
   const { resourceRevisions } = useManagementEvents()
   const resourceRevision = resourceRevisions[workspacePath]
-  const extensionUi = useSyncExternalStore(extensionUiStore.subscribe, extensionUiStore.getSnapshot, extensionUiStore.getSnapshot)
+  const extensionUi = useSyncExternalStore(
+    extensionUiStore.subscribe,
+    extensionUiStore.getSnapshot,
+    extensionUiStore.getSnapshot,
+  )
 
   const load = useCallback(async () => {
     if (!sessionId) return
@@ -45,7 +55,9 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
   }, [sessionId])
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void load() }, 0)
+    const timer = window.setTimeout(() => {
+      void load()
+    }, 0)
     const onRegistryUpdated = (event: Event) => {
       const updatedSessionId = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId
       if (updatedSessionId === sessionId) void load()
@@ -82,10 +94,27 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
       title={t('pi.resourcesTitle')}
       description={t('pi.resourcesDescription')}
       actions={
-        <Button size="sm" variant="secondary" disabled={busy !== null} isLoading={busy === 'reload'} onClick={() => void run('reload', async () => { await reloadPiSessionResources(sessionId); await load() })}>{t('common:reload')}</Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy !== null}
+          isLoading={busy === 'reload'}
+          onClick={() =>
+            void run('reload', async () => {
+              await reloadPiSessionResources(sessionId)
+              await load()
+            })
+          }
+        >
+          {t('common:reload')}
+        </Button>
       }
     >
-      {error ? <p role="alert" className="text-[length:var(--fs-xs)] text-danger-100">{error}</p> : null}
+      {error ? (
+        <p role="alert" className="text-[length:var(--fs-xs)] text-danger-100">
+          {error}
+        </p>
+      ) : null}
       <p className="text-[length:var(--fs-xs)] text-text-400">
         {registry
           ? t('pi.registrySummary', {
@@ -100,16 +129,38 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
 
       {registry ? (
         <div className="space-y-2">
-          <ResourceList title={t('pi.extensions')} items={registry.extensions.map(item => ({ name: item.path, detail: `${t('pi.extensionDetail', { tools: item.tools.length, commands: item.commands.length, handlers: item.handlers.length })}${item.hidden ? ` · ${t('pi.hidden')}` : ''}` }))} />
-          <ResourceList title={t('pi.tools')} items={registry.tools.map(item => ({ name: `${item.name}${registry.activeTools.includes(item.name) ? '' : ` (${t('pi.inactive')})`}`, detail: item.description ?? '' }))} />
-          <ResourceList title={t('pi.commands')} items={registry.commands.map(item => ({ name: item.name, detail: item.description ?? '' }))} />
-          <ResourceList title={t('pi.eventHandlers')} items={registry.eventHandlers.map(name => ({ name, detail: '' }))} />
+          <ResourceList
+            title={t('pi.extensions')}
+            items={registry.extensions.map(item => ({
+              name: item.path,
+              detail: `${t('pi.extensionDetail', { tools: item.tools.length, commands: item.commands.length, handlers: item.handlers.length })}${item.hidden ? ` · ${t('pi.hidden')}` : ''}`,
+            }))}
+          />
+          <ResourceList
+            title={t('pi.tools')}
+            items={registry.tools.map(item => ({
+              name: `${item.name}${registry.activeTools.includes(item.name) ? '' : ` (${t('pi.inactive')})`}`,
+              detail: item.description ?? '',
+            }))}
+          />
+          <ResourceList
+            title={t('pi.commands')}
+            items={registry.commands.map(item => ({ name: item.name, detail: item.description ?? '' }))}
+          />
+          <ResourceList
+            title={t('pi.eventHandlers')}
+            items={registry.eventHandlers.map(name => ({ name, detail: '' }))}
+          />
           {skills ? (
             <ResourceList
               title={t('pi.skills')}
               items={skills.map(item => ({
                 name: item.name,
-                detail: [item.description, item.filePath, item.disableModelInvocation ? t('pi.skillModelInvocationOff') : null]
+                detail: [
+                  item.description,
+                  item.filePath,
+                  item.disableModelInvocation ? t('pi.skillModelInvocationOff') : null,
+                ]
                   .filter(Boolean)
                   .join(' · '),
               }))}
@@ -137,8 +188,20 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
       ) : null}
 
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-        <input className={settingsFieldClass} placeholder={t('pi.eventTypePlaceholder')} value={eventType} onChange={event => setEventType(event.target.value)} />
-        <Button size="sm" variant="secondary" disabled={busy !== null || !eventType.trim()} onClick={() => setHandlerResult(registry?.eventHandlers.includes(eventType.trim()) ?? null)}>{t('pi.checkHandler')}</Button>
+        <input
+          className={settingsFieldClass}
+          placeholder={t('pi.eventTypePlaceholder')}
+          value={eventType}
+          onChange={event => setEventType(event.target.value)}
+        />
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy !== null || !eventType.trim()}
+          onClick={() => setHandlerResult(registry?.eventHandlers.includes(eventType.trim()) ?? null)}
+        >
+          {t('pi.checkHandler')}
+        </Button>
       </div>
       {handlerResult !== null ? (
         <p className="text-[length:var(--fs-xs)] text-text-300">
@@ -147,7 +210,9 @@ export function PiResourceManagement({ sessionId, workspacePath }: { sessionId: 
       ) : null}
 
       {registry ? <JsonDetails title={t('pi.registryData')} value={registry} /> : null}
-      {extensionUi.sessions[sessionId] ? <JsonDetails title={t('pi.extensionUiState')} value={extensionUi.sessions[sessionId]} /> : null}
+      {extensionUi.sessions[sessionId] ? (
+        <JsonDetails title={t('pi.extensionUiState')} value={extensionUi.sessions[sessionId]} />
+      ) : null}
     </SettingsSection>
   )
 }
@@ -159,7 +224,11 @@ function ResourceList({ title, items }: { title: string; items: Array<{ name: st
         {items.map((item, index) => (
           <div key={`${item.name}:${index}`}>
             <p className="break-all text-[length:var(--fs-xs)] text-text-200">{item.name}</p>
-            {item.detail ? <p className="line-clamp-3 whitespace-pre-wrap break-all text-[length:var(--fs-xs)] text-text-500">{item.detail}</p> : null}
+            {item.detail ? (
+              <p className="line-clamp-3 whitespace-pre-wrap break-all text-[length:var(--fs-xs)] text-text-500">
+                {item.detail}
+              </p>
+            ) : null}
           </div>
         ))}
       </div>

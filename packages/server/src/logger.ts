@@ -12,20 +12,20 @@
  * 按天轮转，保留最近 N 天（PIUI_LOG_KEEP_DAYS，默认 7）。
  */
 
-import { appendFileSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs"
-import { homedir } from "node:os"
-import { join, resolve } from "node:path"
+import { appendFileSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
 
 let logDir: string | undefined
 let logFile: string | undefined
-let currentDay = ""
+let currentDay = ''
 let enabled = false
 
 function dataRoot(): string {
   const env = process.env.PIUI_DATA_DIR?.trim()
   if (env) return resolve(env)
-  if (process.platform === "win32" && process.env.APPDATA) return join(process.env.APPDATA, "com.piui.desktop")
-  return join(homedir(), ".piui")
+  if (process.platform === 'win32' && process.env.APPDATA) return join(process.env.APPDATA, 'com.piui.desktop')
+  return join(homedir(), '.piui')
 }
 
 function ensureLogFile(): string | undefined {
@@ -34,7 +34,7 @@ function ensureLogFile(): string | undefined {
     if (logFile && currentDay === day) return logFile
     currentDay = day
     if (!logDir) {
-      logDir = join(dataRoot(), "logs")
+      logDir = join(dataRoot(), 'logs')
       mkdirSync(logDir, { recursive: true })
     }
     logFile = join(logDir, `piui-server-${day}.log`)
@@ -89,7 +89,7 @@ function cleanupOldLogs(): void {
  * 启用文件日志（幂等）。node 模式下额外 patch console 的 stdout/stderr 以
  * 捕获零散输出；bun 下 console 不走 JS 方法，依赖各日志点显式 logToFile。
  */
-export function enableFileLogging(enable = process.env.PIUI_FILE_LOG !== "0"): () => void {
+export function enableFileLogging(enable = process.env.PIUI_FILE_LOG !== '0'): () => void {
   if (enabled) return () => undefined
   if (!enable) return () => undefined
   enabled = true
@@ -100,11 +100,11 @@ export function enableFileLogging(enable = process.env.PIUI_FILE_LOG !== "0"): (
     const origStdoutWrite = process.stdout.write.bind(process.stdout)
     const origStderrWrite = process.stderr.write.bind(process.stderr)
     process.stdout.write = ((chunk: unknown, ...rest: unknown[]) => {
-      if (typeof chunk === "string") logToFile(chunk.replace(/\n$/, ""))
+      if (typeof chunk === 'string') logToFile(chunk.replace(/\n$/, ''))
       return origStdoutWrite(chunk as never, ...(rest as never[]))
     }) as typeof process.stdout.write
     process.stderr.write = ((chunk: unknown, ...rest: unknown[]) => {
-      if (typeof chunk === "string") logToFile(chunk.replace(/\n$/, ""))
+      if (typeof chunk === 'string') logToFile(chunk.replace(/\n$/, ''))
       return origStderrWrite(chunk as never, ...(rest as never[]))
     }) as typeof process.stderr.write
   } catch {

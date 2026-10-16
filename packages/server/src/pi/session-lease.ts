@@ -1,7 +1,7 @@
-import { realpathSync, statSync } from "node:fs"
-import { tmpdir } from "node:os"
-import path from "node:path"
-import { acquireDirectoryLock, type DirectoryLock } from "./directory-lock.ts"
+import { realpathSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { acquireDirectoryLock, type DirectoryLock } from './directory-lock.ts'
 
 export interface SessionLease {
   key: string
@@ -20,11 +20,13 @@ export class SessionLeaseManager {
   private readonly held = new Set<SessionLease>()
   private disposed = false
 
-  constructor(private readonly namespace = process.env.PIUI_SESSION_LEASE_DIR ?? path.join(tmpdir(), "piui-session-leases")) {}
+  constructor(
+    private readonly namespace = process.env.PIUI_SESSION_LEASE_DIR ?? path.join(tmpdir(), 'piui-session-leases'),
+  ) {}
 
   async acquire(sessionFile: string, sessionId?: string): Promise<SessionLease> {
-    if (this.disposed) throw new Error("Session lease manager is disposed")
-    const allocation = await acquireDirectoryLock(this.namespace, "allocation")
+    if (this.disposed) throw new Error('Session lease manager is disposed')
+    const allocation = await acquireDirectoryLock(this.namespace, 'allocation')
     try {
       return await this.acquireWhileLocked(sessionFile, sessionId)
     } finally {
@@ -39,10 +41,12 @@ export class SessionLeaseManager {
     let currentSessionId: string | undefined = sessionId
     let released = false
     let refreshPromise: Promise<void> | undefined
-    let replacementReservation: {
-      allocation: DirectoryLock
-      addedKeys: string[]
-    } | undefined
+    let replacementReservation:
+      | {
+          allocation: DirectoryLock
+          addedKeys: string[]
+        }
+      | undefined
 
     const acquireKeys = async (
       nextSessionFile: string | null | undefined = currentSessionFile,
@@ -52,7 +56,7 @@ export class SessionLeaseManager {
       try {
         for (const key of leaseKeys(nextSessionFile, nextSessionId)) {
           if (locks.has(key)) continue
-          if (released) throw new Error("Session lease is released")
+          if (released) throw new Error('Session lease is released')
           locks.set(key, await acquireDirectoryLock(this.namespace, key, { timeoutMs: 0 }))
           added.push(key)
         }
@@ -79,9 +83,9 @@ export class SessionLeaseManager {
     const lease: SessionLease = {
       key: initialKeys[0]!,
       refresh: async (nextSessionFile, nextSessionId) => {
-        if (released) throw new Error("Session lease is released")
+        if (released) throw new Error('Session lease is released')
         refreshPromise ??= (async () => {
-          const allocation = await acquireDirectoryLock(this.namespace, "allocation")
+          const allocation = await acquireDirectoryLock(this.namespace, 'allocation')
           try {
             await acquireKeys(nextSessionFile, nextSessionId)
             currentSessionFile = nextSessionFile ?? currentSessionFile
@@ -89,12 +93,14 @@ export class SessionLeaseManager {
           } finally {
             allocation.release()
           }
-        })().finally(() => { refreshPromise = undefined })
+        })().finally(() => {
+          refreshPromise = undefined
+        })
         return refreshPromise
       },
       replace: async (nextSessionFile, nextSessionId) => {
-        if (released) throw new Error("Session lease is released")
-        const allocation = await acquireDirectoryLock(this.namespace, "allocation")
+        if (released) throw new Error('Session lease is released')
+        const allocation = await acquireDirectoryLock(this.namespace, 'allocation')
         try {
           const effectiveSessionFile = nextSessionFile === undefined ? currentSessionFile : nextSessionFile
           const effectiveSessionId = nextSessionId === undefined ? currentSessionId : nextSessionId
@@ -112,9 +118,9 @@ export class SessionLeaseManager {
         }
       },
       reserveReplacement: async targetSessionFile => {
-        if (released) throw new Error("Session lease is released")
-        if (replacementReservation) throw new Error("Session replacement is already reserved")
-        const allocation = await acquireDirectoryLock(this.namespace, "allocation")
+        if (released) throw new Error('Session lease is released')
+        if (replacementReservation) throw new Error('Session replacement is already reserved')
+        const allocation = await acquireDirectoryLock(this.namespace, 'allocation')
         let addedKeys: string[] = []
         try {
           if (targetSessionFile) addedKeys = await acquireKeys(targetSessionFile, undefined)
@@ -126,7 +132,8 @@ export class SessionLeaseManager {
         let settled = false
         return {
           commit: async (nextSessionFile, nextSessionId) => {
-            if (settled || replacementReservation?.allocation !== allocation) throw new Error("Replacement reservation is settled")
+            if (settled || replacementReservation?.allocation !== allocation)
+              throw new Error('Replacement reservation is settled')
             const effectiveSessionFile = nextSessionFile === undefined ? currentSessionFile : nextSessionFile
             const effectiveSessionId = nextSessionId === undefined ? currentSessionId : nextSessionId
             await acquireKeys(effectiveSessionFile, effectiveSessionId)
@@ -158,7 +165,7 @@ export class SessionLeaseManager {
     }
     if (this.disposed) {
       release()
-      throw new Error("Session lease manager is disposed")
+      throw new Error('Session lease manager is disposed')
     }
     this.held.add(lease)
     return lease
@@ -174,7 +181,7 @@ export class SessionLeaseManager {
 function leaseKeys(sessionFile?: string | null, sessionId?: string): string[] {
   const keys = sessionFile ? canonicalFileKeys(sessionFile) : []
   if (sessionId) keys.push(`session:${sessionId}`)
-  if (keys.length === 0) keys.push("session:unknown")
+  if (keys.length === 0) keys.push('session:unknown')
   return [...new Set(keys)].sort()
 }
 
@@ -187,12 +194,12 @@ function canonicalFileKeys(sessionFile: string): string[] {
     if (stats.ino !== 0n) keys.push(`file:${stats.dev}:${stats.ino}`)
     return keys
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
   const parent = realpathSync.native(path.dirname(normalized))
-  return ["path:" + normalizeCase(path.join(parent, path.basename(normalized)))]
+  return ['path:' + normalizeCase(path.join(parent, path.basename(normalized)))]
 }
 
 function normalizeCase(filePath: string): string {
-  return process.platform === "win32" ? filePath.toLowerCase() : filePath
+  return process.platform === 'win32' ? filePath.toLowerCase() : filePath
 }

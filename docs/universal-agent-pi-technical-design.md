@@ -337,27 +337,27 @@ Pi 专属能力放在版本化 namespace 下：
 
 ```ts
 interface AgentDriver {
-  readonly manifest: DriverManifest;
+  readonly manifest: DriverManifest
 
-  listSessions(input: ListSessionsInput): Promise<DriverSessionSummary[]>;
-  createSession(input: CreateSessionInput): Promise<DriverSessionRef>;
-  openRuntime(input: OpenRuntimeInput): Promise<AgentRuntime>;
+  listSessions(input: ListSessionsInput): Promise<DriverSessionSummary[]>
+  createSession(input: CreateSessionInput): Promise<DriverSessionRef>
+  openRuntime(input: OpenRuntimeInput): Promise<AgentRuntime>
 }
 
 interface AgentRuntime {
-  readonly ref: DriverSessionRef;
+  readonly ref: DriverSessionRef
 
-  getSnapshot(): Promise<DriverSnapshot>;
-  execute(command: DriverCommand): Promise<DriverCommandResult>;
-  subscribe(listener: (event: DriverEvent) => void): () => void;
-  dispose(reason: DisposeReason): Promise<void>;
+  getSnapshot(): Promise<DriverSnapshot>
+  execute(command: DriverCommand): Promise<DriverCommandResult>
+  subscribe(listener: (event: DriverEvent) => void): () => void
+  dispose(reason: DisposeReason): Promise<void>
 }
 
 interface DriverManifest {
-  id: string;
-  version: string;
-  protocolVersion: number;
-  capabilities: Record<string, { version: number; enabled: boolean }>;
+  id: string
+  version: string
+  protocolVersion: number
+  capabilities: Record<string, { version: number; enabled: boolean }>
 }
 ```
 
@@ -454,51 +454,45 @@ Native model 不允许由 presentation reducer 覆盖。Presentation 可以随 U
 
 ```ts
 interface SessionSnapshotV1 {
-  protocolVersion: 1;
-  epoch: string;
-  sequence: number;
+  protocolVersion: 1
+  epoch: string
+  sequence: number
 
   session: {
-    id: string;
-    directory: string;
-    driverId: "pi";
-    driverSessionId: string;
-    title?: string;
-    state:
-      | "idle"
-      | "running"
-      | "retrying"
-      | "compacting"
-      | "crashed"
-      | "conflict";
-    createdAt: string;
-    updatedAt: string;
-  };
+    id: string
+    directory: string
+    driverId: 'pi'
+    driverSessionId: string
+    title?: string
+    state: 'idle' | 'running' | 'retrying' | 'compacting' | 'crashed' | 'conflict'
+    createdAt: string
+    updatedAt: string
+  }
 
   runtime: {
-    attached: boolean;
-    model?: ModelRefV1;
-    thinkingLevel: string;
-    availableThinkingLevels: string[];
-    isStreaming: boolean;
-    isCompacting: boolean;
-    retry?: RetryStateV1;
-    queue: QueueStateV1;
-    contextUsage?: ContextUsageV1;
-    activeTools: string[];
-  };
+    attached: boolean
+    model?: ModelRefV1
+    thinkingLevel: string
+    availableThinkingLevels: string[]
+    isStreaming: boolean
+    isCompacting: boolean
+    retry?: RetryStateV1
+    queue: QueueStateV1
+    contextUsage?: ContextUsageV1
+    activeTools: string[]
+  }
 
-  timeline: TimelineItemV1[];
+  timeline: TimelineItemV1[]
 
   native: {
-    namespace: "pi";
-    schemaVersion: 1;
-    leafId: string | null;
-    entries: PiSessionEntryDtoV1[];
-    tree: PiSessionTreeNodeDtoV1[];
-    diagnostics: DiagnosticV1[];
-    resources: PiResourceSummaryV1;
-  };
+    namespace: 'pi'
+    schemaVersion: 1
+    leafId: string | null
+    entries: PiSessionEntryDtoV1[]
+    tree: PiSessionTreeNodeDtoV1[]
+    diagnostics: DiagnosticV1[]
+    resources: PiResourceSummaryV1
+  }
 }
 ```
 
@@ -512,45 +506,41 @@ type TimelineItemV1 =
   | CustomTimelineItemV1
   | CompactionTimelineItemV1
   | BranchSummaryTimelineItemV1
-  | StateChangeTimelineItemV1;
+  | StateChangeTimelineItemV1
 
 interface AssistantTimelineItemV1 {
-  type: "assistant";
-  id: string;
-  entryId?: string;
-  parentEntryId?: string | null;
-  timestamp: number;
-  status: "streaming" | "completed" | "error" | "aborted";
-  provider: string;
-  model: string;
-  stopReason?: string;
-  content: Array<
-    | { type: "text"; text: string }
-    | { type: "thinking"; text: string }
-    | ToolPresentationV1
-  >;
-  usage?: UsageV1;
-  error?: ProblemV1;
+  type: 'assistant'
+  id: string
+  entryId?: string
+  parentEntryId?: string | null
+  timestamp: number
+  status: 'streaming' | 'completed' | 'error' | 'aborted'
+  provider: string
+  model: string
+  stopReason?: string
+  content: Array<{ type: 'text'; text: string } | { type: 'thinking'; text: string } | ToolPresentationV1>
+  usage?: UsageV1
+  error?: ProblemV1
 }
 
 interface ToolPresentationV1 {
-  type: "tool";
-  callId: string;
-  name: string;
-  status: "pending" | "running" | "completed" | "error";
-  input: unknown;
-  output?: Array<TextOrImageContentV1>;
-  isError?: boolean;
-  startedAt?: number;
-  endedAt?: number;
+  type: 'tool'
+  callId: string
+  name: string
+  status: 'pending' | 'running' | 'completed' | 'error'
+  input: unknown
+  output?: Array<TextOrImageContentV1>
+  isError?: boolean
+  startedAt?: number
+  endedAt?: number
   normalized?: {
-    title?: string;
-    cwd?: string;
-    exitCode?: number;
-    patch?: string;
-    files?: FileChangeSummaryV1[];
-  };
-  nativeDetails?: unknown;
+    title?: string
+    cwd?: string
+    exitCode?: number
+    patch?: string
+    files?: FileChangeSummaryV1[]
+  }
+  nativeDetails?: unknown
 }
 ```
 
@@ -596,15 +586,15 @@ Pi prompt 原生支持文本和 `ImageContent[]`。OpenCodeUI 当前的任意 fi
 
 ```ts
 interface EventEnvelopeV1<T = unknown> {
-  protocolVersion: 1;
-  epoch: string;
-  sequence: number;
-  eventId: string;
-  sessionId?: string;
-  workspacePath?: string;
-  timestamp: string;
-  type: string;
-  payload: T;
+  protocolVersion: 1
+  epoch: string
+  sequence: number
+  eventId: string
+  sessionId?: string
+  workspacePath?: string
+  timestamp: string
+  type: string
+  payload: T
 }
 ```
 

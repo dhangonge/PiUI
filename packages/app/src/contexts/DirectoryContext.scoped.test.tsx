@@ -6,7 +6,11 @@ import { DirectoryContext } from './DirectoryContext.shared'
 import { serverStore, LOCAL_SERVER_ID } from '../store/serverStore'
 import { serverStorage } from '../utils/perServerStorage'
 
-const route = vi.hoisted(() => ({ directory: undefined as string | undefined, serverId: undefined as string | undefined, setDirectory: vi.fn() }))
+const route = vi.hoisted(() => ({
+  directory: undefined as string | undefined,
+  serverId: undefined as string | undefined,
+  setDirectory: vi.fn(),
+}))
 vi.mock('../hooks/useRouter', () => ({ useRouter: () => route }))
 vi.mock('../utils/tauri', () => ({ isTauri: () => false, isTauriMobile: () => false }))
 

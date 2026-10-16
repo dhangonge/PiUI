@@ -4,7 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTerminalSessionRestore } from './useTerminalSessionRestore'
 import { layoutStore } from '../store/layoutStore'
 
-const { activeServerSnapshot, listHostTerminalsMock, onServerChangeMock, resolveWorkspacePathMock, serverChangeCallback, serverHealthSnapshot, serverSnapshot, uiErrorHandlerMock } = vi.hoisted(() => ({
+const {
+  activeServerSnapshot,
+  listHostTerminalsMock,
+  onServerChangeMock,
+  resolveWorkspacePathMock,
+  serverChangeCallback,
+  serverHealthSnapshot,
+  serverSnapshot,
+  uiErrorHandlerMock,
+} = vi.hoisted(() => ({
   activeServerSnapshot: { id: 'test', url: '', token: '' },
   listHostTerminalsMock: vi.fn(),
   onServerChangeMock: vi.fn<(callback: () => void) => () => void>(() => () => {}),
@@ -30,7 +39,9 @@ vi.mock('../store/serverStore', () => ({
   },
 }))
 
-vi.mock('../pi/eventStream', () => ({ getPiEventStream: () => ({ connectWorkspace: vi.fn(), disconnectWorkspace: vi.fn() }) }))
+vi.mock('../pi/eventStream', () => ({
+  getPiEventStream: () => ({ connectWorkspace: vi.fn(), disconnectWorkspace: vi.fn() }),
+}))
 
 vi.mock('../pi/workspaces', () => ({
   resolveWorkspacePath: resolveWorkspacePathMock,
@@ -132,7 +143,7 @@ describe('useTerminalSessionRestore', () => {
     listHostTerminalsMock.mockReturnValue(
       new Promise(resolve => {
         resolveRequest = resolve
-      })
+      }),
     )
     const syncSpy = vi.spyOn(layoutStore, 'syncTerminalSessions')
 

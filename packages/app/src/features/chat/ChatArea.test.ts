@@ -16,7 +16,11 @@ import {
   seedMeasuredPageHeightsFromPreviousPages,
 } from './chatPageModel'
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
-import { buildVisibleTimelineEntries, getVisibleTimelineForkTargetId, clearVisibleTimelineMergeCache } from './chatAreaVisibility'
+import {
+  buildVisibleTimelineEntries,
+  getVisibleTimelineForkTargetId,
+  clearVisibleTimelineMergeCache,
+} from './chatAreaVisibility'
 import type { Message, MessageError, Part } from '../../types/message'
 import type { SessionMessageEntry } from '@earendil-works/pi-coding-agent'
 import type { ToolCall, ToolResultMessage } from '@earendil-works/pi-ai'
@@ -125,7 +129,14 @@ function createAssistantItem(
       api: 'anthropic-messages',
       provider: 'anthropic',
       model: 'model-1',
-      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
       stopReason: error?.stopReason ?? 'stop',
       errorMessage: error?.errorMessage,
       timestamp: completed ?? created,
@@ -215,13 +226,10 @@ describe('buildVisibleTimelineEntries', () => {
   })
 
   it('keeps aborted assistant messages that already have renderable blocks', () => {
-    const item = createAssistantItem(
-      'assistant-aborted-with-tool',
-      [createToolCall('tool-1')],
-      1,
-      2,
-      { stopReason: 'aborted', errorMessage: 'Aborted' },
-    )
+    const item = createAssistantItem('assistant-aborted-with-tool', [createToolCall('tool-1')], 1, 2, {
+      stopReason: 'aborted',
+      errorMessage: 'Aborted',
+    })
 
     const entries = buildVisibleTimelineEntries([item])
 
@@ -379,10 +387,7 @@ describe('reuseProcessTimelineItems', () => {
     })
 
     const streamingItem = items[items.length - 1] as PiAssistantMessageItem
-    const nextItems = [
-      ...items.slice(0, -1),
-      { ...streamingItem, blocks: [createTextBlock('hello world')] },
-    ]
+    const nextItems = [...items.slice(0, -1), { ...streamingItem, blocks: [createTextBlock('hello world')] }]
     const rebuilt = buildProcessTimeline(nextItems, {
       turnDurationMap: new Map([['assistant-1', 1000]]),
       sessionIsStreaming: true,
@@ -423,8 +428,7 @@ describe('reuseProcessTimelineItems', () => {
 describe('buildProcessTimeline', () => {
   const hasProcess = (item: PiAssistantMessageItem) =>
     item.blocks.some(b => b.type === 'toolCall' || b.type === 'thinking')
-  const hasFinal = (item: PiAssistantMessageItem) =>
-    item.blocks.some(b => b.type === 'text')
+  const hasFinal = (item: PiAssistantMessageItem) => item.blocks.some(b => b.type === 'text')
 
   it('delays empty Working shell until entry-ready gate opens', () => {
     const items = [createUserItem('user-1', 1000)]
@@ -458,7 +462,10 @@ describe('buildProcessTimeline', () => {
   })
 
   it('shows Working shell immediately once any assistant content exists', () => {
-    const mid: PiAssistantMessageItem = { ...createAssistantItem('assistant-1', [createToolCall('tool-1')], 1001), isStreaming: true }
+    const mid: PiAssistantMessageItem = {
+      ...createAssistantItem('assistant-1', [createToolCall('tool-1')], 1001),
+      isStreaming: true,
+    }
     const items = [createUserItem('user-1', 1000), mid]
     const timeline = buildProcessTimeline(items, {
       turnDurationMap: new Map(),
@@ -490,12 +497,11 @@ describe('buildProcessTimeline', () => {
 
   it('keeps only the earliest pending Working shell when a later user is queued', () => {
     // 第一轮仍 live，第二轮 user 已发出 → 只挂 user-1 的 Working，user-2 暂不挂空壳
-    const mid: PiAssistantMessageItem = { ...createAssistantItem('assistant-1', [createToolCall('tool-1')], 1001), isStreaming: true }
-    const items = [
-      createUserItem('user-1', 1000),
-      mid,
-      createUserItem('user-2', 2000),
-    ]
+    const mid: PiAssistantMessageItem = {
+      ...createAssistantItem('assistant-1', [createToolCall('tool-1')], 1001),
+      isStreaming: true,
+    }
+    const items = [createUserItem('user-1', 1000), mid, createUserItem('user-2', 2000)]
     const timeline = buildProcessTimeline(items, {
       turnDurationMap: new Map(),
       sessionIsStreaming: true,
@@ -520,10 +526,7 @@ describe('buildProcessTimeline', () => {
 
   it('only arms the earliest empty turn when multiple users are pending', () => {
     // 快速连发：两轮都还没 assistant → 只在最早 user 下挂 Working
-    const items = [
-      createUserItem('user-1', 1000),
-      createUserItem('user-2', 1500),
-    ]
+    const items = [createUserItem('user-1', 1000), createUserItem('user-2', 1500)]
     const ready = new Set(['user-1', 'user-2'])
     const timeline = buildProcessTimeline(items, {
       turnDurationMap: new Map(),
@@ -554,12 +557,7 @@ describe('buildProcessTimeline', () => {
       ...createAssistantItem('assistant-2', [createToolCall('tool-2')], 2001),
       isStreaming: true,
     }
-    const items = [
-      createUserItem('user-1', 1000),
-      earlierStillFlaggedLive,
-      createUserItem('user-2', 2000),
-      laterLive,
-    ]
+    const items = [createUserItem('user-1', 1000), earlierStillFlaggedLive, createUserItem('user-2', 2000), laterLive]
     const timeline = buildProcessTimeline(items, {
       turnDurationMap: new Map(),
       sessionIsStreaming: true,
@@ -575,12 +573,7 @@ describe('buildProcessTimeline', () => {
 
   it('does not reopen a completed turn when session becomes busy before the next user lands', () => {
     // 发送瞬间：streaming 已 true，新 user 还没进列表 → 已 Worked 的回合不能闪回 Working
-    const settled = createAssistantItem(
-      'assistant-1',
-      [createToolCall('tool-1'), createTextBlock('done')],
-      1001,
-      1500,
-    )
+    const settled = createAssistantItem('assistant-1', [createToolCall('tool-1'), createTextBlock('done')], 1001, 1500)
     const items = [createUserItem('user-1', 1000), settled]
     const timeline = buildProcessTimeline(items, {
       turnDurationMap: new Map([['assistant-1', 500]]),
@@ -595,12 +588,7 @@ describe('buildProcessTimeline', () => {
   })
 
   it('settles shell with process inside and final answer outside', () => {
-    const processOnly = createAssistantItem(
-      'assistant-1',
-      [createToolCall('tool-1')],
-      1001,
-      1200,
-    )
+    const processOnly = createAssistantItem('assistant-1', [createToolCall('tool-1')], 1001, 1200)
     const finalAnswer = createAssistantItem(
       'assistant-2',
       [createToolCall('tool-2'), createTextBlock('done')],
@@ -659,12 +647,7 @@ describe('buildProcessTimeline', () => {
   })
 
   it('does not wrap pure final answer turns in an empty process shell', () => {
-    const plain = createAssistantItem(
-      'assistant-1',
-      [createTextBlock('hello')],
-      1001,
-      1100,
-    )
+    const plain = createAssistantItem('assistant-1', [createTextBlock('hello')], 1001, 1100)
     const items = [createUserItem('user-1', 1000), plain]
     const timeline = buildProcessTimeline(items, {
       turnDurationMap: new Map([['assistant-1', 100]]),
@@ -693,15 +676,15 @@ describe('buildProcessTimeline', () => {
       ...createUserItem('user-1', 1000),
       renderKey: liveUser.entryId,
     }
-    const completed = buildProcessTimeline([
-      persistedUser,
-      createAssistantItem('assistant-1', [createTextBlock('hello')], 1001, 1200),
-    ], {
-      turnDurationMap: new Map([['assistant-1', 200]]),
-      sessionIsStreaming: false,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-    })
+    const completed = buildProcessTimeline(
+      [persistedUser, createAssistantItem('assistant-1', [createTextBlock('hello')], 1001, 1200)],
+      {
+        turnDurationMap: new Map([['assistant-1', 200]]),
+        sessionIsStreaming: false,
+        messageHasProcess: hasProcess,
+        messageHasFinal: hasFinal,
+      },
+    )
 
     expect(active.map(item => item.key)).toEqual(['live-user', 'process-shell:live-user'])
     expect(completed.map(item => item.key)).toEqual(active.map(item => item.key))
@@ -719,7 +702,11 @@ describe('buildProcessTimeline', () => {
       rawEntry: rawEntry('compaction-1', 1001),
     } as unknown as PiTimelineItem
     const timeline = buildProcessTimeline(
-      [createUserItem('user-1', 1000), compaction, createAssistantItem('assistant-1', [createToolCall('tool-1'), createTextBlock('answer')], 1002, 1200)],
+      [
+        createUserItem('user-1', 1000),
+        compaction,
+        createAssistantItem('assistant-1', [createToolCall('tool-1'), createTextBlock('answer')], 1002, 1200),
+      ],
       {
         turnDurationMap: new Map(),
         sessionIsStreaming: false,
@@ -727,11 +714,7 @@ describe('buildProcessTimeline', () => {
         messageHasFinal: hasFinal,
       },
     )
-    expect(timeline.map(item => item.key)).toEqual([
-      'user-1',
-      'process-shell:user-1',
-      'compaction-1',
-    ])
+    expect(timeline.map(item => item.key)).toEqual(['user-1', 'process-shell:user-1', 'compaction-1'])
     expect(timeline[1]).toMatchObject({
       kind: 'process-shell',
       isActive: false,
@@ -741,7 +724,11 @@ describe('buildProcessTimeline', () => {
 
   it('keeps a flat assistant at the page head in position instead of hoisting it', () => {
     const timeline = buildProcessTimeline(
-      [createAssistantItem('assistant-leading', [createTextBlock('continued')], 500, 600), createUserItem('user-1', 1000), createAssistantItem('assistant-1', [createTextBlock('answer')], 1001, 1200)],
+      [
+        createAssistantItem('assistant-leading', [createTextBlock('continued')], 500, 600),
+        createUserItem('user-1', 1000),
+        createAssistantItem('assistant-1', [createTextBlock('answer')], 1001, 1200),
+      ],
       {
         turnDurationMap: new Map(),
         sessionIsStreaming: false,
@@ -802,14 +789,12 @@ describe('buildChatPages', () => {
 
   it('counts blank lines before fenced code independently of indentation', () => {
     const suffix = '```ts\nconst value = 1\n```'
-    const withoutIndent = createAssistantMessage(
-      'assistant-plain-lines',
-      [createTextPart('text-plain-lines', 'assistant-plain-lines', `${'\n'.repeat(100)}${suffix}`)],
-    )
-    const withIndent = createAssistantMessage(
-      'assistant-indented-lines',
-      [createTextPart('text-indented-lines', 'assistant-indented-lines', `${' \n'.repeat(100)}${suffix}`)],
-    )
+    const withoutIndent = createAssistantMessage('assistant-plain-lines', [
+      createTextPart('text-plain-lines', 'assistant-plain-lines', `${'\n'.repeat(100)}${suffix}`),
+    ])
+    const withIndent = createAssistantMessage('assistant-indented-lines', [
+      createTextPart('text-indented-lines', 'assistant-indented-lines', `${' \n'.repeat(100)}${suffix}`),
+    ])
 
     expect(estimateMessageRenderWeight(withIndent)).toBe(estimateMessageRenderWeight(withoutIndent))
   })
@@ -1216,7 +1201,6 @@ describe('reconcileStableChatPages', () => {
       expect(nextPages[index]).toBe(currentPages[index])
     }
   })
-
 })
 
 describe('computeAnchorRestoreScrollDelta', () => {

@@ -16,38 +16,38 @@ There is no remote timeline or presentation API. The browser pages Pi's native a
 
 ## Session And Prompt
 
-| Pi SDK surface | PiUI surface | Status |
-| --- | --- | --- |
-| `SessionManager.list/listAll/create/open` | session list/create/open routes | Complete, including settings and `PI_CODING_AGENT_SESSION_DIR` overrides |
-| `AgentSession.prompt` | `session.prompt` command | Complete; source is `rpc`, templates configurable, images supported |
-| `steer/followUp/sendUserMessage` | run-control commands | Complete |
-| `abort/waitForIdle` | run-control/query commands | Complete |
-| queue modes and clear | queue commands and snapshot state | Complete |
-| model/thinking/scoped models | model commands and snapshot state | Complete, including thinking `max` |
-| tools and tool inspection | tools commands and runtime inspection | Complete; parameter schema, prompt guidelines, and sourceInfo are retained |
-| compaction/retry/branch summary | independent control commands | Complete |
-| user bash | bash command, abort, bounded output metadata | Complete |
-| entries/tree/labels/navigation | native entry/tree routes and commands | Complete; entries and tree nodes remain Pi-native JSON |
-| new/fork/clone/switch/import | replacement commands | Complete with pre-replacement lease reservation |
-| extension `ctx.newSession/fork/switchSession` | worker host-control IPC | Complete with setup/withSession support |
-| extension `ctx.shutdown` | graceful worker disposal | Complete |
-| HTML/JSONL export | export commands | Complete |
+| Pi SDK surface                                | PiUI surface                                 | Status                                                                     |
+| --------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------- |
+| `SessionManager.list/listAll/create/open`     | session list/create/open routes              | Complete, including settings and `PI_CODING_AGENT_SESSION_DIR` overrides   |
+| `AgentSession.prompt`                         | `session.prompt` command                     | Complete; source is `rpc`, templates configurable, images supported        |
+| `steer/followUp/sendUserMessage`              | run-control commands                         | Complete                                                                   |
+| `abort/waitForIdle`                           | run-control/query commands                   | Complete                                                                   |
+| queue modes and clear                         | queue commands and snapshot state            | Complete                                                                   |
+| model/thinking/scoped models                  | model commands and snapshot state            | Complete, including thinking `max`                                         |
+| tools and tool inspection                     | tools commands and runtime inspection        | Complete; parameter schema, prompt guidelines, and sourceInfo are retained |
+| compaction/retry/branch summary               | independent control commands                 | Complete                                                                   |
+| user bash                                     | bash command, abort, bounded output metadata | Complete                                                                   |
+| entries/tree/labels/navigation                | native entry/tree routes and commands        | Complete; entries and tree nodes remain Pi-native JSON                     |
+| new/fork/clone/switch/import                  | replacement commands                         | Complete with pre-replacement lease reservation                            |
+| extension `ctx.newSession/fork/switchSession` | worker host-control IPC                      | Complete with setup/withSession support                                    |
+| extension `ctx.shutdown`                      | graceful worker disposal                     | Complete                                                                   |
+| HTML/JSONL export                             | export commands                              | Complete                                                                   |
 
 ## Resources And Management
 
-| Pi SDK surface | PiUI surface | Status |
-| --- | --- | --- |
-| settings getters | global/project native scope snapshots plus effective view | Complete, including applied `httpProxy` |
-| persistent settings setters | typed settings patch | Complete for every setter exported by the patched SDK, including `httpProxy` |
-| project trust store | trust GET/PUT | Complete |
-| extension `project_trust` | pre-resource trust callback | Complete through Pi's exported `resolveProjectTrusted` |
-| packages list/install/remove/update | package routes | Complete |
-| package resolve missing action | `install`, `skip`, `error` | Complete; omitted remains non-destructive `skip` |
-| package sources/path/update check | package management routes | Complete |
-| extensions/skills/prompts/themes/context | resource snapshot and reload | Complete |
-| providers/API key/OAuth/logout | provider auth routes and events | Complete |
-| model catalogs and runtime inspection | model routes | Complete; Pi model JSON is retained without capability fabrication; credential-bearing config fields are redacted |
-| model runtime reload/refresh | model runtime routes | Complete |
+| Pi SDK surface                           | PiUI surface                                              | Status                                                                                                            |
+| ---------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| settings getters                         | global/project native scope snapshots plus effective view | Complete, including applied `httpProxy`                                                                           |
+| persistent settings setters              | typed settings patch                                      | Complete for every setter exported by the patched SDK, including `httpProxy`                                      |
+| project trust store                      | trust GET/PUT                                             | Complete                                                                                                          |
+| extension `project_trust`                | pre-resource trust callback                               | Complete through Pi's exported `resolveProjectTrusted`                                                            |
+| packages list/install/remove/update      | package routes                                            | Complete                                                                                                          |
+| package resolve missing action           | `install`, `skip`, `error`                                | Complete; omitted remains non-destructive `skip`                                                                  |
+| package sources/path/update check        | package management routes                                 | Complete                                                                                                          |
+| extensions/skills/prompts/themes/context | resource snapshot and reload                              | Complete                                                                                                          |
+| providers/API key/OAuth/logout           | provider auth routes and events                           | Complete                                                                                                          |
+| model catalogs and runtime inspection    | model routes                                              | Complete; Pi model JSON is retained without capability fabrication; credential-bearing config fields are redacted |
+| model runtime reload/refresh             | model runtime routes                                      | Complete                                                                                                          |
 
 ## Browser UI Coverage
 
@@ -61,20 +61,20 @@ Transport-only surfaces do not receive artificial buttons: health, capability ne
 
 The capability manifest contains a per-method `rpc`, `web-equivalent`, or `tui-only` value and concrete size limits.
 
-| Methods | Status |
-| --- | --- |
-| select, confirm, input, editor | Browser RPC dialog, timeout/abort, snapshot recovery, idempotent response |
-| notify, status, string widgets, title | Web events and persistent session UI state |
-| working indicator/message, hidden-thinking label | Web-equivalent state |
-| editor set/paste/get | Browser draft synchronization with worker shadow state |
-| theme name and tools expanded | Web-equivalent state |
-| terminal input | `tui-only`; terminal byte streams are not browser keyboard events |
-| component widget/header/footer/custom | `tui-only`; component factories are functions and cannot cross JSON IPC |
-| editor component and autocomplete factory | `tui-only`; no false RPC declaration |
-| theme enumeration | `rpc`; serializable `{name, path}` metadata comes from Pi ResourceLoader |
-| TUI Theme object/getTheme | `tui-only`; Theme instances contain rendering functions |
-| custom message/entry/tool renderers | Execute only in a TUI host; PiUI transports structured message/tool data instead |
-| extension shortcuts | TUI-host keybinding behavior; extension commands remain available to Web command UI |
+| Methods                                          | Status                                                                              |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| select, confirm, input, editor                   | Browser RPC dialog, timeout/abort, snapshot recovery, idempotent response           |
+| notify, status, string widgets, title            | Web events and persistent session UI state                                          |
+| working indicator/message, hidden-thinking label | Web-equivalent state                                                                |
+| editor set/paste/get                             | Browser draft synchronization with worker shadow state                              |
+| theme name and tools expanded                    | Web-equivalent state                                                                |
+| terminal input                                   | `tui-only`; terminal byte streams are not browser keyboard events                   |
+| component widget/header/footer/custom            | `tui-only`; component factories are functions and cannot cross JSON IPC             |
+| editor component and autocomplete factory        | `tui-only`; no false RPC declaration                                                |
+| theme enumeration                                | `rpc`; serializable `{name, path}` metadata comes from Pi ResourceLoader            |
+| TUI Theme object/getTheme                        | `tui-only`; Theme instances contain rendering functions                             |
+| custom message/entry/tool renderers              | Execute only in a TUI host; PiUI transports structured message/tool data instead    |
+| extension shortcuts                              | TUI-host keybinding behavior; extension commands remain available to Web command UI |
 
 ## Remote Boundary Policy
 

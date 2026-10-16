@@ -28,11 +28,14 @@ function notify(): void {
 export function extractToolExecutionText(partialResult: { content?: unknown } | undefined): string {
   if (!partialResult || !Array.isArray(partialResult.content)) return ''
   return partialResult.content
-    .filter((block): block is { type: 'text'; text: string } => (
-      Boolean(block) && typeof block === 'object' && !Array.isArray(block)
-      && (block as { type?: unknown }).type === 'text'
-      && typeof (block as { text?: unknown }).text === 'string'
-    ))
+    .filter(
+      (block): block is { type: 'text'; text: string } =>
+        Boolean(block) &&
+        typeof block === 'object' &&
+        !Array.isArray(block) &&
+        (block as { type?: unknown }).type === 'text' &&
+        typeof (block as { text?: unknown }).text === 'string',
+    )
     .map(block => block.text)
     .join('')
 }
@@ -83,8 +86,7 @@ export const liveToolOutputStore = {
 /** 订阅某工具调用的实时输出；无输出或非运行中时返回 undefined */
 export function useLiveToolOutput(toolCallId: string | undefined): string | undefined {
   const { currentSessionId } = useSessionNavigation()
-  return useSyncExternalStore(
-    liveToolOutputStore.subscribe,
-    () => (toolCallId ? liveToolOutputStore.get(toolCallId, currentSessionId) : undefined),
+  return useSyncExternalStore(liveToolOutputStore.subscribe, () =>
+    toolCallId ? liveToolOutputStore.get(toolCallId, currentSessionId) : undefined,
   )
 }

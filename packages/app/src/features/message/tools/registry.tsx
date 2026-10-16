@@ -72,15 +72,18 @@ function resultText(result: ToolResultMessage): string {
 export function defaultExtractData(execution: PiToolExecution): ExtractedToolData {
   const { call, result: toolResult } = execution
   const inputObj = call.arguments as Record<string, unknown> | undefined
-  const metadata = toolResult?.details && typeof toolResult.details === 'object' && !Array.isArray(toolResult.details)
-    ? toolResult.details as Record<string, unknown>
-    : undefined
-  const nativeDetails = metadata?.nativeDetails && typeof metadata.nativeDetails === 'object'
-    ? metadata.nativeDetails as Record<string, unknown>
-    : undefined
-  const normalized = metadata?.normalized && typeof metadata.normalized === 'object'
-    ? metadata.normalized as Record<string, unknown>
-    : undefined
+  const metadata =
+    toolResult?.details && typeof toolResult.details === 'object' && !Array.isArray(toolResult.details)
+      ? (toolResult.details as Record<string, unknown>)
+      : undefined
+  const nativeDetails =
+    metadata?.nativeDetails && typeof metadata.nativeDetails === 'object'
+      ? (metadata.nativeDetails as Record<string, unknown>)
+      : undefined
+  const normalized =
+    metadata?.normalized && typeof metadata.normalized === 'object'
+      ? (metadata.normalized as Record<string, unknown>)
+      : undefined
   const output = toolResult ? resultText(toolResult) : undefined
 
   const result: ExtractedToolData = {}
@@ -88,9 +91,7 @@ export function defaultExtractData(execution: PiToolExecution): ExtractedToolDat
   // Native inline image blocks (pi tool results carry ImageContent inline)
   if (toolResult) {
     const images = toolResult.content.flatMap(block =>
-      block.type === 'image'
-        ? [{ url: `data:${block.mimeType};base64,${block.data}`, mimeType: block.mimeType }]
-        : [],
+      block.type === 'image' ? [{ url: `data:${block.mimeType};base64,${block.data}`, mimeType: block.mimeType }] : [],
     )
     if (images.length > 0) result.images = images
   }
@@ -113,9 +114,8 @@ export function defaultExtractData(execution: PiToolExecution): ExtractedToolDat
 
   // Pi 原生截断字段：输出超限时 truncated=true 且给出完整日志路径（bash/read 等通用）
   result.truncated = metadata?.truncated === true
-  result.fullOutputPath = typeof metadata?.fullOutputPath === 'string' && metadata.fullOutputPath
-    ? metadata.fullOutputPath
-    : undefined
+  result.fullOutputPath =
+    typeof metadata?.fullOutputPath === 'string' && metadata.fullOutputPath ? metadata.fullOutputPath : undefined
   if (!result.filePath && inputObj?.filePath) {
     result.filePath = String(inputObj.filePath)
   }
@@ -227,15 +227,20 @@ export function defaultExtractData(execution: PiToolExecution): ExtractedToolDat
   const patch = normalized?.patch ?? nativeDetails?.patch ?? nativeDetails?.diff
   if (!result.diff && typeof patch === 'string') result.diff = patch
   const truncation = nativeDetails?.truncation as Record<string, unknown> | undefined
-  const limits = [nativeDetails?.matchLimitReached, nativeDetails?.resultLimitReached, nativeDetails?.entryLimitReached]
-    .filter(value => typeof value === 'number')
+  const limits = [
+    nativeDetails?.matchLimitReached,
+    nativeDetails?.resultLimitReached,
+    nativeDetails?.entryLimitReached,
+  ].filter(value => typeof value === 'number')
   if (truncation?.truncated === true || limits.length > 0) {
-    const shown = typeof truncation?.outputLines === 'number'
-      ? i18n.t('message:truncation.linesShown', { count: truncation.outputLines })
-      : i18n.t('message:truncation.outputTruncated')
-    const fullPath = typeof nativeDetails?.fullOutputPath === 'string'
-      ? ` · ${i18n.t('message:truncation.fullOutput', { path: nativeDetails.fullOutputPath })}`
-      : ''
+    const shown =
+      typeof truncation?.outputLines === 'number'
+        ? i18n.t('message:truncation.linesShown', { count: truncation.outputLines })
+        : i18n.t('message:truncation.outputTruncated')
+    const fullPath =
+      typeof nativeDetails?.fullOutputPath === 'string'
+        ? ` · ${i18n.t('message:truncation.fullOutput', { path: nativeDetails.fullOutputPath })}`
+        : ''
     result.notice = `${shown}${fullPath}`
   }
   if (Array.isArray(metadata?.images)) {
@@ -276,9 +281,12 @@ export function defaultExtractData(execution: PiToolExecution): ExtractedToolDat
 function bashExtractData(execution: PiToolExecution): ExtractedToolData {
   const base = defaultExtractData(execution)
   const inputObj = execution.call.arguments as Record<string, unknown> | undefined
-  const metadata = execution.result?.details && typeof execution.result.details === 'object' && !Array.isArray(execution.result.details)
-    ? execution.result.details as Record<string, unknown>
-    : undefined
+  const metadata =
+    execution.result?.details &&
+    typeof execution.result.details === 'object' &&
+    !Array.isArray(execution.result.details)
+      ? (execution.result.details as Record<string, unknown>)
+      : undefined
 
   if (inputObj?.command) {
     base.input = String(inputObj.command)

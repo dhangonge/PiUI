@@ -76,7 +76,8 @@ function toPiRelativePath(path: string, directory?: string): string {
 async function fetchDirectory(path: string, directory?: string, serverId?: string): Promise<FileNodeDto[]> {
   const revision = serverId ? getServerRevision(serverId) : undefined
   const checkOwner = () => {
-    if (serverId && getServerRevision(serverId) !== revision) throw new DOMException('Directory server changed', 'AbortError')
+    if (serverId && getServerRevision(serverId) !== revision)
+      throw new DOMException('Directory server changed', 'AbortError')
   }
   const workspaceDir =
     directory && (/^[a-zA-Z]:/.test(directory) || directory.startsWith('/'))
@@ -119,10 +120,15 @@ export async function searchFiles(
   } = {},
 ): Promise<string[]> {
   const workspacePath = await requireWorkspacePath(options.directory)
-  const result = await searchHostFilesByName(workspacePath, query, {
-    type: options.type,
-    limit: options.limit,
-  }, options.signal)
+  const result = await searchHostFilesByName(
+    workspacePath,
+    query,
+    {
+      type: options.type,
+      limit: options.limit,
+    },
+    options.signal,
+  )
   return result.paths
 }
 
@@ -169,15 +175,17 @@ export async function getFileContent(path: string, directory?: string): Promise<
   return readHostFile(workspacePath, rel)
 }
 
-export async function saveFile(path: string, content: Pick<FileReadResponse, 'content'> & Partial<FileReadResponse>, directory?: string): Promise<FileReadResponse> {
+export async function saveFile(
+  path: string,
+  content: Pick<FileReadResponse, 'content'> & Partial<FileReadResponse>,
+  directory?: string,
+): Promise<FileReadResponse> {
   const workspacePath = await requireWorkspacePath(directory)
   const relative = toPiRelativePath(path, directory)
-  const saved = await writeHostFile(
-    workspacePath,
-    relative,
-    content.content,
-    { ifMatch: content.etag, encoding: content.encoding === 'base64' ? 'base64' : 'utf-8' },
-  )
+  const saved = await writeHostFile(workspacePath, relative, content.content, {
+    ifMatch: content.etag,
+    encoding: content.encoding === 'base64' ? 'base64' : 'utf-8',
+  })
   invalidateWorkspaceFileCaches(directory)
   return saved
 }
@@ -229,7 +237,11 @@ export function invalidateWorkspaceFileCaches(directory?: string): void {
 }
 
 export function clearAllWorkspaceFileCaches(): void {
-  const keys = new Set([...rootDirectoryCache.keys(), ...rootDirectoryInflight.keys(), ...rootDirectoryGeneration.keys()])
+  const keys = new Set([
+    ...rootDirectoryCache.keys(),
+    ...rootDirectoryInflight.keys(),
+    ...rootDirectoryGeneration.keys(),
+  ])
   for (const key of keys) {
     rootDirectoryGeneration.set(key, (rootDirectoryGeneration.get(key) ?? 0) + 1)
   }
@@ -237,7 +249,11 @@ export function clearAllWorkspaceFileCaches(): void {
   rootDirectoryInflight.clear()
 }
 
-export async function searchText(pattern: string, directory?: string, signal?: AbortSignal): Promise<WorkspaceTextSearchMatch[]> {
+export async function searchText(
+  pattern: string,
+  directory?: string,
+  signal?: AbortSignal,
+): Promise<WorkspaceTextSearchMatch[]> {
   const workspacePath = await requireWorkspacePath(directory)
   return signal
     ? (await searchHostFilesText(workspacePath, pattern, 50, signal)).matches

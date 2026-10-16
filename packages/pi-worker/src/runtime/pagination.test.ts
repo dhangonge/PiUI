@@ -1,21 +1,21 @@
-import assert from "node:assert/strict"
-import { execFileSync } from "node:child_process"
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-import { afterEach, describe, it } from "node:test"
+import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { afterEach, describe, it } from 'node:test'
 
 const roots: string[] = []
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-const paginationEntry = fileURLToPath(new URL("./pagination.ts", import.meta.url))
+const paginationEntry = fileURLToPath(new URL('./pagination.ts', import.meta.url))
 
-function childScript(mode: "sign" | "verify"): string {
+function childScript(mode: 'sign' | 'verify'): string {
   const paginationImport = JSON.stringify(paginationEntry)
-  if (mode === "sign") {
+  if (mode === 'sign') {
     return `
       import { entriesPageFromEntries, sessionHeadFromParts } from ${paginationImport}
       const head = sessionHeadFromParts({
@@ -55,14 +55,14 @@ function childScript(mode: "sign" | "verify"): string {
   `
 }
 
-function runChild(mode: "sign" | "verify", env: Record<string, string>): string {
-  const root = mkdtempSync(path.join(tmpdir(), "piui-cursor-"))
+function runChild(mode: 'sign' | 'verify', env: Record<string, string>): string {
+  const root = mkdtempSync(path.join(tmpdir(), 'piui-cursor-'))
   roots.push(root)
   const script = path.join(root, `${mode}.ts`)
   writeFileSync(script, childScript(mode))
-  return execFileSync(process.execPath, ["--import", "tsx", script], {
+  return execFileSync(process.execPath, ['--import', 'tsx', script], {
     env: { ...process.env, ...env },
-    encoding: "utf8",
+    encoding: 'utf8',
     windowsHide: true,
   })
 }
@@ -73,17 +73,17 @@ function runChild(mode: "sign" | "verify", env: Record<string, string>): string 
  * 注入 worker 环境——"重启后的新 worker"（新进程、同密钥）必须能验证旧进程
  * 签发的光标；不共享密钥时则必须失败（旧行为）。
  */
-describe("pagination cursor survives worker restarts", () => {
-  it("validates a cursor signed by another process when sharing PIUI_CURSOR_SECRET", () => {
-    const sharedSecret = Buffer.alloc(32, 7).toString("base64url")
-    const cursor = runChild("sign", { PIUI_CURSOR_SECRET: sharedSecret })
-    const result = runChild("verify", { PIUI_CURSOR_SECRET: sharedSecret, CURSOR: cursor })
-    assert.equal(result, "ok:a")
+describe('pagination cursor survives worker restarts', () => {
+  it('validates a cursor signed by another process when sharing PIUI_CURSOR_SECRET', () => {
+    const sharedSecret = Buffer.alloc(32, 7).toString('base64url')
+    const cursor = runChild('sign', { PIUI_CURSOR_SECRET: sharedSecret })
+    const result = runChild('verify', { PIUI_CURSOR_SECRET: sharedSecret, CURSOR: cursor })
+    assert.equal(result, 'ok:a')
   })
 
-  it("rejects a cursor signed by another process without a shared secret", () => {
-    const cursor = runChild("sign", { PIUI_CURSOR_SECRET: "" })
-    const result = runChild("verify", { PIUI_CURSOR_SECRET: "", CURSOR: cursor })
-    assert.equal(result, "fail:INVALID_REQUEST")
+  it('rejects a cursor signed by another process without a shared secret', () => {
+    const cursor = runChild('sign', { PIUI_CURSOR_SECRET: '' })
+    const result = runChild('verify', { PIUI_CURSOR_SECRET: '', CURSOR: cursor })
+    assert.equal(result, 'fail:INVALID_REQUEST')
   })
 })

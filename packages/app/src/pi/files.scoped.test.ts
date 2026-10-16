@@ -7,7 +7,9 @@ vi.mock('./transport/index.js', () => ({ listHostFiles: vi.fn() }))
 
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>(done => { resolve = done })
+  const promise = new Promise<T>(done => {
+    resolve = done
+  })
   return { promise, resolve }
 }
 
@@ -27,7 +29,9 @@ describe('server-bound project directory browsing', () => {
 
   it('keeps paginated requests on their original server after focus changes', async () => {
     const first = deferred<Awaited<ReturnType<typeof listHostFiles>>>()
-    vi.mocked(listHostFiles).mockReturnValueOnce(first.promise).mockResolvedValueOnce({ path: '', entries: [], total: 0, truncated: false })
+    vi.mocked(listHostFiles)
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce({ path: '', entries: [], total: 0, truncated: false })
     const result = listDirectory('/a', undefined, a)
     serverStore.setActiveServer(b)
     first.resolve({ path: '', entries: [], total: 0, truncated: true, nextCursor: 'a-page-2' })

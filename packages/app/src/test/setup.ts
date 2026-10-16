@@ -6,7 +6,7 @@ import '../i18n'
 if (process.env.NODE_ENV === 'production') {
   throw new Error(
     'NODE_ENV=production 时无法运行测试（React 会加载 production 构建）。' +
-    '请用：NODE_ENV=test npm run test:run -w @piui/app',
+      '请用：NODE_ENV=test npm run test:run -w @piui/app',
   )
 }
 

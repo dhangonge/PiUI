@@ -26,22 +26,26 @@ export function piSessionInfoToUiSession(item: SessionInfo): UiSession | null {
 export function filterPiSessionList(sessions: UiSession[], search: string): UiSession[] {
   const query = search.trim().toLowerCase()
   if (!query) return sessions
-  return sessions.filter(session =>
-    session.title.toLowerCase().includes(query) ||
-    session.directory.toLowerCase().includes(query) ||
-    session.id.toLowerCase().includes(query) ||
-    session.searchText?.toLowerCase().includes(query),
+  return sessions.filter(
+    session =>
+      session.title.toLowerCase().includes(query) ||
+      session.directory.toLowerCase().includes(query) ||
+      session.id.toLowerCase().includes(query) ||
+      session.searchText?.toLowerCase().includes(query),
   )
 }
 
 export function linkPiSessionForks(sessions: UiSession[]): UiSession[] {
   const sessionByPath = new Map<string, UiSession>()
   for (const session of sessions) {
-    if (session.path) sessionByPath.set(JSON.stringify([sessionKeyToServerId(session.id), pathKey(session.path)]), session)
+    if (session.path)
+      sessionByPath.set(JSON.stringify([sessionKeyToServerId(session.id), pathKey(session.path)]), session)
   }
   return sessions.map(session => {
     if (!session.parentSessionPath) return session
-    const parent = sessionByPath.get(JSON.stringify([sessionKeyToServerId(session.id), pathKey(session.parentSessionPath)]))
+    const parent = sessionByPath.get(
+      JSON.stringify([sessionKeyToServerId(session.id), pathKey(session.parentSessionPath)]),
+    )
     if (!parent || parent.id === session.id) return session
     return {
       ...session,

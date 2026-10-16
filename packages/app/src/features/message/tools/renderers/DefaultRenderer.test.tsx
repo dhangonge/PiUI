@@ -20,8 +20,6 @@ vi.mock('../../../../contexts', () => ({
   useFullscreenLayer: () => ({ isOpen: false, open: vi.fn(), close: vi.fn() }),
 }))
 
-
-
 function runningEditExecution(toolCallId = 'call-edit'): PiToolExecution {
   return {
     call: {
@@ -35,14 +33,7 @@ function runningEditExecution(toolCallId = 'call-edit'): PiToolExecution {
 }
 
 function renderDefault(execution: PiToolExecution, data: ExtractedToolData) {
-  return render(
-    <DefaultRenderer
-      execution={execution}
-      partKey="p1"
-      data={data}
-      onFullscreenChange={vi.fn()}
-    />,
-  )
+  return render(<DefaultRenderer execution={execution} partKey="p1" data={data} onFullscreenChange={vi.fn()} />)
 }
 
 describe('DefaultRenderer', () => {

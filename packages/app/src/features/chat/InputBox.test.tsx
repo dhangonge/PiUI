@@ -45,8 +45,17 @@ vi.mock('./chatViewport', () => ({
   useChatViewportSelect: <S,>(selector: (value: unknown) => S) =>
     selector({
       presentation: { surfaceVariant: 'desktop', isCompact: compactViewport },
-      interaction: { mode: 'pointer', touchCapable: false, sidebarBehavior: 'docked', rightPanelBehavior: 'docked', bottomPanelBehavior: 'docked', outlineInteraction: 'pointer', enableCollapsedInputDock: collapsedDockEnabled },
-    }),}))
+      interaction: {
+        mode: 'pointer',
+        touchCapable: false,
+        sidebarBehavior: 'docked',
+        rightPanelBehavior: 'docked',
+        bottomPanelBehavior: 'docked',
+        outlineInteraction: 'pointer',
+        enableCollapsedInputDock: collapsedDockEnabled,
+      },
+    }),
+}))
 
 vi.mock('../mention', () => ({
   MentionMenu: () => null,
@@ -129,13 +138,7 @@ describe('InputBox composer accessory', () => {
   })
 
   it('renders the accessory inside the composer width container', () => {
-    render(
-      <InputBox
-        paneId="pane-test"
-        onSend={vi.fn()}
-        aboveComposer={<div data-testid="todo-card">Tasks</div>}
-      />,
-    )
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} aboveComposer={<div data-testid="todo-card">Tasks</div>} />)
 
     const widthContainer = document.querySelector('[data-composer-width]')
     expect(widthContainer).not.toBeNull()
@@ -447,14 +450,7 @@ describe('InputBox slash command selection', () => {
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: 'new draft' } })
 
-    rerender(
-      <InputBox
-        paneId="pane-test"
-        onSend={onSend}
-        restoreMode="append"
-        revertedText="failed prompt"
-      />,
-    )
+    rerender(<InputBox paneId="pane-test" onSend={onSend} restoreMode="append" revertedText="failed prompt" />)
     await waitFor(() => expect(textarea.value).toBe('new draft\n\nfailed prompt'))
 
     fireEvent.click(screen.getByRole('button', { name: 'send' }))

@@ -35,10 +35,7 @@ const CACHE_LIMIT = 64
  * @returns Timeline items; history item references are stable across chunks,
  *          the live streaming item is fresh per chunk.
  */
-export function selectPiTimelineItemsCached(
-  sessionId: string | null,
-  branch: PiBranchPage | null,
-): PiTimelineItem[] {
+export function selectPiTimelineItemsCached(sessionId: string | null, branch: PiBranchPage | null): PiTimelineItem[] {
   if (!branch || !sessionId) {
     if (branch) return buildPiHistoryItems(branch).concat(buildPiLiveItems(branch))
     return []

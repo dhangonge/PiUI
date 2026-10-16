@@ -1,4 +1,4 @@
-import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot, SessionActivityStatus } from "@piui/protocol"
+import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot, SessionActivityStatus } from '@piui/protocol'
 
 export interface PiEventMeta {
   epoch: string
@@ -32,26 +32,30 @@ export interface SessionRuntime {
   listPrompts(): JsonValue | Promise<JsonValue>
   listAgentsFiles(): JsonValue | Promise<JsonValue>
 
-  prompt(text: string, images?: ImageInput[], options?: { expandPromptTemplates?: boolean; streamingBehavior?: "steer" | "followUp" }): Promise<void>
+  prompt(
+    text: string,
+    images?: ImageInput[],
+    options?: { expandPromptTemplates?: boolean; streamingBehavior?: 'steer' | 'followUp' },
+  ): Promise<void>
   steer(text: string, images?: ImageInput[]): Promise<void>
   followUp(text: string, images?: ImageInput[]): Promise<void>
-  sendUserMessage(text: string, images?: ImageInput[], deliverAs?: "steer" | "followUp"): Promise<void>
+  sendUserMessage(text: string, images?: ImageInput[], deliverAs?: 'steer' | 'followUp'): Promise<void>
   abort(): Promise<JsonValue | undefined>
 
   newSession(parentSession?: string): Promise<JsonObject>
   switchSession(sessionPath: string, cwdOverride?: string): Promise<JsonObject>
-  fork(entryId: string, position: "before" | "at"): Promise<JsonObject>
+  fork(entryId: string, position: 'before' | 'at'): Promise<JsonObject>
   importSession(inputPath: string, cwdOverride?: string): Promise<JsonObject>
   setSessionName(name: string): Promise<void>
 
   setModel(provider: string, modelId: string): Promise<void>
-  cycleModel(direction?: "forward" | "backward"): Promise<void>
+  cycleModel(direction?: 'forward' | 'backward'): Promise<void>
   setScopedModels(patterns: string[]): Promise<JsonValue | undefined>
   setThinkingLevel(level: string): Promise<void>
   cycleThinkingLevel(): Promise<JsonValue | undefined>
 
-  setSteeringMode(mode: "all" | "one-at-a-time"): Promise<void>
-  setFollowUpMode(mode: "all" | "one-at-a-time"): Promise<void>
+  setSteeringMode(mode: 'all' | 'one-at-a-time'): Promise<void>
+  setFollowUpMode(mode: 'all' | 'one-at-a-time'): Promise<void>
   clearQueue(): Promise<JsonValue | undefined>
 
   compact(customInstructions?: string): Promise<JsonValue | undefined>
@@ -82,12 +86,12 @@ export interface SessionRuntime {
 
   sendCustomMessage(
     customType: string,
-    content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>,
+    content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>,
     options: {
       display: boolean
       details?: JsonValue
       triggerTurn?: boolean
-      deliverAs?: "steer" | "followUp" | "nextTurn"
+      deliverAs?: 'steer' | 'followUp' | 'nextTurn'
     },
   ): Promise<void>
   appendCustomEntry(customType: string, data?: JsonValue): Promise<void>
@@ -112,8 +116,15 @@ export interface CatalogProvider {
   listSessions(cwd: string): Promise<JsonValue>
   listAllSessions(): Promise<JsonValue>
   createSession(cwd: string): Promise<JsonValue>
-  previewSession(cwd: string, sessionFile: string, params?: { cursor?: string; limit?: number; maxBytes?: number }): Promise<JsonValue>
-  previewSessionById(sessionId: string, params?: { cursor?: string; limit?: number; maxBytes?: number }): Promise<JsonValue>
+  previewSession(
+    cwd: string,
+    sessionFile: string,
+    params?: { cursor?: string; limit?: number; maxBytes?: number },
+  ): Promise<JsonValue>
+  previewSessionById(
+    sessionId: string,
+    params?: { cursor?: string; limit?: number; maxBytes?: number },
+  ): Promise<JsonValue>
   deleteSession(cwd: string, sessionFile: string): Promise<void>
   listModels(): Promise<JsonValue>
   getSettings(cwd: string): JsonValue | Promise<JsonValue>

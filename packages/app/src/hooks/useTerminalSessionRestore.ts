@@ -79,13 +79,23 @@ export function useTerminalSessionRestore(directory?: string) {
       if (!hasRestoredRef.current) setIsRestoring(true)
       try {
         const workspacePath = await resolveWorkspacePath(normalizedDirectory, serverId)
-        if (restoreRequestIdRef.current !== requestId || serverStore.getActiveServerId() !== serverId || getServerRevision(serverId) !== revision) return
+        if (
+          restoreRequestIdRef.current !== requestId ||
+          serverStore.getActiveServerId() !== serverId ||
+          getServerRevision(serverId) !== revision
+        )
+          return
         if (!workspacePath) {
           layoutStore.syncTerminalSessions(undefined, [], serverId)
           return
         }
         const result = await listHostTerminals(workspacePath, undefined, serverId)
-        if (restoreRequestIdRef.current !== requestId || serverStore.getActiveServerId() !== serverId || getServerRevision(serverId) !== revision) return
+        if (
+          restoreRequestIdRef.current !== requestId ||
+          serverStore.getActiveServerId() !== serverId ||
+          getServerRevision(serverId) !== revision
+        )
+          return
         layoutStore.syncTerminalSessions(workspacePath, result.terminals, serverId)
       } catch (error) {
         if (restoreRequestIdRef.current !== requestId) return
@@ -113,7 +123,11 @@ export function useTerminalSessionRestore(directory?: string) {
     restoreTriggerRef.current = () => void restoreSessions(++restoreRequestIdRef.current)
     const onTerminalsChanged = (event: Event) => {
       const workspacePath = (event as CustomEvent<{ workspacePath?: string }>).detail?.workspacePath
-      if (!workspacePath || normalizeToForwardSlash(workspacePath) !== normalizeToForwardSlash(workspacePathRef.current ?? '')) return
+      if (
+        !workspacePath ||
+        normalizeToForwardSlash(workspacePath) !== normalizeToForwardSlash(workspacePathRef.current ?? '')
+      )
+        return
       void restoreSessions(++restoreRequestIdRef.current)
     }
     window.addEventListener('piui:terminals-changed', onTerminalsChanged)

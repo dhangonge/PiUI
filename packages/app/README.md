@@ -38,15 +38,15 @@ npm run tauri:android:build -- --apk --target aarch64
 
 ## 目录
 
-| 路径 | 内容 |
-| --- | --- |
-| `src/pi/` | Pi 事件流、HTTP/WS transport、跨服务器 scoped 状态、领域 selectors |
-| `src/store/` | 本地 UI 状态（布局、主题、服务器列表、快捷键、通知、置顶） |
-| `src/features/pi-chat/` | Pi 原生会话主界面（`PiChatPane`） |
-| `src/features/chat/` | 上游 OpenCodeUI 的聊天外壳（侧栏、分屏、输入框等），见下方说明 |
-| `src/components/` | 通用组件（Markdown、Diff、终端、文件树等） |
-| `src/hooks/`、`src/utils/`、`src/lib/` | 复用逻辑 |
-| `src-tauri/` | Tauri 壳（Rust）、图标、Android 工程 |
+| 路径                                   | 内容                                                               |
+| -------------------------------------- | ------------------------------------------------------------------ |
+| `src/pi/`                              | Pi 事件流、HTTP/WS transport、跨服务器 scoped 状态、领域 selectors |
+| `src/store/`                           | 本地 UI 状态（布局、主题、服务器列表、快捷键、通知、置顶）         |
+| `src/features/pi-chat/`                | Pi 原生会话主界面（`PiChatPane`）                                  |
+| `src/features/chat/`                   | 上游 OpenCodeUI 的聊天外壳（侧栏、分屏、输入框等），见下方说明     |
+| `src/components/`                      | 通用组件（Markdown、Diff、终端、文件树等）                         |
+| `src/hooks/`、`src/utils/`、`src/lib/` | 复用逻辑                                                           |
+| `src-tauri/`                           | Tauri 壳（Rust）、图标、Android 工程                               |
 
 ### 关于 `src/features/chat`（遗留外壳）
 

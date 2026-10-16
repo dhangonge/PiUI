@@ -8,8 +8,7 @@
  * 生产构建下完全无开销（空函数）。
  */
 
-const enabled = typeof window !== 'undefined'
-  && new URLSearchParams(window.location.search).has('piuiPerf')
+const enabled = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('piuiPerf')
 
 // 各 mark 的上次时间（O(1) 间隔计算；performance.getEntriesByName 会随
 // mark 数量线性增长，长流式会话里每 token 一次会拖慢被测路径本身）
@@ -91,7 +90,9 @@ export function perfReport(): void {
       .slice(0, 8)
       .forEach(name => {
         const s = renderStats[name]
-        lines.push(`  ${name}: ${s.count} 次 | 累计 ${s.totalMs.toFixed(1)}ms | 峰值 ${s.maxMs.toFixed(1)}ms | 平均 ${(s.totalMs / s.count).toFixed(2)}ms`)
+        lines.push(
+          `  ${name}: ${s.count} 次 | 累计 ${s.totalMs.toFixed(1)}ms | 峰值 ${s.maxMs.toFixed(1)}ms | 平均 ${(s.totalMs / s.count).toFixed(2)}ms`,
+        )
       })
   }
 

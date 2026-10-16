@@ -30,16 +30,30 @@ describe('session hierarchy', () => {
   it('does not revisit a cycle', () => {
     const a = session('a')
     const b = session('b')
-    const rows = flattenSessionHierarchy('root', [a], new Map([
-      ['a', [b]],
-      ['b', [a]],
-    ]))
+    const rows = flattenSessionHierarchy(
+      'root',
+      [a],
+      new Map([
+        ['a', [b]],
+        ['b', [a]],
+      ]),
+    )
     expect(rows.map(row => row.session.id)).toEqual(['a', 'b'])
   })
 
   it('rejects cyclic and excessively deep parent chains', () => {
     expect(hasSafeParentChain('a', 'b', new Map([['b', 'a']]))).toBe(false)
-    expect(hasSafeParentChain('a', 'b', new Map([['b', 'c'], ['c', 'd']]), 1)).toBe(false)
+    expect(
+      hasSafeParentChain(
+        'a',
+        'b',
+        new Map([
+          ['b', 'c'],
+          ['c', 'd'],
+        ]),
+        1,
+      ),
+    ).toBe(false)
     expect(hasSafeParentChain('a', 'b', new Map([['b', 'c']]))).toBe(true)
   })
 })

@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react"
+import { useSyncExternalStore } from 'react'
 
 interface SessionEditorDraft {
   text: string
@@ -21,10 +21,13 @@ export function setSessionEditorDraft(sessionId: string, text: string, options: 
   if (options.sync === false || !syncDraft) return
   const previous = syncTimers.get(sessionId)
   if (previous) clearTimeout(previous)
-  syncTimers.set(sessionId, setTimeout(() => {
-    syncTimers.delete(sessionId)
-    void syncDraft?.(sessionId, text)
-  }, 100))
+  syncTimers.set(
+    sessionId,
+    setTimeout(() => {
+      syncTimers.delete(sessionId)
+      void syncDraft?.(sessionId, text)
+    }, 100),
+  )
 }
 
 export function configureSessionEditorDraftSync(
@@ -47,7 +50,7 @@ export function useSessionEditorDraft(sessionId: string | null): SessionEditorDr
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
-    () => (sessionId ? drafts.get(sessionId) ?? null : null),
+    () => (sessionId ? (drafts.get(sessionId) ?? null) : null),
     () => null,
   )
 }

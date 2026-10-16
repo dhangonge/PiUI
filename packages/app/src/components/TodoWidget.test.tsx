@@ -16,9 +16,24 @@ const widgetLines = [
 beforeEach(() => extensionUiStore.reset())
 
 it('renders only todo widget rows in the shared list presentation', () => {
-  extensionUiStore.statePatched('a::same', { kind: 'widget', key: 'rpiv-todos', lines: widgetLines, placement: 'aboveEditor' })
-  extensionUiStore.statePatched('a::same', { kind: 'widget', key: 'input-status', lines: ['Model: opus'], placement: 'aboveEditor' })
-  extensionUiStore.statePatched('a::same', { kind: 'widget', key: 'context-progress', lines: ['Context 12%'], placement: 'belowEditor' })
+  extensionUiStore.statePatched('a::same', {
+    kind: 'widget',
+    key: 'rpiv-todos',
+    lines: widgetLines,
+    placement: 'aboveEditor',
+  })
+  extensionUiStore.statePatched('a::same', {
+    kind: 'widget',
+    key: 'input-status',
+    lines: ['Model: opus'],
+    placement: 'aboveEditor',
+  })
+  extensionUiStore.statePatched('a::same', {
+    kind: 'widget',
+    key: 'context-progress',
+    lines: ['Context 12%'],
+    placement: 'belowEditor',
+  })
   render(<TodoWidget sessionId="a::same" />)
 
   expect(screen.getByText('Tasks')).toBeTruthy()
@@ -41,7 +56,11 @@ it('uses the composer-width card shell with the small type scale', () => {
   expect(card?.className).not.toContain('mb-2')
   // The rows use the compact density of the shared renderer, and every widget row survives.
   expect(screen.getByText('Write notes').parentElement?.className).toContain('py-1.5')
-  expect([screen.getByText('Read config'), screen.getByText('Ship fix (shipping)'), screen.getByText('Write notes')]).toHaveLength(3)
+  expect([
+    screen.getByText('Read config'),
+    screen.getByText('Ship fix (shipping)'),
+    screen.getByText('Write notes'),
+  ]).toHaveLength(3)
 })
 
 it('animates the expanded panel with the shared motion variant', () => {
@@ -82,7 +101,11 @@ it('ignores other sessions, non-todo keys and empty widgets', () => {
 
 it('follows the owner session and clears when the extension removes the widget', () => {
   extensionUiStore.statePatched('a::same', { kind: 'widget', key: 'rpiv-todos', lines: widgetLines })
-  extensionUiStore.statePatched('b::same', { kind: 'widget', key: 'rpiv-todos', lines: ['\u001b[2m└─\u001b[0m \u001b[2m○\u001b[0m Beta only'] })
+  extensionUiStore.statePatched('b::same', {
+    kind: 'widget',
+    key: 'rpiv-todos',
+    lines: ['\u001b[2m└─\u001b[0m \u001b[2m○\u001b[0m Beta only'],
+  })
   const { rerender } = render(<TodoWidget sessionId="a::same" />)
   expect(screen.getByText('Write notes')).toBeTruthy()
   rerender(<TodoWidget sessionId="b::same" />)

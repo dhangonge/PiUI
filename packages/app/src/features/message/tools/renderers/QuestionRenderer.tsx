@@ -41,9 +41,12 @@ export function QuestionRenderer({ execution, data }: ToolRendererProps) {
   const isActive = !execution.result
   const inputObj = execution.call.arguments as Record<string, unknown> | undefined
   const output = data.output?.trim()
-  const metadata = execution.result?.details && typeof execution.result.details === 'object' && !Array.isArray(execution.result.details)
-    ? execution.result.details as Record<string, unknown>
-    : undefined
+  const metadata =
+    execution.result?.details &&
+    typeof execution.result.details === 'object' &&
+    !Array.isArray(execution.result.details)
+      ? (execution.result.details as Record<string, unknown>)
+      : undefined
 
   // 从 input 拿问题结构，从 metadata/output 解析答案
   const qaList = useMemo(() => {

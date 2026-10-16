@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ExtensionUiDialogRequest, ExtensionUiDialogResponse } from '@piui/protocol'
-import { QuestionIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, MaximizeIcon, MinimizeIcon } from '../../components/Icons'
+import {
+  QuestionIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  MaximizeIcon,
+  MinimizeIcon,
+} from '../../components/Icons'
 import { Dialog } from '../../components/ui/Dialog'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 import { respondPiExtensionUi } from '../../pi/controllers/index.js'
@@ -34,11 +43,7 @@ export function ExtensionUiDialogCard({
 }) {
   const { t } = useTranslation(['common', 'components'])
   const [value, setValue] = useState(() =>
-    request.kind === 'select'
-      ? request.options[0] ?? ''
-      : request.kind === 'editor'
-        ? request.prefill ?? ''
-        : '',
+    request.kind === 'select' ? (request.options[0] ?? '') : request.kind === 'editor' ? (request.prefill ?? '') : '',
   )
   const [submitting, setSubmitting] = useState(false)
   const submittingRef = useRef(false)
@@ -91,8 +96,7 @@ export function ExtensionUiDialogCard({
     if (request.kind === 'confirm') return send({ confirmed: true })
     return send({ value })
   }
-  const cancel = () =>
-    request.kind === 'confirm' ? send({ confirmed: false }) : send({ cancelled: true })
+  const cancel = () => (request.kind === 'confirm' ? send({ confirmed: false }) : send({ cancelled: true }))
 
   // Enter 提交（Shift+Enter 换行）；editor 里 Enter 换行、Ctrl/Cmd+Enter 提交；Esc 取消。
   // 中文输入法组合中（选词）的 Enter 不触发提交。
@@ -126,21 +130,33 @@ export function ExtensionUiDialogCard({
     <div
       onKeyDown={handleKeyDown}
       className={`overflow-hidden rounded-xl border border-border-200/60 bg-bg-100 shadow-float flex flex-col ${
-        fullscreen ? 'h-full min-h-0 !rounded-none !border-0 shadow-none' : compact ? 'max-h-[min(440px,55vh)]' : 'max-h-[min(540px,62vh)]'
+        fullscreen
+          ? 'h-full min-h-0 !rounded-none !border-0 shadow-none'
+          : compact
+            ? 'max-h-[min(440px,55vh)]'
+            : 'max-h-[min(540px,62vh)]'
       }`}
     >
       {/* Header —— 一行摘要，永远紧凑 */}
       <div className="flex items-center justify-between gap-2 px-4 py-2.5 shrink-0">
         <div className="flex min-w-0 items-center gap-2">
           <QuestionIcon size={16} className="shrink-0 text-text-400" />
-          <h3 className="text-[length:var(--fs-sm)] font-medium text-text-100">{t('components:dialog.extensionRequest')}</h3>
+          <h3 className="text-[length:var(--fs-sm)] font-medium text-text-100">
+            {t('components:dialog.extensionRequest')}
+          </h3>
           {!onQueueNav && queueLength > 1 && (
             <span className="shrink-0 rounded-md bg-bg-200 px-1.5 py-0.5 text-[length:var(--fs-xs)] text-text-400">
               +{queueLength - 1}
             </span>
           )}
         </div>
-        <button type="button" onClick={() => setFullscreen(value => !value)} title={t(fullscreen ? 'components:contentBlock.exitFullscreen' : 'components:contentBlock.fullscreen')} aria-label={t(fullscreen ? 'components:contentBlock.exitFullscreen' : 'components:contentBlock.fullscreen')} className="ml-auto shrink-0 rounded-md p-2 text-text-400 hover:bg-bg-200 hover:text-text-200">
+        <button
+          type="button"
+          onClick={() => setFullscreen(value => !value)}
+          title={t(fullscreen ? 'components:contentBlock.exitFullscreen' : 'components:contentBlock.fullscreen')}
+          aria-label={t(fullscreen ? 'components:contentBlock.exitFullscreen' : 'components:contentBlock.fullscreen')}
+          className="ml-auto shrink-0 rounded-md p-2 text-text-400 hover:bg-bg-200 hover:text-text-200"
+        >
           {fullscreen ? <MinimizeIcon size={16} /> : <MaximizeIcon size={16} />}
         </button>
         {onCollapse && (
@@ -156,8 +172,12 @@ export function ExtensionUiDialogCard({
       </div>
 
       {/* Body —— 内容区：卡片总高受限时收缩并内部滚动；无内部分隔线 */}
-      <div className={`${pad} flex flex-col ${gap} min-h-0 overflow-y-auto custom-scrollbar ${fullscreen ? 'flex-1' : ''}`}>
-        <p className="whitespace-pre-wrap break-words text-[length:var(--fs-sm)] font-medium leading-relaxed text-text-100">{request.title}</p>
+      <div
+        className={`${pad} flex flex-col ${gap} min-h-0 overflow-y-auto custom-scrollbar ${fullscreen ? 'flex-1' : ''}`}
+      >
+        <p className="whitespace-pre-wrap break-words text-[length:var(--fs-sm)] font-medium leading-relaxed text-text-100">
+          {request.title}
+        </p>
 
         {request.kind === 'confirm' && request.message && (
           <p className="whitespace-pre-wrap break-words text-[length:var(--fs-sm)] leading-relaxed text-text-200">
@@ -204,7 +224,11 @@ export function ExtensionUiDialogCard({
           />
         )}
 
-        {error && <p role="alert" className="text-[length:var(--fs-sm)] text-danger-100">{error}</p>}
+        {error && (
+          <p role="alert" className="text-[length:var(--fs-sm)] text-danger-100">
+            {error}
+          </p>
+        )}
       </div>
 
       {/* Actions —— 取消/提交在右；队列分页器在左；无内部分隔线 */}
@@ -253,7 +277,13 @@ export function ExtensionUiDialogCard({
       </div>
     </div>
   )
-  return fullscreen ? <Dialog isOpen onClose={() => setFullscreen(false)} ariaLabel={request.title} fullscreen rawContent>{card}</Dialog> : card
+  return fullscreen ? (
+    <Dialog isOpen onClose={() => setFullscreen(false)} ariaLabel={request.title} fullscreen rawContent>
+      {card}
+    </Dialog>
+  ) : (
+    card
+  )
 }
 
 /**
@@ -334,7 +364,6 @@ function SelectOption({
           </button>
         )}
       </div>
-
     </div>
   )
 }

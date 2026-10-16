@@ -221,9 +221,7 @@ export function normalizeForComparison(dir: string | undefined | null): string {
   if (!dir) return ''
   const slashed = dir.replace(/\\/g, '/') // 反斜杠 → 正斜杠
   const normalized = slashed === '/' ? '/' : slashed.replace(/\/+$/, '') // 保留 POSIX 根目录
-  return /^[a-zA-Z]:(?:\/|$)/.test(normalized) || normalized.startsWith('//')
-    ? normalized.toLowerCase()
-    : normalized
+  return /^[a-zA-Z]:(?:\/|$)/.test(normalized) || normalized.startsWith('//') ? normalized.toLowerCase() : normalized
 }
 
 /**

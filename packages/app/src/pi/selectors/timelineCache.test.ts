@@ -11,8 +11,23 @@ function rawEntry(id: string, timestamp = 1, role: 'user' | 'assistant' = 'user'
     timestamp: new Date(timestamp).toISOString(),
     message: (role === 'user'
       ? { role: 'user', content: `hello ${id}`, timestamp }
-      : { role: 'assistant', content: [], api: 'anthropic-messages', provider: 'anthropic', model: 'm', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: 'stop', timestamp }
-    ) as SessionMessageEntry['message'],
+      : {
+          role: 'assistant',
+          content: [],
+          api: 'anthropic-messages',
+          provider: 'anthropic',
+          model: 'm',
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: 'stop',
+          timestamp,
+        }) as SessionMessageEntry['message'],
   }
 }
 
@@ -94,7 +109,18 @@ describe('selectPiTimelineItemsCached streaming (items identity)', () => {
 
     // updateLiveMessage: setData(sessionId, { ...data, checkpoint: {...} }) —
     // new page reference, same items array reference, new liveMessage.
-    const page2 = { ...page1, checkpoint: { position: { epoch: 'e1', sequence: 2 }, liveMessage: { id: 'live-1', revision: 2, phase: 'streaming' as const, message: { role: 'user' as const, content: 'hi', timestamp: 2 } } } } as PiBranchPage
+    const page2 = {
+      ...page1,
+      checkpoint: {
+        position: { epoch: 'e1', sequence: 2 },
+        liveMessage: {
+          id: 'live-1',
+          revision: 2,
+          phase: 'streaming' as const,
+          message: { role: 'user' as const, content: 'hi', timestamp: 2 },
+        },
+      },
+    } as PiBranchPage
     const second = selectPiTimelineItemsCached('s1', page2)
     // History item references are reused — memoized rows hold.
     expect(firstUser(second)).toBe(firstUserItem)
@@ -122,13 +148,35 @@ describe('selectPiTimelineItemsCached streaming (items identity)', () => {
     const first = selectPiTimelineItemsCached('s1', page1)
     const firstUserItem = firstUser(first)
 
-    const chunk1 = { ...page1, checkpoint: { position: { epoch: 'e1', sequence: 2 }, liveMessage: { id: 'live-a1', revision: 2, phase: 'streaming' as const, message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'Hel' }], timestamp: 2 } } } } as PiBranchPage
+    const chunk1 = {
+      ...page1,
+      checkpoint: {
+        position: { epoch: 'e1', sequence: 2 },
+        liveMessage: {
+          id: 'live-a1',
+          revision: 2,
+          phase: 'streaming' as const,
+          message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'Hel' }], timestamp: 2 },
+        },
+      },
+    } as PiBranchPage
     const items1 = selectPiTimelineItemsCached('s1', chunk1)
     expect(firstUser(items1)).toBe(firstUserItem)
     expect(items1.length).toBe(2)
     expect((items1[1] as { message: { content: { text: string }[] } }).message.content[0]?.text).toBe('Hel')
 
-    const chunk2 = { ...page1, checkpoint: { position: { epoch: 'e1', sequence: 3 }, liveMessage: { id: 'live-a1', revision: 3, phase: 'streaming' as const, message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'Hello' }], timestamp: 3 } } } } as PiBranchPage
+    const chunk2 = {
+      ...page1,
+      checkpoint: {
+        position: { epoch: 'e1', sequence: 3 },
+        liveMessage: {
+          id: 'live-a1',
+          revision: 3,
+          phase: 'streaming' as const,
+          message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'Hello' }], timestamp: 3 },
+        },
+      },
+    } as PiBranchPage
     const items2 = selectPiTimelineItemsCached('s1', chunk2)
     expect(firstUser(items2)).toBe(firstUserItem)
     expect(items2.length).toBe(2)

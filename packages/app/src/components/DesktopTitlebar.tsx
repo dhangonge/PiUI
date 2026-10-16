@@ -1,9 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  DESKTOP_MACOS_TRAFFIC_LIGHTS_WIDTH,
-  DESKTOP_TITLEBAR_HEIGHT,
-  DESKTOP_TITLEBAR_Z_INDEX,
-} from '../constants'
+import { DESKTOP_MACOS_TRAFFIC_LIGHTS_WIDTH, DESKTOP_TITLEBAR_HEIGHT, DESKTOP_TITLEBAR_Z_INDEX } from '../constants'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -265,11 +261,7 @@ export function DesktopTitlebar() {
       <div data-tauri-drag-region className="h-full min-w-0" />
 
       {/* ---- 右侧：Windows 控制按钮 / macOS 留白 ---- */}
-      {platform === 'windows' ? (
-        <WindowsControls />
-      ) : (
-        <div data-tauri-drag-region className="h-full w-3 shrink-0" />
-      )}
+      {platform === 'windows' ? <WindowsControls /> : <div data-tauri-drag-region className="h-full w-3 shrink-0" />}
     </header>
   )
 }

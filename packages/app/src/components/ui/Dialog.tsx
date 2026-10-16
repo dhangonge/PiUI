@@ -66,7 +66,10 @@ export function Dialog({
   }, [])
 
   const getTopOpenDialog = useCallback(
-    () => Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"][data-dialog-open="true"]')).at(-1),
+    () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"][data-dialog-open="true"]'),
+      ).at(-1),
     [],
   )
 
@@ -305,7 +308,16 @@ export function Dialog({
     >
       <div
         className="dialog-safe-region absolute inset-x-0 bottom-0 flex items-center justify-center p-4"
-        style={fullscreen ? { paddingTop: 0, paddingLeft: 'var(--safe-area-inset-left, 0px)', paddingRight: 'var(--safe-area-inset-right, 0px)', paddingBottom: 'var(--safe-area-inset-bottom, 0px)' } : undefined}
+        style={
+          fullscreen
+            ? {
+                paddingTop: 0,
+                paddingLeft: 'var(--safe-area-inset-left, 0px)',
+                paddingRight: 'var(--safe-area-inset-right, 0px)',
+                paddingBottom: 'var(--safe-area-inset-bottom, 0px)',
+              }
+            : undefined
+        }
         onPointerDown={e => {
           handleBackdropPointerDown(e)
           e.stopPropagation()
@@ -346,7 +358,11 @@ export function Dialog({
           {/* Drag Handle (mobile) - 触摸下滑关闭的唯一触发区域 */}
           <div
             ref={dragHandleRef}
-            className={fullscreen ? 'hidden' : 'md:hidden flex justify-center pt-3 pb-2 shrink-0 cursor-grab active:cursor-grabbing'}
+            className={
+              fullscreen
+                ? 'hidden'
+                : 'md:hidden flex justify-center pt-3 pb-2 shrink-0 cursor-grab active:cursor-grabbing'
+            }
           >
             <div className="w-10 h-1 rounded-full bg-bg-300" />
           </div>
@@ -359,7 +375,10 @@ export function Dialog({
               {/* Header */}
               {(title || showCloseButton) && (
                 <div className="flex items-center justify-between px-5 py-4 border-b border-border-100/50">
-                  <div id={title ? titleId : undefined} className="text-[length:var(--fs-heading-2)] font-semibold text-text-100">
+                  <div
+                    id={title ? titleId : undefined}
+                    className="text-[length:var(--fs-heading-2)] font-semibold text-text-100"
+                  >
                     {title}
                   </div>
                   {showCloseButton && (

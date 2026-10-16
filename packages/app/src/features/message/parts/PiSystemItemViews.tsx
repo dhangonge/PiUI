@@ -125,14 +125,7 @@ function BashExecutionGroupView({ item }: { item: PiBashExecutionItem | PiBashEx
   const latestTimestamp = items.reduce((max, bashItem) => Math.max(max, bashItem.timestamp), 0)
   const now = useNow(60_000)
   const fresh = latestTimestamp > 0 && now - latestTimestamp < FRESH_BASH_WINDOW_MS
-  return (
-    <ToolGroup
-      groupId={item.entryId}
-      startedAt={item.timestamp}
-      executions={executions}
-      defaultExpanded={fresh}
-    />
-  )
+  return <ToolGroup groupId={item.entryId} startedAt={item.timestamp} executions={executions} defaultExpanded={fresh} />
 }
 
 function bashItemToExecution(item: PiBashExecutionItem): PiToolExecution {
@@ -171,12 +164,13 @@ function BranchSummaryItemView({ item }: { item: PiBranchSummaryItem }) {
 }
 
 function CustomMessageItemView({ item }: { item: PiCustomMessageItem }) {
-  const text = typeof item.content === 'string'
-    ? item.content
-    : item.content
-        .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
-        .map(block => block.text)
-        .join('\n')
+  const text =
+    typeof item.content === 'string'
+      ? item.content
+      : item.content
+          .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
+          .map(block => block.text)
+          .join('\n')
   if (!text.trim()) return null
   return <MarkdownRenderer content={text} />
 }

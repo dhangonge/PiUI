@@ -8,7 +8,9 @@ type Listener = () => void
 const STORAGE_KEY_HIDDEN_MODELS = 'piui-hidden-model-keys'
 
 function loadHiddenModelKeys(serverId?: string): string[] {
-  const stored = serverId ? serverStorage.getJSONFor<unknown>(STORAGE_KEY_HIDDEN_MODELS, serverId) : serverStorage.getJSON<unknown>(STORAGE_KEY_HIDDEN_MODELS)
+  const stored = serverId
+    ? serverStorage.getJSONFor<unknown>(STORAGE_KEY_HIDDEN_MODELS, serverId)
+    : serverStorage.getJSON<unknown>(STORAGE_KEY_HIDDEN_MODELS)
   if (!Array.isArray(stored)) return []
   return stored.filter((item): item is string => typeof item === 'string')
 }

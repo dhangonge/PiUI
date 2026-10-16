@@ -89,7 +89,7 @@ function getTerminalTheme(isDark: boolean) {
       brightBlue: '#82cfff',
       brightMagenta: '#de8ef0',
       brightCyan: '#70d0dc',
-      brightWhite: '#ffffff'
+      brightWhite: '#ffffff',
     }
   } else {
     return {
@@ -118,7 +118,7 @@ function getTerminalTheme(isDark: boolean) {
       brightBlue: '#5a9fe0',
       brightMagenta: '#c06abf',
       brightCyan: '#5abfbf',
-      brightWhite: '#2d2a26'
+      brightWhite: '#2d2a26',
     }
   }
 }
@@ -158,7 +158,7 @@ const MOBILE_EXTRA_KEY_ROWS: MobileExtraKey[][] = [
     { label: 'HOME', data: '\x1b[H' },
     { label: '↑', data: '\x1b[A' },
     { label: 'END', data: '\x1b[F' },
-    { label: 'PGUP', data: '\x1b[5~' }
+    { label: 'PGUP', data: '\x1b[5~' },
   ],
   [
     { label: 'TAB', data: '\t' },
@@ -167,8 +167,8 @@ const MOBILE_EXTRA_KEY_ROWS: MobileExtraKey[][] = [
     { label: '←', data: '\x1b[D' },
     { label: '↓', data: '\x1b[B' },
     { label: '→', data: '\x1b[C' },
-    { label: 'PGDN', data: '\x1b[6~' }
-  ]
+    { label: 'PGDN', data: '\x1b[6~' },
+  ],
 ]
 
 function toCtrlSequence(data: string): string {
@@ -213,7 +213,12 @@ function isNativePasteShortcut(event: KeyboardEvent) {
 function canReadClipboardText() {
   // Ctrl/Cmd+V uses ClipboardEvent.clipboardData, but smart right-click paste must actively call
   // navigator.clipboard.readText(), which browsers only expose in secure contexts.
-  return typeof window !== 'undefined' && window.isSecureContext && typeof navigator !== 'undefined' && !!navigator.clipboard?.readText
+  return (
+    typeof window !== 'undefined' &&
+    window.isSecureContext &&
+    typeof navigator !== 'undefined' &&
+    !!navigator.clipboard?.readText
+  )
 }
 
 function parseServerFrame(value: unknown): TerminalStreamServerFrame | undefined {
@@ -267,7 +272,7 @@ function useRepeatablePress() {
       }
       schedule(REPEAT_DELAY)
     },
-    [clear]
+    [clear],
   )
 }
 
@@ -280,7 +285,7 @@ interface MobileExtraKeysProps {
 
 function MobileExtraKeys({ onSend, stickyModifiers, onToggleSticky, onFocusTerminal }: MobileExtraKeysProps) {
   const toolbarGridStyle = {
-    gridTemplateColumns: 'repeat(7, minmax(0, 1fr))'
+    gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
   } as const
   const press = useRepeatablePress()
 
@@ -289,7 +294,7 @@ function MobileExtraKeys({ onSend, stickyModifiers, onToggleSticky, onFocusTermi
       onSend(data)
       onFocusTerminal()
     },
-    [onFocusTerminal, onSend]
+    [onFocusTerminal, onSend],
   )
 
   const btnBase =
@@ -357,7 +362,9 @@ interface TerminalProps {
 }
 
 export const Terminal = memo(function Terminal({ terminalId, workspacePath, isActive }: TerminalProps) {
-  const endpointRevision = useSyncExternalStore(serverStore.subscribe.bind(serverStore), () => getSessionRevision(terminalId))
+  const endpointRevision = useSyncExternalStore(serverStore.subscribe.bind(serverStore), () =>
+    getSessionRevision(terminalId),
+  )
   const previousRevisionRef = useRef(endpointRevision)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isTouchScrolling, setIsTouchScrolling] = useState(false)
@@ -412,7 +419,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
         clearStickyModifiers()
       }
     },
-    [clearStickyModifiers]
+    [clearStickyModifiers],
   )
 
   useEffect(() => {
@@ -442,18 +449,25 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
     // the render closure. This breaks the infinite cycle:
     //   old terminal cleanup → updateTerminalSnapshot → notify →
     //   re-render → effect deps changed → cleanup → notify → ...
-    const freshTab = previousRevisionRef.current === endpointRevision
-      ? layoutStore.getState().panelTabs.find(t => t.id === terminalId && t.type === 'terminal')
-      : undefined
+    const freshTab =
+      previousRevisionRef.current === endpointRevision
+        ? layoutStore.getState().panelTabs.find(t => t.id === terminalId && t.type === 'terminal')
+        : undefined
     previousRevisionRef.current = endpointRevision
     const effectBuffer = typeof freshTab?.buffer === 'string' ? freshTab.buffer : ''
     const effectScrollY = typeof freshTab?.scrollY === 'number' ? freshTab.scrollY : undefined
     const effectCursor =
-      typeof freshTab?.cursor === 'number' && Number.isSafeInteger(freshTab.cursor) && freshTab.cursor >= 0 ? freshTab.cursor : 0
+      typeof freshTab?.cursor === 'number' && Number.isSafeInteger(freshTab.cursor) && freshTab.cursor >= 0
+        ? freshTab.cursor
+        : 0
     const effectCols =
-      typeof freshTab?.cols === 'number' && Number.isSafeInteger(freshTab.cols) && freshTab.cols > 0 ? freshTab.cols : undefined
+      typeof freshTab?.cols === 'number' && Number.isSafeInteger(freshTab.cols) && freshTab.cols > 0
+        ? freshTab.cols
+        : undefined
     const effectRows =
-      typeof freshTab?.rows === 'number' && Number.isSafeInteger(freshTab.rows) && freshTab.rows > 0 ? freshTab.rows : undefined
+      typeof freshTab?.rows === 'number' && Number.isSafeInteger(freshTab.rows) && freshTab.rows > 0
+        ? freshTab.rows
+        : undefined
 
     const restoreSize = effectBuffer && effectCols && effectRows ? { cols: effectCols, rows: effectRows } : undefined
     const shouldConnect = freshTab?.status !== 'exited'
@@ -491,9 +505,9 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
         ? {
             scrollSensitivity: 2,
             macOptionIsMeta: true,
-            disableStdin: false
+            disableStdin: false,
           }
-        : {})
+        : {}),
     })
 
     const fitAddon = new FitAddon()
@@ -633,13 +647,13 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
           JSON.stringify({
             type: 'resize',
             rows: terminal.rows,
-            cols: terminal.cols
-          })
+            cols: terminal.cols,
+          }),
         )
       }
       layoutStore.updateTerminalSnapshot(terminalId, {
         rows: terminal.rows,
-        cols: terminal.cols
+        cols: terminal.cols,
       })
     }
 
@@ -680,7 +694,9 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
       console.info(`[Terminal] disconnected (${detail})`)
       reconnectAttempt++
       const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempt - 1), MAX_RECONNECT_DELAY)
-      terminal.write(`\r\n\x1b[90m[Disconnected (${detail}), reconnecting in ${(delay / 1000).toFixed(0)}s...]\x1b[0m\r\n`)
+      terminal.write(
+        `\r\n\x1b[90m[Disconnected (${detail}), reconnecting in ${(delay / 1000).toFixed(0)}s...]\x1b[0m\r\n`,
+      )
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = null
         if (mountedRef.current) {
@@ -720,10 +736,11 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
           if (frame.type === 'hello') {
             const current = layoutStore.getState().panelTabs.find(tab => tab.id === terminalId)
             layoutStore.updateTerminalTab(terminalId, {
-              title: manualTerminalTitlesRef.current && current?.customTitle ? current.customTitle : frame.terminal.title,
+              title:
+                manualTerminalTitlesRef.current && current?.customTitle ? current.customTitle : frame.terminal.title,
               shellTitle: frame.terminal.title,
               shell: frame.terminal.shell,
-              cwd: frame.terminal.cwd
+              cwd: frame.terminal.cwd,
             })
           } else if (frame.type === 'output') {
             terminal.write(frame.data)
@@ -731,7 +748,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
           } else if (frame.type === 'title') {
             layoutStore.updateTerminalTab(terminalId, {
               shellTitle: frame.title,
-              ...(manualTerminalTitlesRef.current ? {} : { title: frame.title })
+              ...(manualTerminalTitlesRef.current ? {} : { title: frame.title }),
             })
           } else if (frame.type === 'ready') {
             cursorRef.current = Math.max(cursorRef.current, frame.cursor)
@@ -740,7 +757,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
             cursorRef.current = frame.cursor
             layoutStore.updateTerminalTab(terminalId, {
               status: 'exited',
-              cursor: frame.cursor
+              cursor: frame.cursor,
             })
             if (socketRef.current?.readyState === PI_SOCKET_OPEN) {
               socketRef.current.close(1000, 'terminal exited')
@@ -821,7 +838,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
           scrollY: terminal.buffer.active.viewportY,
           cursor: cursorRef.current,
           rows: terminal.rows,
-          cols: terminal.cols
+          cols: terminal.cols,
         })
       } catch {
         // ignore snapshot persistence failures
@@ -844,7 +861,15 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
       terminalRef.current = null
       fitAddonRef.current = null
     }
-  }, [terminalId, workspacePath, endpointRevision, hasBeenActive, clearStickyModifiers, sendTerminalData, preferTouchUi])
+  }, [
+    terminalId,
+    workspacePath,
+    endpointRevision,
+    hasBeenActive,
+    clearStickyModifiers,
+    sendTerminalData,
+    preferTouchUi,
+  ])
 
   useEffect(() => {
     const container = containerRef.current
@@ -933,10 +958,10 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
     }
 
     container.addEventListener('touchstart', handleTouchStart, {
-      passive: true
+      passive: true,
     })
     container.addEventListener('touchmove', handleTouchMove, {
-      passive: false
+      passive: false,
     })
     container.addEventListener('touchend', handleTouchEnd)
 
@@ -968,13 +993,13 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
               JSON.stringify({
                 type: 'resize',
                 rows: terminal.rows,
-                cols: terminal.cols
-              })
+                cols: terminal.cols,
+              }),
             )
           }
           layoutStore.updateTerminalSnapshot(terminalId, {
             rows: terminal.rows,
-            cols: terminal.cols
+            cols: terminal.cols,
           })
         }
       }, 16)
@@ -1025,7 +1050,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
 
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ['data-mode']
+      attributeFilter: ['data-mode'],
     })
 
     return () => observer.disconnect()
@@ -1070,13 +1095,13 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
               JSON.stringify({
                 type: 'resize',
                 rows: terminal.rows,
-                cols: terminal.cols
-              })
+                cols: terminal.cols,
+              }),
             )
           }
           layoutStore.updateTerminalSnapshot(terminalId, {
             rows: terminal.rows,
-            cols: terminal.cols
+            cols: terminal.cols,
           })
         })
       }
@@ -1133,7 +1158,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
           visibility: isActive ? 'visible' : 'hidden',
           position: isActive ? 'relative' : 'absolute',
           pointerEvents: isActive ? 'auto' : 'none',
-          inset: isActive ? undefined : 0
+          inset: isActive ? undefined : 0,
         }}
       >
         <div
@@ -1141,7 +1166,7 @@ export const Terminal = memo(function Terminal({ terminalId, workspacePath, isAc
           className={`${preferTouchUi ? 'flex-1 min-h-0' : 'h-full'} w-full bg-bg-100 ${preferTouchUi ? 'no-scrollbar' : ''} ${preferTouchUi ? (isTouchScrolling ? 'scrollbar-active' : 'scrollbar-idle') : ''}`}
           style={{
             padding: preferTouchUi ? '0' : '4px 0 0 4px',
-            touchAction: touchCapable ? 'pan-y' : 'auto'
+            touchAction: touchCapable ? 'pan-y' : 'auto',
           }}
           onClick={() => {
             if (preferTouchUi && terminalRef.current) {

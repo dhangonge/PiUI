@@ -1,15 +1,15 @@
-import { useSyncExternalStore } from "react"
+import { useSyncExternalStore } from 'react'
 
-export type PiBackendStatus = "booting" | "online" | "offline" | "unauthorized"
+export type PiBackendStatus = 'booting' | 'online' | 'offline' | 'unauthorized'
 
 export interface PiBackendState {
   status: PiBackendStatus
-  driver?: "mock" | "pi"
+  driver?: 'mock' | 'pi'
   error?: string
   checkedAt?: number
 }
 
-let state: PiBackendState = { status: "booting" }
+let state: PiBackendState = { status: 'booting' }
 const listeners = new Set<() => void>()
 
 export function setPiBackendState(next: PiBackendState): void {
@@ -26,13 +26,15 @@ export function usePiBackendState(): PiBackendState {
 }
 
 export function setPiServerReachable(up: boolean) {
-  setPiBackendState(up
-    ? { ...state, status: "online", error: undefined, checkedAt: Date.now() }
-    : { ...state, status: "offline", checkedAt: Date.now() })
+  setPiBackendState(
+    up
+      ? { ...state, status: 'online', error: undefined, checkedAt: Date.now() }
+      : { ...state, status: 'offline', checkedAt: Date.now() },
+  )
 }
 
 export function isPiServerReachable(): boolean {
-  return state.status === "online"
+  return state.status === 'online'
 }
 
 /** This application must never fall back to a legacy transport. */

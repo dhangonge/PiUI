@@ -79,7 +79,7 @@ async function requestTauriPermission(): Promise<NotificationPermission> {
     const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification')
     if (await isPermissionGranted()) return 'granted'
     const result = await requestPermission()
-    return result === 'granted' || await isPermissionGranted() ? 'granted' : 'denied'
+    return result === 'granted' || (await isPermissionGranted()) ? 'granted' : 'denied'
   } catch {
     return 'denied'
   }
@@ -116,12 +116,19 @@ export function useNotification() {
     let disposed = false
     const refresh = async () => {
       const request = enableRequest.current
-      const result = isTauri() ? await checkTauriPermission() : typeof Notification === 'undefined' ? 'denied' : Notification.permission
+      const result = isTauri()
+        ? await checkTauriPermission()
+        : typeof Notification === 'undefined'
+          ? 'denied'
+          : Notification.permission
       if (!disposed && request === enableRequest.current) setPermission(result)
     }
     void refresh()
     window.addEventListener('focus', refresh)
-    return () => { disposed = true; window.removeEventListener('focus', refresh) }
+    return () => {
+      disposed = true
+      window.removeEventListener('focus', refresh)
+    }
   }, [])
 
   // 启用时预注册 SW（浏览器环境）

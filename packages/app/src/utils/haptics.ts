@@ -5,5 +5,7 @@ export function hapticTap(ms = 8): void {
     const b = (window as unknown as { __piui_android?: { vibrate?: (n: number) => void } }).__piui_android?.vibrate
     if (b) return b(ms)
     navigator.vibrate?.(ms)
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }

@@ -1,10 +1,10 @@
-import assert from "node:assert/strict"
-import { createServer } from "node:net"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { afterEach, test } from "node:test"
-import { parseWebArgs, resolveServerConfig, startPiUiServer } from "./start.ts"
+import assert from 'node:assert/strict'
+import { createServer } from 'node:net'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, test } from 'node:test'
+import { parseWebArgs, resolveServerConfig, startPiUiServer } from './start.ts'
 
 const roots: string[] = []
 const previousDriver = process.env.PIUI_DRIVER
@@ -15,38 +15,38 @@ afterEach(() => {
   else process.env.PIUI_DRIVER = previousDriver
 })
 
-test("server config validates ports and parses web flags", () => {
+test('server config validates ports and parses web flags', () => {
   const config = resolveServerConfig({}, { webRoot: null })
-  assert.equal(config.host, "127.0.0.1")
+  assert.equal(config.host, '127.0.0.1')
   assert.equal(config.port, 8787)
   assert.equal(config.webRoot, null)
-  assert.throws(() => resolveServerConfig({ PIUI_PORT: "invalid" }, { webRoot: null }), /PIUI_PORT/)
-  assert.deepEqual(parseWebArgs(["--host", "0.0.0.0", "--port=9000", "--api-only"]), {
+  assert.throws(() => resolveServerConfig({ PIUI_PORT: 'invalid' }, { webRoot: null }), /PIUI_PORT/)
+  assert.deepEqual(parseWebArgs(['--host', '0.0.0.0', '--port=9000', '--api-only']), {
     help: false,
-    host: "0.0.0.0",
+    host: '0.0.0.0',
     port: 9000,
     webRoot: null,
   })
-  assert.throws(() => parseWebArgs(["--unknown"]), /unknown|requires/)
+  assert.throws(() => parseWebArgs(['--unknown']), /unknown|requires/)
 })
 
-test("one server provides the web app and authenticated API on the same port", async t => {
-  const info = t.mock.method(console, "info", () => {})
-  process.env.PIUI_DRIVER = "mock"
-  const webRoot = mkdtempSync(join(tmpdir(), "piui-start-web-"))
+test('one server provides the web app and authenticated API on the same port', async t => {
+  const info = t.mock.method(console, 'info', () => {})
+  process.env.PIUI_DRIVER = 'mock'
+  const webRoot = mkdtempSync(join(tmpdir(), 'piui-start-web-'))
   roots.push(webRoot)
-  writeFileSync(join(webRoot, "index.html"), "<html>piui</html>")
+  writeFileSync(join(webRoot, 'index.html'), '<html>piui</html>')
   const port = await availablePort()
   const running = await startPiUiServer(
     // 测试环境的 undici keep-alive 连接 + Windows 机器上的 dispose 轻松超过
     // 生产默认的 500ms 关闭窗口；这里用宽松预算，避免 hardStop 的
     // process.exit(1) 把测试进程带走。
-    { host: "127.0.0.1", port, webRoot, authToken: "test-token", shutdownTimeoutMs: 5_000 },
+    { host: '127.0.0.1', port, webRoot, authToken: 'test-token', shutdownTimeoutMs: 5_000 },
     { installSignalHandlers: false },
   )
   try {
-    assert.ok(info.mock.calls.some(call => call.arguments.some(value => String(value).includes("web client:"))))
-    assert.ok(info.mock.calls.every(call => call.arguments.every(value => !String(value).includes("test-token"))))
+    assert.ok(info.mock.calls.some(call => call.arguments.some(value => String(value).includes('web client:'))))
+    assert.ok(info.mock.calls.every(call => call.arguments.every(value => !String(value).includes('test-token'))))
     const page = await fetch(`http://127.0.0.1:${port}/`)
     assert.equal(page.status, 200)
     assert.match(await page.text(), /piui/)
@@ -55,16 +55,16 @@ test("one server provides the web app and authenticated API on the same port", a
     assert.equal(unauthorized.status, 401)
     await unauthorized.arrayBuffer()
     const health = await fetch(`http://127.0.0.1:${port}/api/v1/host/health`, {
-      headers: { authorization: "Bearer test-token" },
+      headers: { authorization: 'Bearer test-token' },
     })
     assert.equal(health.status, 200)
-    assert.equal((await health.json() as { service?: string }).service, "piui-server")
+    assert.equal(((await health.json()) as { service?: string }).service, 'piui-server')
 
     // Finish the background catalog handshake before testing graceful shutdown.
     const catalog = await fetch(`http://127.0.0.1:${port}/api/v1/pi/commands/session.listAll`, {
-      method: "POST",
-      headers: { authorization: "Bearer test-token", "content-type": "application/json" },
-      body: "{}",
+      method: 'POST',
+      headers: { authorization: 'Bearer test-token', 'content-type': 'application/json' },
+      body: '{}',
     })
     assert.equal(catalog.status, 200)
     await catalog.arrayBuffer()
@@ -76,11 +76,11 @@ test("one server provides the web app and authenticated API on the same port", a
 async function availablePort(): Promise<number> {
   const server = createServer()
   await new Promise<void>((resolve, reject) => {
-    server.once("error", reject)
-    server.listen(0, "127.0.0.1", resolve)
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
   })
   const address = server.address()
-  const port = typeof address === "object" && address ? address.port : 0
-  await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  const port = typeof address === 'object' && address ? address.port : 0
+  await new Promise<void>((resolve, reject) => server.close(error => (error ? reject(error) : resolve())))
   return port
 }

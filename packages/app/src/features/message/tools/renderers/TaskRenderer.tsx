@@ -5,7 +5,12 @@ import { ChevronRightIcon, ExternalLinkIcon, StopIcon } from '../../../../compon
 import { useDisclosureScrollLock } from '../../../../hooks'
 import { useSessionNavigation } from '../../../../contexts/SessionNavigationContext'
 import { abortPiOperation } from '../../../../pi/controllers/index.js'
-import { isScopedSessionKey, makeSessionKey, sessionKeyToServerId, sessionKeyToSessionId } from '../../../../utils/sessionKey'
+import {
+  isScopedSessionKey,
+  makeSessionKey,
+  sessionKeyToServerId,
+  sessionKeyToSessionId,
+} from '../../../../utils/sessionKey'
 import { useUiDisclosureState } from '../../../../utils/uiDisclosureState'
 import type { ToolRendererProps } from '../types'
 import { MessageExpandPanel, useMessageExpandRender } from '../../messageExpand'
@@ -30,10 +35,7 @@ export const TaskRenderer = memo(function TaskRenderer({ execution, partKey, onF
   const isRunning = !execution.result
   const isCompleted = Boolean(execution.result && !execution.result.isError)
   const isError = Boolean(execution.result?.isError)
-  const [expanded, setExpanded] = useUiDisclosureState(
-    `message:${partKey}:task-body`,
-    isRunning,
-  )
+  const [expanded, setExpanded] = useUiDisclosureState(`message:${partKey}:task-body`, isRunning)
   const [isContentFullscreen, setIsContentFullscreen] = useState(false)
   const { rootRef, headerRef, withScrollLock } = useDisclosureScrollLock()
   const effectiveExpanded = expanded || isContentFullscreen
@@ -46,11 +48,17 @@ export const TaskRenderer = memo(function TaskRenderer({ execution, partKey, onF
   const agentType = (input?.subagent_type as string) || 'general'
 
   // 获取子 session ID —— 只信任 metadata.sessionId，它是后端为这个 tool call 精确设置的
-  const metadata = execution.result?.details && typeof execution.result.details === 'object' && !Array.isArray(execution.result.details)
-    ? execution.result.details as Record<string, unknown>
-    : undefined
+  const metadata =
+    execution.result?.details &&
+    typeof execution.result.details === 'object' &&
+    !Array.isArray(execution.result.details)
+      ? (execution.result.details as Record<string, unknown>)
+      : undefined
   const { currentSessionId } = useSessionNavigation()
-  const targetSessionId = scopeChildSession(typeof metadata?.sessionId === 'string' ? metadata.sessionId : undefined, currentSessionId)
+  const targetSessionId = scopeChildSession(
+    typeof metadata?.sessionId === 'string' ? metadata.sessionId : undefined,
+    currentSessionId,
+  )
 
   const resultOutput = execution.result
     ? execution.result.content

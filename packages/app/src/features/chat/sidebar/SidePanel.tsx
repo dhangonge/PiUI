@@ -34,10 +34,7 @@ import { useBusySessions, useBusyCount } from '../../../store/activeSessionStore
 import { notificationStore, useNotifications, useUnreadNotificationCount } from '../../../store/notificationStore'
 import { pinnedSessionsStore } from '../../../store/pinnedSessionsStore'
 import type { NotificationEntry } from '../../../store/notificationStore'
-import {
-  subscribeToConnectionState,
-  type ConnectionInfo,
-} from '../../../api'
+import { subscribeToConnectionState, type ConnectionInfo } from '../../../api'
 import type { UiSession } from '../../../types/session'
 import { getDirectoryName, isSameDirectory, normalizeToForwardSlash } from '../../../utils'
 import { uiErrorHandler } from '../../../utils'
@@ -306,7 +303,10 @@ export function SidePanel({
     return subscribeToConnectionState(setConnectionState)
   }, [])
 
-  const activeServerId = useSyncExternalStore(listener => serverStore.subscribe(listener), () => serverStore.getActiveServerId())
+  const activeServerId = useSyncExternalStore(
+    listener => serverStore.subscribe(listener),
+    () => serverStore.getActiveServerId(),
+  )
   const { sessions, isLoading, isLoadingMore, hasMore, search, setSearch, loadMore, deleteSession, refresh } =
     useSessionContext()
 
@@ -315,14 +315,21 @@ export function SidePanel({
     pinnedSessionsStore.getScopedSnapshot,
     pinnedSessionsStore.getScopedSnapshot,
   )
-  const pinnedEntries = useMemo(() => allPinnedEntries.filter(entry => sessionKeyToServerId(entry.sessionId) === activeServerId), [allPinnedEntries, activeServerId])
+  const pinnedEntries = useMemo(
+    () => allPinnedEntries.filter(entry => sessionKeyToServerId(entry.sessionId) === activeServerId),
+    [allPinnedEntries, activeServerId],
+  )
   const sessionLookup = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions])
 
   // 列表显示按当前工作区过滤；数据本身是全局的（活跃 tab / 标题解析都需全局）
   const visibleSessions = useMemo(
     () =>
       currentDirectory
-        ? sessions.filter(session => sessionKeyToServerId(session.id) === activeServerId && isSameDirectory(session.directory, currentDirectory))
+        ? sessions.filter(
+            session =>
+              sessionKeyToServerId(session.id) === activeServerId &&
+              isSameDirectory(session.directory, currentDirectory),
+          )
         : sessions,
     [sessions, currentDirectory, activeServerId],
   )
@@ -818,7 +825,11 @@ export function SidePanel({
           <a href="/" className="flex items-center whitespace-nowrap" aria-label="Pi">
             {/* 官方 Pi 标志：16px 固定尺寸，中心点与下方导航按钮图标(X=24px)垂直对齐 */}
             <svg viewBox="0 0 470 470" fill="currentColor" aria-hidden="true" className="h-4 w-auto text-text-100">
-              <path fillRule="evenodd" clipRule="evenodd" d="M0 0H352.07V234.71H234.71V352.07H117.36V469.43H0V0ZM117.36 117.36V234.71H234.71V117.36H117.36Z" />
+              <path
+                fillRule="evenodd"
+                clipRule="evenodd"
+                d="M0 0H352.07V234.71H234.71V352.07H117.36V469.43H0V0ZM117.36 117.36V234.71H234.71V117.36H117.36Z"
+              />
               <path d="M352.07 234.71H469.43V469.43H352.07V234.71Z" />
             </svg>
           </a>
@@ -986,11 +997,7 @@ export function SidePanel({
                         <div
                           className={`text-[length:var(--fs-xxs)] text-text-400 truncate opacity-70 ${isGlobal ? '' : 'font-mono'}`}
                         >
-                          {isGlobal
-                            ? t('sidebar.globalProjectHint')
-                            : project.path
-                              ? getParentPath(project.path)
-                              : ''}
+                          {isGlobal ? t('sidebar.globalProjectHint') : project.path ? getParentPath(project.path) : ''}
                         </div>
                       </div>
                     </button>
@@ -1191,12 +1198,15 @@ export function SidePanel({
 
           {/* Recents Tab */}
           {sidebarTab === 'recents' && (
-            <div
-              ref={recentsSelectionRootRef}
-              className={`flex-1 overflow-hidden ${isEditMode ? 'select-none' : ''}`}
-            >
+            <div ref={recentsSelectionRootRef} className={`flex-1 overflow-hidden ${isEditMode ? 'select-none' : ''}`}>
               {multiServer.enabled ? (
-                <MultiServerFolderList search={search} selectedSessionId={selectedSessionId} onSelectSession={handleSelect} onNewSession={onNewSession} onAddProject={onAddProject} />
+                <MultiServerFolderList
+                  search={search}
+                  selectedSessionId={selectedSessionId}
+                  onSelectSession={handleSelect}
+                  onNewSession={onNewSession}
+                  onAddProject={onAddProject}
+                />
               ) : canShowFolderRecents ? (
                 <FolderRecentList
                   projects={folderProjects}

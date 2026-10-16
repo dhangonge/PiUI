@@ -27,7 +27,13 @@ function readStoredPlan(sessionId: string): RedoPlan | null {
     if (typeof value.epoch !== 'string' || !value.epoch) return null
     if (!Array.isArray(value.checkpoints) || value.checkpoints.some(item => typeof item !== 'string')) return null
     const restored = value.restored
-    if (typeof restored !== 'number' || !Number.isInteger(restored) || restored < 0 || restored >= value.checkpoints.length) return null
+    if (
+      typeof restored !== 'number' ||
+      !Number.isInteger(restored) ||
+      restored < 0 ||
+      restored >= value.checkpoints.length
+    )
+      return null
     if (value.undoLeafId !== null && typeof value.undoLeafId !== 'string') return null
     return {
       epoch: value.epoch,
@@ -91,7 +97,10 @@ export function captureRedoCheckpoints(sessionId: string, entryId: string): stri
   const items = selectPiTimelineItemsCached(sessionId, branch)
   const undoIndex = items.findIndex(item => item.entryId === entryId)
   if (undoIndex === -1) return []
-  return items.slice(undoIndex).filter(item => item.kind !== 'user_message').map(item => item.entryId)
+  return items
+    .slice(undoIndex)
+    .filter(item => item.kind !== 'user_message')
+    .map(item => item.entryId)
 }
 
 /**

@@ -91,5 +91,4 @@ describe('activeSessionStore scoped refresh handling', () => {
       next: 1000,
     })
   })
-
 })

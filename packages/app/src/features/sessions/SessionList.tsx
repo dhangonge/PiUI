@@ -1,6 +1,14 @@
 import { useRef, useEffect, useCallback, useState, useMemo, useSyncExternalStore, type PointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { SearchIcon, PencilIcon, TrashIcon, ComposeIcon, PinIcon, MessageSquareIcon, GitBranchIcon } from '../../components/Icons'
+import {
+  SearchIcon,
+  PencilIcon,
+  TrashIcon,
+  ComposeIcon,
+  PinIcon,
+  MessageSquareIcon,
+  GitBranchIcon,
+} from '../../components/Icons'
 import { getSelectionRoundClass } from './selectionRound'
 import { formatRelativeTime } from '../../utils/dateUtils'
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
@@ -252,8 +260,7 @@ export function SessionList({
                                 parentSession={session}
                                 selectedSessionId={selectedId}
                                 fetchAll={
-                                  !inlineChildSessions?.has(session.id) &&
-                                  expandedChildSessionIds?.has(session.id)
+                                  !inlineChildSessions?.has(session.id) && expandedChildSessionIds?.has(session.id)
                                 }
                                 children={inlineChildSessions?.get(session.id)}
                                 childrenByParent={inlineChildSessions}
@@ -290,8 +297,7 @@ export function SessionList({
               const showPinnedDivider = pinnedDividerAfterIds?.has(session.id)
               const showUnavailableAfter = hasUnavailablePinned && index === lastAvailablePinnedIndex
               const isChecked = selectedSessionIds?.has(session.id) ?? false
-              const prevChecked =
-                isEditMode && index > 0 && (selectedSessionIds?.has(sessions[index - 1].id) ?? false)
+              const prevChecked = isEditMode && index > 0 && (selectedSessionIds?.has(sessions[index - 1].id) ?? false)
               const nextChecked =
                 isEditMode &&
                 index < sessions.length - 1 &&
@@ -433,20 +439,19 @@ export function SessionListItem({
     pinnedSessionsStore.getScopedSnapshot,
     pinnedSessionsStore.getScopedSnapshot,
   )
-  const isPinned = useMemo(
-    () => {
-      const target = splitSessionKey(session.id)
-      return pinnedEntries.some(entry => entry.sessionId === makeSessionKey(target.serverId, target.sessionId))
-    },
-    [pinnedEntries, session.id],
-  )
+  const isPinned = useMemo(() => {
+    const target = splitSessionKey(session.id)
+    return pinnedEntries.some(entry => entry.sessionId === makeSessionKey(target.serverId, target.sessionId))
+  }, [pinnedEntries, session.id])
   const sessionTitleDetails = [
     session.title,
     session.isNamed && session.firstMessage ? session.firstMessage : undefined,
     session.parentSessionPath ? `Forked from ${session.forkParentTitle || 'another session'}` : undefined,
     session.directory,
     typeof session.messageCount === 'number' ? `${session.messageCount} messages` : undefined,
-  ].filter(Boolean).join('\n')
+  ]
+    .filter(Boolean)
+    .join('\n')
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -581,14 +586,11 @@ export function SessionListItem({
     if (isEditMode || isEditing) {
       return
     }
-    startInternalDrag(
-      e,
-      {
-        kind: 'session',
-        sessionId: session.id,
-        directory: session.directory,
-      },
-    )
+    startInternalDrag(e, {
+      kind: 'session',
+      sessionId: session.id,
+      directory: session.directory,
+    })
   }
 
   const isDraggable = !isEditMode && !isEditing
@@ -630,7 +632,8 @@ export function SessionListItem({
   // 标题 + 时间 + 活跃状态圆点
   // ============================================
   if (isMinimal) {
-    const statusIndicatorTitle = activeStatus?.label ||
+    const statusIndicatorTitle =
+      activeStatus?.label ||
       (hasUnreadCompletedNotification ? t('chat:notification.completed') : undefined) ||
       (session.parentSessionPath ? `Forked from ${session.forkParentTitle || 'another session'}` : undefined)
 
@@ -797,9 +800,7 @@ export function SessionListItem({
         >
           <p
             className={`${isCompact ? 'text-[length:var(--fs-md)]' : 'text-[length:var(--fs-base)]'} truncate font-medium ${
-              (isEditMode ? isChecked : isSelected)
-                ? 'text-text-100'
-                : 'text-text-200 group-hover:text-text-100'
+              (isEditMode ? isChecked : isSelected) ? 'text-text-100' : 'text-text-200 group-hover:text-text-100'
             }`}
             title={sessionTitleDetails || t('sessions.untitledChat')}
           >
@@ -847,7 +848,10 @@ export function SessionListItem({
             {typeof session.messageCount === 'number' && session.messageCount > 0 && (
               <>
                 <span className="opacity-30 shrink-0">·</span>
-                <span className="flex shrink-0 items-center gap-0.5 opacity-55" title={`${session.messageCount} messages`}>
+                <span
+                  className="flex shrink-0 items-center gap-0.5 opacity-55"
+                  title={`${session.messageCount} messages`}
+                >
                   <MessageSquareIcon size={10} aria-hidden="true" />
                   <span>{session.messageCount}</span>
                 </span>
@@ -940,7 +944,9 @@ function UnavailablePinnedSessionItem({
         >
           {title}
         </p>
-        <div className={`flex items-center ${isCompact ? 'mt-1' : 'mt-1.5'} h-4 text-[length:var(--fs-xxs)] text-text-500`}>
+        <div
+          className={`flex items-center ${isCompact ? 'mt-1' : 'mt-1.5'} h-4 text-[length:var(--fs-xxs)] text-text-500`}
+        >
           <span>{t('sessions.unavailable')}</span>
         </div>
       </div>

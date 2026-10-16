@@ -66,7 +66,8 @@ describe('modelVisibilityStore', () => {
     const a = serverStore.addServer({ name: 'A', url: 'https://a.example.test' }).id
     const b = serverStore.addServer({ name: 'B', url: 'https://b.example.test' }).id
     serverStore.setActiveServer(a)
-    const first = getModelVisibilityStore(a), second = getModelVisibilityStore(b)
+    const first = getModelVisibilityStore(a),
+      second = getModelVisibilityStore(b)
     first.setVisible('same:model', false)
     expect(first.getSnapshot()).toEqual(['same:model'])
     expect(second.getSnapshot()).toEqual([])

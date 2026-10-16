@@ -1,0 +1,19 @@
+# 构建产物
+node_modules/
+dist/
+build/
+target/
+coverage/
+
+# 生成物（脚本或工具生成，不要手改，也不参与格式门禁）
+packages/app/public/material-icons/
+packages/app/src-tauri/gen/
+packages/app/src-tauri/resources/
+
+# 锁文件与补丁
+package-lock.json
+patches/
+
+# 上游 OpenCodeUI 的冻结文档：保留原始字节，不再格式化
+packages/app/CHANGELOG.opencodeui.md
+packages/app/README.opencodeui.md

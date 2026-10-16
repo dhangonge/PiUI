@@ -48,10 +48,7 @@ function makeModel(id: string, name: string): AnyModel {
   } as AnyModel
 }
 
-const MODELS: AnyModel[] = [
-  makeModel('gpt-4.1', 'GPT-4.1'),
-  makeModel('gpt-4o-mini', 'GPT-4o Mini'),
-]
+const MODELS: AnyModel[] = [makeModel('gpt-4.1', 'GPT-4.1'), makeModel('gpt-4o-mini', 'GPT-4o Mini')]
 
 describe('ModelsSettings', () => {
   beforeEach(() => {

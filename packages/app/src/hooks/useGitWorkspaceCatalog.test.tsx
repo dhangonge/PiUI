@@ -30,7 +30,10 @@ vi.mock('../api/events', () => ({
 vi.mock('../store/serverStore', () => ({
   serverStore: {
     getActiveServerId: () => activeServerId,
-    subscribe: (listener: () => void) => { serverListeners.add(listener); return () => serverListeners.delete(listener) },
+    subscribe: (listener: () => void) => {
+      serverListeners.add(listener)
+      return () => serverListeners.delete(listener)
+    },
     onServerChange: (...args: unknown[]) => onServerChangeMock(...args),
   },
 }))
@@ -55,7 +58,9 @@ describe('useGitWorkspaceCatalog', () => {
 
   it('never opens the previous server directories on the next server', async () => {
     getCurrentProjectMock.mockImplementation(async (directory: string) => ({ path: directory }))
-    const { result, rerender } = renderHook(({ dirs }) => useGitWorkspaceCatalog(dirs), { initialProps: { dirs: ['/a'] } })
+    const { result, rerender } = renderHook(({ dirs }) => useGitWorkspaceCatalog(dirs), {
+      initialProps: { dirs: ['/a'] },
+    })
     await waitFor(() => expect(result.current.catalog.has('/a')).toBe(true))
     act(() => {
       activeServerId = 'b'
@@ -74,7 +79,9 @@ describe('useGitWorkspaceCatalog', () => {
     const staleRequest = createDeferred<{ vcs: string; worktree: string }>()
     const freshRequest = createDeferred<{ vcs: string; worktree: string }>()
 
-    getCurrentProjectMock.mockImplementationOnce(() => staleRequest.promise).mockImplementationOnce(() => freshRequest.promise)
+    getCurrentProjectMock
+      .mockImplementationOnce(() => staleRequest.promise)
+      .mockImplementationOnce(() => freshRequest.promise)
 
     const directories = ['C:\\repo']
     const { result } = renderHook(() => useGitWorkspaceCatalog(directories))

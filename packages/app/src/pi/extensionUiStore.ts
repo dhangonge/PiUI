@@ -4,7 +4,7 @@ import type {
   ExtensionUiSnapshot,
   ExtensionUiState,
   ExtensionUiStatePatch,
-} from "@piui/protocol"
+} from '@piui/protocol'
 
 interface ExtensionUiStoreSnapshot {
   sessions: Readonly<Record<string, ExtensionUiSnapshot>>
@@ -22,7 +22,7 @@ const emptyState = (): ExtensionUiState => ({
   statuses: {},
   workingVisible: true,
   widgets: {},
-  editorText: "",
+  editorText: '',
   toolsExpanded: false,
 })
 
@@ -130,9 +130,7 @@ export const extensionUiStore = {
 
   editorCommand(sessionId: string, command: ExtensionUiEditorCommand): void {
     const snapshot = existing(sessionId)
-    const editorText = command.kind === "set"
-      ? command.text
-      : snapshot.state.editorText + command.text
+    const editorText = command.kind === 'set' ? command.text : snapshot.state.editorText + command.text
     editorTextSourceBySession.set(sessionId, 'extension')
     update(sessionId, {
       ...snapshot,

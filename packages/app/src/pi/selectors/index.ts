@@ -224,17 +224,19 @@ export function buildPiLiveItems(branch: PiBranchPage): PiTimelineItem[] {
   // 不再渲染 live 行——否则 live 行与条目同时存在、同 key，React 报
   // "two children with the same key" 且 DOM 错乱。条目可见前仍渲染
   // persisting live，避免消息短暂消失（branchMerge 保留 checkpoint 的初衷）。
-  const persistedVisible = live != null
-    && branch.client?.stableEntryIds != null
-    && Object.values(branch.client.stableEntryIds).includes(live.id)
+  const persistedVisible =
+    live != null &&
+    branch.client?.stableEntryIds != null &&
+    Object.values(branch.client.stableEntryIds).includes(live.id)
   if (live && !persistedVisible && live.message.role === 'user' && live.phase === 'streaming') {
     const message = live.message
-    const text = typeof message.content === 'string'
-      ? message.content
-      : message.content
-          .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
-          .map(block => block.text)
-          .join('')
+    const text =
+      typeof message.content === 'string'
+        ? message.content
+        : message.content
+            .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
+            .map(block => block.text)
+            .join('')
     if (text.trim()) {
       items.push({
         kind: 'user_message',
@@ -266,13 +268,17 @@ export function buildPiLiveItems(branch: PiBranchPage): PiTimelineItem[] {
 /**
  * Select composer mode from session runtime state.
  */
-export function selectPiComposerMode(state: { isStreaming?: boolean; steeringMode?: string; followUpMode?: string } | null): { type: 'idle' } | { type: 'streaming'; mode: 'steering' | 'followUp'; queueMode: 'all' | 'one-at-a-time' } {
+export function selectPiComposerMode(
+  state: { isStreaming?: boolean; steeringMode?: string; followUpMode?: string } | null,
+): { type: 'idle' } | { type: 'streaming'; mode: 'steering' | 'followUp'; queueMode: 'all' | 'one-at-a-time' } {
   if (!state) return { type: 'idle' }
   if (state.isStreaming) {
     return {
       type: 'streaming',
       mode: state.steeringMode === 'one-at-a-time' ? 'steering' : 'followUp',
-      queueMode: (state.steeringMode === 'one-at-a-time' ? state.steeringMode : state.followUpMode) as 'all' | 'one-at-a-time' || 'all',
+      queueMode:
+        ((state.steeringMode === 'one-at-a-time' ? state.steeringMode : state.followUpMode) as
+          'all' | 'one-at-a-time') || 'all',
     }
   }
   return { type: 'idle' }
@@ -281,7 +287,9 @@ export function selectPiComposerMode(state: { isStreaming?: boolean; steeringMod
 /**
  * Select current model info from session runtime state.
  */
-export function selectPiCurrentModel(state: { model?: { provider: string; modelId: string }; thinkingLevel?: string } | null): { provider: string; modelId: string; thinkingLevel?: ThinkingLevel } | null {
+export function selectPiCurrentModel(
+  state: { model?: { provider: string; modelId: string }; thinkingLevel?: string } | null,
+): { provider: string; modelId: string; thinkingLevel?: ThinkingLevel } | null {
   if (!state?.model) return null
   return {
     provider: state.model.provider,

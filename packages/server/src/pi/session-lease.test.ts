@@ -1,27 +1,27 @@
-import assert from "node:assert/strict"
-import { fork, type ChildProcess } from "node:child_process"
-import { linkSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import path from "node:path"
-import { afterEach, describe, it } from "node:test"
-import { SessionLeaseManager } from "./session-lease.ts"
+import assert from 'node:assert/strict'
+import { fork, type ChildProcess } from 'node:child_process'
+import { linkSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { afterEach, describe, it } from 'node:test'
+import { SessionLeaseManager } from './session-lease.ts'
 
-describe("SessionLeaseManager", () => {
+describe('SessionLeaseManager', () => {
   const roots: string[] = []
   afterEach(() => {
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
   })
 
-  it("allows one writer and releases the session for another supervisor", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-lease-test-"))
+  it('allows one writer and releases the session for another supervisor', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-lease-test-'))
     roots.push(root)
     const first = new SessionLeaseManager(root)
     const second = new SessionLeaseManager(root)
-    const sessionFile = path.join(root, "session.jsonl")
+    const sessionFile = path.join(root, 'session.jsonl')
     try {
       const lease = await first.acquire(sessionFile)
       await assert.rejects(second.acquire(sessionFile), error => {
-        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+        assert.equal((error as { code?: string }).code, 'SESSION_BUSY')
         return true
       })
       lease.release()
@@ -33,40 +33,40 @@ describe("SessionLeaseManager", () => {
     }
   })
 
-  it("allows exactly one independent process to acquire a session", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-lease-process-test-"))
+  it('allows exactly one independent process to acquire a session', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-lease-process-test-'))
     roots.push(root)
-    const sessionFile = path.join(root, "cross-process.jsonl")
+    const sessionFile = path.join(root, 'cross-process.jsonl')
     const children = [startLeaseProcess(root, sessionFile), startLeaseProcess(root, sessionFile)]
     try {
-      const results = await Promise.all(children.map(child => request(child, "acquire", ["acquired", "busy"])))
-      assert.deepEqual(results.slice().sort(), ["acquired", "busy"])
+      const results = await Promise.all(children.map(child => request(child, 'acquire', ['acquired', 'busy'])))
+      assert.deepEqual(results.slice().sort(), ['acquired', 'busy'])
 
-      const winner = children[results.indexOf("acquired")]
-      const loser = children[results.indexOf("busy")]
-      await request(winner, "release", "released")
-      assert.equal(await request(loser, "acquire", "acquired"), "acquired")
+      const winner = children[results.indexOf('acquired')]
+      const loser = children[results.indexOf('busy')]
+      await request(winner, 'release', 'released')
+      assert.equal(await request(loser, 'acquire', 'acquired'), 'acquired')
     } finally {
       for (const child of children) {
-        if (child.connected) child.send("shutdown")
+        if (child.connected) child.send('shutdown')
       }
       await Promise.all(children.map(waitForExit))
     }
   })
 
-  it("treats hard links to one session file as the same lease", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-lease-link-test-"))
+  it('treats hard links to one session file as the same lease', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-lease-link-test-'))
     roots.push(root)
-    const sessionFile = path.join(root, "session.jsonl")
-    const aliasFile = path.join(root, "session-alias.jsonl")
-    writeFileSync(sessionFile, "")
+    const sessionFile = path.join(root, 'session.jsonl')
+    const aliasFile = path.join(root, 'session-alias.jsonl')
+    writeFileSync(sessionFile, '')
     linkSync(sessionFile, aliasFile)
     const first = new SessionLeaseManager(root)
     const second = new SessionLeaseManager(root)
     try {
       const lease = await first.acquire(sessionFile)
       await assert.rejects(second.acquire(aliasFile), error => {
-        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+        assert.equal((error as { code?: string }).code, 'SESSION_BUSY')
         return true
       })
       lease.release()
@@ -76,18 +76,18 @@ describe("SessionLeaseManager", () => {
     }
   })
 
-  it("keeps the same path lease after the session file is created", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-lease-create-test-"))
+  it('keeps the same path lease after the session file is created', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-lease-create-test-'))
     roots.push(root)
-    const sessionFile = path.join(root, "session.jsonl")
+    const sessionFile = path.join(root, 'session.jsonl')
     const first = new SessionLeaseManager(root)
     const second = new SessionLeaseManager(root)
     try {
       const lease = await first.acquire(sessionFile)
-      writeFileSync(sessionFile, "")
+      writeFileSync(sessionFile, '')
       await lease.refresh()
       await assert.rejects(second.acquire(sessionFile), error => {
-        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+        assert.equal((error as { code?: string }).code, 'SESSION_BUSY')
         return true
       })
       lease.release()
@@ -97,20 +97,20 @@ describe("SessionLeaseManager", () => {
     }
   })
 
-  it("adds the physical file identity when a new session lease is refreshed", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-lease-refresh-test-"))
+  it('adds the physical file identity when a new session lease is refreshed', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-lease-refresh-test-'))
     roots.push(root)
-    const sessionFile = path.join(root, "session.jsonl")
-    const aliasFile = path.join(root, "session-alias.jsonl")
+    const sessionFile = path.join(root, 'session.jsonl')
+    const aliasFile = path.join(root, 'session-alias.jsonl')
     const first = new SessionLeaseManager(root)
     const second = new SessionLeaseManager(root)
     try {
       const lease = await first.acquire(sessionFile)
-      writeFileSync(sessionFile, "")
+      writeFileSync(sessionFile, '')
       linkSync(sessionFile, aliasFile)
       await lease.refresh()
       await assert.rejects(second.acquire(aliasFile), error => {
-        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+        assert.equal((error as { code?: string }).code, 'SESSION_BUSY')
         return true
       })
       lease.release()
@@ -120,20 +120,20 @@ describe("SessionLeaseManager", () => {
     }
   })
 
-  it("uses the Pi session id to reject a hard-link alias after delayed file creation", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-lease-session-id-test-"))
+  it('uses the Pi session id to reject a hard-link alias after delayed file creation', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-lease-session-id-test-'))
     roots.push(root)
-    const sessionFile = path.join(root, "session.jsonl")
-    const aliasFile = path.join(root, "session-alias.jsonl")
+    const sessionFile = path.join(root, 'session.jsonl')
+    const aliasFile = path.join(root, 'session-alias.jsonl')
     const first = new SessionLeaseManager(root)
     const second = new SessionLeaseManager(root)
     try {
-      const lease = await first.acquire(sessionFile, "pi-session-id")
-      writeFileSync(sessionFile, "")
+      const lease = await first.acquire(sessionFile, 'pi-session-id')
+      writeFileSync(sessionFile, '')
       linkSync(sessionFile, aliasFile)
       const aliasLease = await second.acquire(aliasFile)
-      await assert.rejects(aliasLease.refresh(aliasFile, "pi-session-id"), error => {
-        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+      await assert.rejects(aliasLease.refresh(aliasFile, 'pi-session-id'), error => {
+        assert.equal((error as { code?: string }).code, 'SESSION_BUSY')
         return true
       })
       aliasLease.release()
@@ -144,21 +144,21 @@ describe("SessionLeaseManager", () => {
     }
   })
 
-  it("reserves a replacement target before releasing the source", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-lease-replacement-test-"))
+  it('reserves a replacement target before releasing the source', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-lease-replacement-test-'))
     roots.push(root)
-    const sourceFile = path.join(root, "source.jsonl")
-    const targetFile = path.join(root, "target.jsonl")
+    const sourceFile = path.join(root, 'source.jsonl')
+    const targetFile = path.join(root, 'target.jsonl')
     const first = new SessionLeaseManager(root)
     const second = new SessionLeaseManager(root)
     try {
-      const lease = await first.acquire(sourceFile, "source-id")
+      const lease = await first.acquire(sourceFile, 'source-id')
       const reservation = await lease.reserveReplacement!(targetFile)
-      await reservation.commit(targetFile, "target-id")
-      const sourceLease = await second.acquire(sourceFile, "source-id")
+      await reservation.commit(targetFile, 'target-id')
+      const sourceLease = await second.acquire(sourceFile, 'source-id')
       sourceLease.release()
-      await assert.rejects(second.acquire(targetFile, "target-id"), error => {
-        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+      await assert.rejects(second.acquire(targetFile, 'target-id'), error => {
+        assert.equal((error as { code?: string }).code, 'SESSION_BUSY')
         return true
       })
       lease.release()
@@ -168,21 +168,21 @@ describe("SessionLeaseManager", () => {
     }
   })
 
-  it("clears the source file identity when a replacement has no target file", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-lease-memory-replacement-test-"))
+  it('clears the source file identity when a replacement has no target file', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-lease-memory-replacement-test-'))
     roots.push(root)
-    const sourceFile = path.join(root, "source.jsonl")
-    const otherFile = path.join(root, "other.jsonl")
+    const sourceFile = path.join(root, 'source.jsonl')
+    const otherFile = path.join(root, 'other.jsonl')
     const first = new SessionLeaseManager(root)
     const second = new SessionLeaseManager(root)
     try {
-      const lease = await first.acquire(sourceFile, "source-id")
-      await lease.replace(null, "target-id")
+      const lease = await first.acquire(sourceFile, 'source-id')
+      await lease.replace(null, 'target-id')
 
-      const sourceLease = await second.acquire(sourceFile, "source-id")
+      const sourceLease = await second.acquire(sourceFile, 'source-id')
       sourceLease.release()
-      await assert.rejects(second.acquire(otherFile, "target-id"), error => {
-        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+      await assert.rejects(second.acquire(otherFile, 'target-id'), error => {
+        assert.equal((error as { code?: string }).code, 'SESSION_BUSY')
         return true
       })
       lease.release()
@@ -192,11 +192,11 @@ describe("SessionLeaseManager", () => {
     }
   })
 
-  it("rolls a replacement reservation back without dropping the source", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-lease-rollback-test-"))
+  it('rolls a replacement reservation back without dropping the source', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-lease-rollback-test-'))
     roots.push(root)
-    const sourceFile = path.join(root, "source.jsonl")
-    const targetFile = path.join(root, "target.jsonl")
+    const sourceFile = path.join(root, 'source.jsonl')
+    const targetFile = path.join(root, 'target.jsonl')
     const first = new SessionLeaseManager(root)
     const second = new SessionLeaseManager(root)
     try {
@@ -208,12 +208,12 @@ describe("SessionLeaseManager", () => {
         return value
       })
       await new Promise(resolve => setTimeout(resolve, 50))
-      assert.equal(acquired, false, "attach must wait while replacement identity is unknown")
+      assert.equal(acquired, false, 'attach must wait while replacement identity is unknown')
       reservation.rollback()
       const targetLease = await pendingTarget
       targetLease.release()
       await assert.rejects(second.acquire(sourceFile), error => {
-        assert.equal((error as { code?: string }).code, "SESSION_BUSY")
+        assert.equal((error as { code?: string }).code, 'SESSION_BUSY')
         return true
       })
       lease.release()
@@ -225,9 +225,9 @@ describe("SessionLeaseManager", () => {
 })
 
 function startLeaseProcess(namespace: string, sessionFile: string): ChildProcess {
-  return fork(new URL("./session-lease-fixture.mjs", import.meta.url), [namespace, sessionFile], {
-    execArgv: ["--import", "tsx"],
-    stdio: ["ignore", "ignore", "inherit", "ipc"],
+  return fork(new URL('./session-lease-fixture.mjs', import.meta.url), [namespace, sessionFile], {
+    execArgv: ['--import', 'tsx'],
+    stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
   })
 }
 
@@ -240,21 +240,21 @@ function request(child: ChildProcess, command: string, expected: string | string
 function waitForMessage(child: ChildProcess, expected: string | string[]): Promise<string> {
   const accepted = new Set(Array.isArray(expected) ? expected : [expected])
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => finish(new Error(`Timed out waiting for ${[...accepted].join(" or ")}`)), 5_000)
+    const timer = setTimeout(() => finish(new Error(`Timed out waiting for ${[...accepted].join(' or ')}`)), 5_000)
     const onMessage = (message: unknown) => {
-      if (typeof message === "string" && accepted.has(message)) finish(undefined, message)
-      else if (typeof message === "string" && message.startsWith("error:")) finish(new Error(message))
+      if (typeof message === 'string' && accepted.has(message)) finish(undefined, message)
+      else if (typeof message === 'string' && message.startsWith('error:')) finish(new Error(message))
     }
     const onExit = (code: number | null) => finish(new Error(`Lease fixture exited with code ${code}`))
     const finish = (error?: Error, message?: string) => {
       clearTimeout(timer)
-      child.removeListener("message", onMessage)
-      child.removeListener("exit", onExit)
+      child.removeListener('message', onMessage)
+      child.removeListener('exit', onExit)
       if (error) reject(error)
       else resolve(message!)
     }
-    child.on("message", onMessage)
-    child.once("exit", onExit)
+    child.on('message', onMessage)
+    child.once('exit', onExit)
   })
 }
 
@@ -265,7 +265,7 @@ function waitForExit(child: ChildProcess): Promise<void> {
       child.kill()
       resolve()
     }, 5_000)
-    child.once("exit", () => {
+    child.once('exit', () => {
       clearTimeout(timer)
       resolve()
     })

@@ -6,13 +6,13 @@
 
 APK 代码基线：`c3751157`（包含以下提交）。后续探针断言加强及文档不改变 APK 代码。
 
-| 提交 | 内容 |
-| --- | --- |
-| `f24a1fb0` | SDK 家族固定为 1.0.3，隔离迁移探针，旧会话夹具，插件基线快照 |
+| 提交       | 内容                                                           |
+| ---------- | -------------------------------------------------------------- |
+| `f24a1fb0` | SDK 家族固定为 1.0.3，隔离迁移探针，旧会话夹具，插件基线快照   |
 | `7add2b3e` | 会话级稳定 Theme、按名查找与切换、RPC 降级诊断、前端控制符清理 |
-| `0f688a7c` | 组件回调故障隔离、custom UI 生命周期、扩展错误上报和重载绑定 |
-| `400ea0ce` | 修复 mock 预览空历史，持久化/分页回归与浏览器等待条件 |
-| `c3751157` | Linux bubblewrap 真实插件隔离启动探针 |
+| `0f688a7c` | 组件回调故障隔离、custom UI 生命周期、扩展错误上报和重载绑定   |
+| `400ea0ce` | 修复 mock 预览空历史，持久化/分页回归与浏览器等待条件          |
+| `c3751157` | Linux bubblewrap 真实插件隔离启动探针                          |
 
 ## 1. SDK 与个人配置边界
 
@@ -39,15 +39,15 @@ APK 代码基线：`c3751157`（包含以下提交）。后续探针断言加强
 
 ### 有限支持，不能冒充终端
 
-| 能力 | 当前行为 |
-| --- | --- |
-| `onTerminalInput` | 返回可重复调用的空取消函数，并提示 RPC 不提供终端监听 |
-| `getEditorComponent` | 返回 undefined 并提示降级 |
-| `setEditorComponent` / `addAutocompleteProvider` | 不调用传入的终端工厂，提示降级 |
-| select/confirm/input/editor | 保留真实等待、回答、取消与超时逻辑，不自动批准 |
-| footer 数据 | git/provider 相关占位能力会提示限制，不声称全部等价 |
-| 动态 overlayOptions 工厂 | 仅挂载时求值；明确提示不会在每次尺寸变化时重新计算 |
-| 自动 light/dark 主题对 | 尚无手机外观协商，选暗色分支 |
+| 能力                                             | 当前行为                                              |
+| ------------------------------------------------ | ----------------------------------------------------- |
+| `onTerminalInput`                                | 返回可重复调用的空取消函数，并提示 RPC 不提供终端监听 |
+| `getEditorComponent`                             | 返回 undefined 并提示降级                             |
+| `setEditorComponent` / `addAutocompleteProvider` | 不调用传入的终端工厂，提示降级                        |
+| select/confirm/input/editor                      | 保留真实等待、回答、取消与超时逻辑，不自动批准        |
+| footer 数据                                      | git/provider 相关占位能力会提示限制，不声称全部等价   |
+| 动态 overlayOptions 工厂                         | 仅挂载时求值；明确提示不会在每次尺寸变化时重新计算    |
+| 自动 light/dark 主题对                           | 尚无手机外观协商，选暗色分支                          |
 
 ## 3. 错误隔离与 custom UI
 
@@ -68,19 +68,19 @@ APK 代码基线：`c3751157`（包含以下提交）。后续探针断言加强
 
 探针检查版本与审计基线一致、确实注册扩展、启动/清理正常；不能把内置的 read/bash 等 8 个工具计为插件注册成功。
 
-| 插件 | 本轮实测 | 尚未验证 |
-| --- | --- | --- |
-| pi-cache-optimizer 2.8.19 | 启动；cache-optimizer 命令注册 | 真实 provider 缓存统计、可选配置改写 |
-| @plannotator/pi-extension 0.28.3 | 启动；2 个工具、4 个命令注册 | 手机评审页面、批注与确认闭环 |
-| pi-mcp-adapter 5.0.0 | 启动；mcp 网关和管理命令注册 | 实际 MCP 服务、认证与远程调用 |
-| @narumitw/pi-lsp 0.49.9 | 启动；diagnostics/fix 工具注册 | 个人语言服务器配置及真实项目修复 |
-| pi-subagents-lite 1.15.1 | 启动；3 个代理工具注册；终端监听降级可见 | 子代理模型执行、手机输出浏览/停止 |
-| pi-simple-web-tools 0.2.0 | 启动；搜索与抓取工具注册 | 外网请求、长结果与取消 |
-| pi-context-view 0.6.0 | 启动；context 命令注册 | 原生上下文页面，TUI-only 视图未迁移 |
-| pi-render-cache 1.4.0 | 启动；rcstats 命令注册 | 缓存收益或离屏副作用；不是 React 正文优化 |
-| @juicesharp/rpiv-todo 2.12.0 | 创建隔离任务；捕获包含 Sandbox task 的真实 widget 渲染帧，无宿主诊断错误 | 原生卡片、所有任务操作和会话恢复 |
-| @juicesharp/rpiv-ask-user-question 2.12.0 | RPC 多选往返保留 One、Two 两个答案 | 原生复选框、完整预览、多题回顾 |
-| billion-context 0.1.185 | 启动；acp/acp-cache/acp-rule 命令注册 | 该隔离配置未注册压缩工具；压缩/恢复能力未验收 |
+| 插件                                      | 本轮实测                                                                 | 尚未验证                                      |
+| ----------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------- |
+| pi-cache-optimizer 2.8.19                 | 启动；cache-optimizer 命令注册                                           | 真实 provider 缓存统计、可选配置改写          |
+| @plannotator/pi-extension 0.28.3          | 启动；2 个工具、4 个命令注册                                             | 手机评审页面、批注与确认闭环                  |
+| pi-mcp-adapter 5.0.0                      | 启动；mcp 网关和管理命令注册                                             | 实际 MCP 服务、认证与远程调用                 |
+| @narumitw/pi-lsp 0.49.9                   | 启动；diagnostics/fix 工具注册                                           | 个人语言服务器配置及真实项目修复              |
+| pi-subagents-lite 1.15.1                  | 启动；3 个代理工具注册；终端监听降级可见                                 | 子代理模型执行、手机输出浏览/停止             |
+| pi-simple-web-tools 0.2.0                 | 启动；搜索与抓取工具注册                                                 | 外网请求、长结果与取消                        |
+| pi-context-view 0.6.0                     | 启动；context 命令注册                                                   | 原生上下文页面，TUI-only 视图未迁移           |
+| pi-render-cache 1.4.0                     | 启动；rcstats 命令注册                                                   | 缓存收益或离屏副作用；不是 React 正文优化     |
+| @juicesharp/rpiv-todo 2.12.0              | 创建隔离任务；捕获包含 Sandbox task 的真实 widget 渲染帧，无宿主诊断错误 | 原生卡片、所有任务操作和会话恢复              |
+| @juicesharp/rpiv-ask-user-question 2.12.0 | RPC 多选往返保留 One、Two 两个答案                                       | 原生复选框、完整预览、多题回顾                |
+| billion-context 0.1.185                   | 启动；acp/acp-cache/acp-rule 命令注册                                    | 该隔离配置未注册压缩工具；压缩/恢复能力未验收 |
 
 Todo 探针手动调用工具后，显式重放 SDK 的 tool_execution_end，以覆盖插件延迟加载 widget 的路径；它不是一次真实模型决策。问答也是隔离 API 夹具，不调用模型。
 
@@ -88,18 +88,18 @@ Todo 探针手动调用工具后，显式重放 SDK 的 tool_execution_end，以
 
 ## 5. 验证结果
 
-| 检查 | 结果 |
-| --- | --- |
-| 四包类型检查、app ESLint | 通过 |
-| protocol | 15 通过 |
-| worker（含新 mock 预览回归） | 75 通过 |
-| server | 126 通过，2 个既有跳过 |
-| app | 135 文件、757 测试通过 |
-| Rust | cargo check 通过；3 个 lib 测试通过 |
-| LSP | 无错误，仅 4 条可选 async 写法提示 |
-| build | 通过；原有大 chunk 提示仍存在 |
-| Chromium 412×915 | 双服务器同 ID、发送隔离、分屏后台保留、首击切换 owner 通过；无未捕获异常 |
-| Android | arm64-v8a 与 armeabi-v7a APK 构建、签名和 16 KiB ZIP 对齐验证通过 |
+| 检查                         | 结果                                                                     |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| 四包类型检查、app ESLint     | 通过                                                                     |
+| protocol                     | 15 通过                                                                  |
+| worker（含新 mock 预览回归） | 75 通过                                                                  |
+| server                       | 126 通过，2 个既有跳过                                                   |
+| app                          | 135 文件、757 测试通过                                                   |
+| Rust                         | cargo check 通过；3 个 lib 测试通过                                      |
+| LSP                          | 无错误，仅 4 条可选 async 写法提示                                       |
+| build                        | 通过；原有大 chunk 提示仍存在                                            |
+| Chromium 412×915             | 双服务器同 ID、发送隔离、分屏后台保留、首击切换 owner 通过；无未捕获异常 |
+| Android                      | arm64-v8a 与 armeabi-v7a APK 构建、签名和 16 KiB ZIP 对齐验证通过        |
 
 浏览器验证期间修复一个旧 mock 缺陷：previewSession 永远返回空历史，导致分屏刷新覆盖已持久化内容。现在读真实 mock JSONL 并沿 parentId 构造分支；回归验证分页及预览不写文件。浏览器也改为等待 assistant 持久化完成，不再依赖短暂 live message。
 
@@ -130,9 +130,9 @@ node scripts/probe-installed-plugins.mjs /path/to/plugin-node_modules /tmp/piui-
 
 输出目录：`packages/app/src-tauri/target/apk-delivery-c3751157-p1/`。
 
-| APK | 字节数 | SHA-256 |
-| --- | ---: | --- |
-| piui-android-arm64-v8a-dev-signed.apk | 14317640 | `6703148d658143e236cc582d9a5b2ecc722db9016e50d168445b0db8ad4b40df` |
+| APK                                     |   字节数 | SHA-256                                                            |
+| --------------------------------------- | -------: | ------------------------------------------------------------------ |
+| piui-android-arm64-v8a-dev-signed.apk   | 14317640 | `6703148d658143e236cc582d9a5b2ecc722db9016e50d168445b0db8ad4b40df` |
 | piui-android-armeabi-v7a-dev-signed.apk | 11429962 | `5d8bb4097a7bd9bbcac2f1a28d551ac8c5bada3e2c12ab2f1ab25d5c4e6d5129` |
 
 沿用原 piui-development 开发证书，V2/V3 均验证通过；未生成新密钥、未读取/打印口令值。两个 ABI 先分别保存再构建下一个，避免 Tauri 同名输出覆盖交付物。unsigned、aligned 产物与校验记录同目录保留；旧 APK 目录不变。

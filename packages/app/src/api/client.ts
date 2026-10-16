@@ -25,7 +25,9 @@ export * from './events'
 export async function getCurrentProject(directory?: string, serverId?: string): Promise<HostProject> {
   const workspacePath = await resolveWorkspacePath(directory, serverId)
   if (!workspacePath) throw new Error('No PiUI workspace is available')
-  const git = await (serverId ? getHostGitInfo(workspacePath, undefined, serverId) : getHostGitInfo(workspacePath)).catch(() => null)
+  const git = await (
+    serverId ? getHostGitInfo(workspacePath, undefined, serverId) : getHostGitInfo(workspacePath)
+  ).catch(() => null)
   const path = workspacePath.replace(/\\/g, '/').replace(/\/+$/, '')
   const name = path.split('/').pop() || path
   return {

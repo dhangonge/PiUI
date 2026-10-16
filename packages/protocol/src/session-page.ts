@@ -1,5 +1,5 @@
-import type { EventCursor } from "./envelope.js"
-import type { JsonObject, JsonValue } from "./json.js"
+import type { EventCursor } from './envelope.js'
+import type { JsonObject, JsonValue } from './json.js'
 
 export type SessionHead = {
   sdkVersion: string
@@ -14,7 +14,7 @@ export type SessionHead = {
 export type LiveMessage = {
   id: string
   revision: number
-  phase: "streaming" | "persisting"
+  phase: 'streaming' | 'persisting'
   message: JsonValue
 }
 
@@ -36,9 +36,7 @@ export type EntriesPage = {
  * Full snapshot on every change: sessions present are active; absent = idle.
  */
 export type SessionActivityStatus =
-  | { type: "busy" }
-  | { type: "compacting" }
-  | { type: "retry"; attempt: number; message: string; next: number }
+  { type: 'busy' } | { type: 'compacting' } | { type: 'retry'; attempt: number; message: string; next: number }
 
 export type SessionsActivitySnapshot = {
   sessions: Record<string, SessionActivityStatus>

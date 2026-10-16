@@ -1,7 +1,7 @@
-import { fork, spawn, type ChildProcess } from "node:child_process"
-import { randomUUID } from "node:crypto"
-import { logToFile } from "../logger.ts"
-import type { JsonObject, JsonValue, Problem } from "@piui/protocol"
+import { fork, spawn, type ChildProcess } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { logToFile } from '../logger.ts'
+import type { JsonObject, JsonValue, Problem } from '@piui/protocol'
 import {
   PI_WORKER_HEARTBEAT_INTERVAL_MS,
   PI_WORKER_PROTOCOL_VERSION,
@@ -9,7 +9,7 @@ import {
   type WorkerHello,
   type WorkerHostCall,
   type WorkerMessage,
-} from "@piui/pi-worker"
+} from '@piui/pi-worker'
 
 export interface WorkerClientOptions {
   env?: NodeJS.ProcessEnv
@@ -40,7 +40,7 @@ interface PendingRequest {
  * 心跳看门狗（missLimit ≈ 60s 连续丢心跳）兜底。显式配置的超时
  * （测试注入 / PIUI_WORKER_REQUEST_TIMEOUT_MS）对所有命令仍然生效。
  */
-const TURN_SCOPED_COMMANDS = new Set(["prompt", "sendUserMessage", "compact"])
+const TURN_SCOPED_COMMANDS = new Set(['prompt', 'sendUserMessage', 'compact'])
 
 /**
  * Spawning the SDK worker takes seconds on a loaded machine (cold boot even
@@ -102,17 +102,19 @@ function heartbeatMissLimit(): number {
  * taskkill /T /F（对齐 opencode util/process.ts 的做法）。
  */
 function killProcessTree(child: ChildProcess): void {
-  if (process.platform === "win32" && child.pid) {
+  if (process.platform === 'win32' && child.pid) {
     try {
-      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true })
-        .on("error", () => undefined)
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on(
+        'error',
+        () => undefined,
+      )
       return
     } catch {
       /* fall through to plain kill */
     }
   }
   try {
-    child.kill("SIGKILL")
+    child.kill('SIGKILL')
   } catch {
     /* already gone */
   }
@@ -191,12 +193,14 @@ class WorkerHostCore {
     const child = this.options.selfSpawn
       ? spawnSelfWorker(this.options.env)
       : fork(this.workerEntry, {
-        env: { ...process.env, ...this.options.env },
-        execArgv: this.options.execArgv,
-        stdio: ["ignore", "inherit", "inherit", "ipc"],
-      })
+          env: { ...process.env, ...this.options.env },
+          execArgv: this.options.execArgv,
+          stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+        })
     const handshakeTimeout = setTimeout(() => {
-      this.settleReadyError(Object.assign(new Error("Pi worker handshake timed out"), { code: "WORKER_PROTOCOL_MISMATCH" }))
+      this.settleReadyError(
+        Object.assign(new Error('Pi worker handshake timed out'), { code: 'WORKER_PROTOCOL_MISMATCH' }),
+      )
       // 握不上手就杀掉——否则僵尸进程占着端口，而它的 ready 已拒，
       // 再也不可用
       killProcessTree(this.child)
@@ -204,20 +208,24 @@ class WorkerHostCore {
     handshakeTimeout.unref()
     this.ready.finally(() => clearTimeout(handshakeTimeout)).catch(() => undefined)
 
-    child.on("message", (message: WorkerMessage) => this.handleMessage(message))
-    child.on("exit", (code, signal) => this.handleExit(code, signal))
-    child.on("error", error => this.handleExit(1, null, error))
+    child.on('message', (message: WorkerMessage) => this.handleMessage(message))
+    child.on('exit', (code, signal) => this.handleExit(code, signal))
+    child.on('error', error => this.handleExit(1, null, error))
     return child
   }
 
   private handleMessage(message: WorkerMessage): void {
-    if (!message || typeof message !== "object") return
-    if (message.kind === "hello") {
+    if (!message || typeof message !== 'object') return
+    if (message.kind === 'hello') {
       if (message.workerProtocolVersion !== PI_WORKER_PROTOCOL_VERSION) {
-        this.settleReadyError(Object.assign(
-          new Error(`Pi worker protocol ${message.workerProtocolVersion} does not match ${PI_WORKER_PROTOCOL_VERSION}`),
-          { code: "WORKER_PROTOCOL_MISMATCH" },
-        ))
+        this.settleReadyError(
+          Object.assign(
+            new Error(
+              `Pi worker protocol ${message.workerProtocolVersion} does not match ${PI_WORKER_PROTOCOL_VERSION}`,
+            ),
+            { code: 'WORKER_PROTOCOL_MISMATCH' },
+          ),
+        )
         return
       }
       this.heartbeatMisses = 0
@@ -229,11 +237,11 @@ class WorkerHostCore {
       }
       return
     }
-    if (message.kind === "heartbeat") {
+    if (message.kind === 'heartbeat') {
       this.heartbeatMisses = 0
       return
     }
-    if (message.kind === "response") {
+    if (message.kind === 'response') {
       const pending = this.pending.get(message.id)
       if (!pending) return
       this.pending.delete(message.id)
@@ -243,9 +251,9 @@ class WorkerHostCore {
       else pending.reject(problemToError(message.error))
       return
     }
-    if (message.kind === "event") {
+    if (message.kind === 'event') {
       // 带 sessionId 的事件路由到对应句柄；无归属的全局事件广播给 host 监听者
-      if ("sessionId" in message && message.sessionId) {
+      if ('sessionId' in message && message.sessionId) {
         this.handles.get(message.sessionId)?.dispatchEvent(message)
       } else {
         for (const listener of this.hostEventListeners) {
@@ -258,7 +266,7 @@ class WorkerHostCore {
       }
       return
     }
-    if (message.kind === "hostCall") {
+    if (message.kind === 'hostCall') {
       void this.answerHostCall(message.id, message.generation, message.call)
       return
     }
@@ -266,40 +274,46 @@ class WorkerHostCore {
 
   private async answerHostCall(id: string, generation: string, call: WorkerHostCall): Promise<void> {
     let sessionId: string | undefined
-    if ("sourceSessionId" in call) {
+    if ('sourceSessionId' in call) {
       sessionId = call.sourceSessionId
-    } else if (call.type === "extensionShutdown") {
+    } else if (call.type === 'extensionShutdown') {
       sessionId = call.sessionId
     } else {
       sessionId = this.reservationOwners.get(call.reservationId)
     }
     const handler = sessionId ? this.hostCallHandlers.get(sessionId) : undefined
     if (!handler) {
-      this.child.send({ kind: "hostReply", id, generation, ok: false, error: { code: "CAPABILITY_DISABLED", message: "no host call handler" } })
+      this.child.send({
+        kind: 'hostReply',
+        id,
+        generation,
+        ok: false,
+        error: { code: 'CAPABILITY_DISABLED', message: 'no host call handler' },
+      })
       return
     }
     try {
       await handler(call)
-      if (call.type === "extensionReplacement.reserve") {
+      if (call.type === 'extensionReplacement.reserve') {
         this.reservationOwners.set(call.reservationId, call.sourceSessionId)
       }
-      if (call.type === "extensionReplacement.commit" && call.replacement.cancelled === false) {
+      if (call.type === 'extensionReplacement.commit' && call.replacement.cancelled === false) {
         const handle = this.handles.get(sessionId!)
         if (handle) await handle.dispatchReplacement(call.replacement)
         this.reservationOwners.delete(call.reservationId)
       }
-      if (call.type === "extensionReplacement.abort") {
+      if (call.type === 'extensionReplacement.abort') {
         this.reservationOwners.delete(call.reservationId)
       }
-      this.child.send({ kind: "hostReply", id, generation, ok: true })
+      this.child.send({ kind: 'hostReply', id, generation, ok: true })
     } catch (error) {
       this.child.send({
-        kind: "hostReply",
+        kind: 'hostReply',
         id,
         generation,
         ok: false,
         error: {
-          code: error && typeof error === "object" && "code" in error ? String(error.code) : "INTERNAL",
+          code: error && typeof error === 'object' && 'code' in error ? String(error.code) : 'INTERNAL',
           message: error instanceof Error ? error.message : String(error),
         },
       })
@@ -317,7 +331,7 @@ class WorkerHostCore {
     this.heartbeatTimer = setInterval(() => {
       this.heartbeatMisses += 1
       if (this.heartbeatMisses === warnAt && !this.exitHandled) {
-        const message = `[piui-worker] heartbeat missing for ${this.heartbeatMisses} consecutive ticks (pid=${this.child.pid ?? "?"}); worker may be stuck`
+        const message = `[piui-worker] heartbeat missing for ${this.heartbeatMisses} consecutive ticks (pid=${this.child.pid ?? '?'}); worker may be stuck`
         console.warn(message)
         logToFile(message)
       }
@@ -325,9 +339,13 @@ class WorkerHostCore {
         // 先杀后记账：反过来会有「server 已判死并孵化新 worker，旧进程还
         // 活着」的并存窗口
         killProcessTree(this.child)
-        this.handleExit(null, null, Object.assign(new Error("Pi worker heartbeat timed out"), {
-          code: "SESSION_RUNTIME_CRASHED",
-        }))
+        this.handleExit(
+          null,
+          null,
+          Object.assign(new Error('Pi worker heartbeat timed out'), {
+            code: 'SESSION_RUNTIME_CRASHED',
+          }),
+        )
       }
     }, intervalMs)
     this.heartbeatTimer.unref()
@@ -338,19 +356,21 @@ class WorkerHostCore {
     this.exitHandled = true
     this.resolveExited()
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
-    this.exitError = error ?? (this.disposed
-      ? Object.assign(new Error("Pi worker disposed"), { code: "SESSION_RUNTIME_CRASHED" })
-      : Object.assign(new Error(`Pi worker exited unexpectedly (code ${code} signal ${signal})`), {
-        code: "SESSION_RUNTIME_CRASHED",
-      }))
+    this.exitError =
+      error ??
+      (this.disposed
+        ? Object.assign(new Error('Pi worker disposed'), { code: 'SESSION_RUNTIME_CRASHED' })
+        : Object.assign(new Error(`Pi worker exited unexpectedly (code ${code} signal ${signal})`), {
+            code: 'SESSION_RUNTIME_CRASHED',
+          }))
     // 崩溃/退出必须有可见记录：之前这里完全静默，用户（和日志）无法知道
     // worker 何时、为何死亡，"突然死了"无从排查。
     if (!this.disposed) {
-      const message = `[piui-worker] worker process exited unexpectedly (pid=${this.child.pid ?? "?"} code=${code} signal=${signal}): ${this.exitError.message}`
+      const message = `[piui-worker] worker process exited unexpectedly (pid=${this.child.pid ?? '?'} code=${code} signal=${signal}): ${this.exitError.message}`
       console.error(message)
       logToFile(message)
     } else {
-      const message = `[piui-worker] worker process stopped (pid=${this.child.pid ?? "?"})`
+      const message = `[piui-worker] worker process stopped (pid=${this.child.pid ?? '?'})`
       console.info(message)
       logToFile(message)
     }
@@ -358,9 +378,11 @@ class WorkerHostCore {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer)
       pending.removeAbort?.()
-      pending.reject(Object.assign(new Error("Pi worker crashed before confirming the command result"), {
-        code: "WORKER_RESULT_UNKNOWN",
-      }))
+      pending.reject(
+        Object.assign(new Error('Pi worker crashed before confirming the command result'), {
+          code: 'WORKER_RESULT_UNKNOWN',
+        }),
+      )
     }
     this.pending.clear()
     // 共享进程崩溃 = 所有会话 runtime 一起失效：逐个句柄通知
@@ -395,14 +417,17 @@ class WorkerHostCore {
 
   async open(cwd: string, sessionFile?: string, signal?: AbortSignal): Promise<WorkerSession> {
     await this.ready
-    const data = await this.request({
-      type: "session.open",
-      params: { cwd, sessionFile: sessionFile ?? null },
-    }, signal)
+    const data = await this.request(
+      {
+        type: 'session.open',
+        params: { cwd, sessionFile: sessionFile ?? null },
+      },
+      signal,
+    )
     const opened = data as { sessionId?: string; sessionFile?: string; cwd?: string } | undefined
     const sessionId = opened?.sessionId
     if (!sessionId) {
-      throw Object.assign(new Error("Pi worker session.open returned no session id"), { code: "WORKER_RESULT_UNKNOWN" })
+      throw Object.assign(new Error('Pi worker session.open returned no session id'), { code: 'WORKER_RESULT_UNKNOWN' })
     }
     const handle = new WorkerSession(this, {
       sessionId,
@@ -463,11 +488,11 @@ class WorkerHostCore {
     signal?: AbortSignal,
     sessionId?: string,
   ): Promise<JsonValue | undefined> {
-    if (this.exitHandled) return Promise.reject(this.exitError ?? new Error("Pi worker is not available"))
+    if (this.exitHandled) return Promise.reject(this.exitError ?? new Error('Pi worker is not available'))
     const id = randomUUID()
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {
-        reject(Object.assign(new Error("request aborted"), { code: "REQUEST_ABORTED" }))
+        reject(Object.assign(new Error('request aborted'), { code: 'REQUEST_ABORTED' }))
         return
       }
       const timeoutMs =
@@ -495,9 +520,11 @@ class WorkerHostCore {
               const message = `[piui-worker] command ${command.type} timed out after ${timeoutMs}ms (misses=${this.heartbeatMisses}); discarding command, worker stays`
               console.error(message)
               logToFile(message)
-              reject(Object.assign(new Error(`Pi worker command timed out: ${command.type}`), {
-                code: "WORKER_RESULT_UNKNOWN",
-              }))
+              reject(
+                Object.assign(new Error(`Pi worker command timed out: ${command.type}`), {
+                  code: 'WORKER_RESULT_UNKNOWN',
+                }),
+              )
             }, timeoutMs)
       timer?.unref()
       let pending: PendingRequest
@@ -506,42 +533,47 @@ class WorkerHostCore {
         this.pending.delete(id)
         clearTimeout(timer)
         pending.removeAbort?.()
-        reject(Object.assign(new Error("request aborted"), { code: "REQUEST_ABORTED" }))
+        reject(Object.assign(new Error('request aborted'), { code: 'REQUEST_ABORTED' }))
       }
       pending = { resolve, reject, timer }
       if (signal) {
-        signal.addEventListener("abort", onAbort, { once: true })
-        pending.removeAbort = () => signal.removeEventListener("abort", onAbort)
+        signal.addEventListener('abort', onAbort, { once: true })
+        pending.removeAbort = () => signal.removeEventListener('abort', onAbort)
       }
       this.pending.set(id, pending)
-      void this.ready.then(helloMessage => {
-        if (this.exitHandled || !this.pending.has(id) || signal?.aborted) {
-          if (this.pending.get(id) === pending) this.pending.delete(id)
-          clearTimeout(timer)
-          pending.removeAbort?.()
-          if (this.exitHandled) reject(this.exitError ?? new Error("Pi worker is not available"))
-          return
-        }
-        this.child.send({
-          kind: "request",
-          id,
-          generation: helloMessage.generation,
-          sessionId,
-          command,
-        }, error => {
-          if (!error) return
+      void this.ready
+        .then(helloMessage => {
+          if (this.exitHandled || !this.pending.has(id) || signal?.aborted) {
+            if (this.pending.get(id) === pending) this.pending.delete(id)
+            clearTimeout(timer)
+            pending.removeAbort?.()
+            if (this.exitHandled) reject(this.exitError ?? new Error('Pi worker is not available'))
+            return
+          }
+          this.child.send(
+            {
+              kind: 'request',
+              id,
+              generation: helloMessage.generation,
+              sessionId,
+              command,
+            },
+            error => {
+              if (!error) return
+              this.pending.delete(id)
+              clearTimeout(timer)
+              pending.removeAbort?.()
+              reject(error)
+            },
+          )
+        })
+        .catch(error => {
+          if (this.pending.get(id) !== pending) return
           this.pending.delete(id)
           clearTimeout(timer)
           pending.removeAbort?.()
           reject(error)
         })
-      }).catch(error => {
-        if (this.pending.get(id) !== pending) return
-        this.pending.delete(id)
-        clearTimeout(timer)
-        pending.removeAbort?.()
-        reject(error)
-      })
     })
   }
 
@@ -558,14 +590,17 @@ class WorkerHostCore {
         timer.unref()
       })
       await Promise.race([
-        this.request({ type: "dispose" }, undefined, undefined).then(() => this.exited, () => this.exited),
+        this.request({ type: 'dispose' }, undefined, undefined).then(
+          () => this.exited,
+          () => this.exited,
+        ),
         this.exited,
         timeout,
       ])
     } finally {
       if (!this.exitHandled) {
         killProcessTree(this.child)
-        this.handleExit(null, "SIGKILL")
+        this.handleExit(null, 'SIGKILL')
       }
     }
   }
@@ -596,7 +631,7 @@ export class WorkerSession {
     this.sessionId = identity.sessionId
     this.sessionFile = identity.sessionFile
     this.cwd = identity.cwd
-    this.hostCallHandler = async (call) => {
+    this.hostCallHandler = async call => {
       await this.hostCallHandlerImpl?.(call)
       // replacementListeners 由 core.answerHostCall 在 commit 成功后统一触发
       // （dispatchReplacement），这里只做原始 hostCall 应答。
@@ -649,7 +684,7 @@ export class WorkerSession {
   }
 
   getCwd(): string {
-    return this.cwd ?? ""
+    return this.cwd ?? ''
   }
 
   async command(type: string, params?: JsonObject, signal?: AbortSignal): Promise<JsonValue | undefined> {
@@ -720,7 +755,7 @@ export class WorkerSession {
     this.core.unregisterHandle(this, this.sessionId)
     if (this.core.isGone()) return
     try {
-      await this.core.request({ type: "session.close" }, undefined, this.sessionId)
+      await this.core.request({ type: 'session.close' }, undefined, this.sessionId)
     } catch {
       // runtime 已不可用（进程崩溃/命令失败）：本地清理即可
     }
@@ -747,15 +782,15 @@ function problemToError(problem: Problem): Error {
 function spawnSelfWorker(env?: NodeJS.ProcessEnv): ChildProcess {
   const workerBinary = env?.PIUI_WORKER_BIN ?? process.env.PIUI_WORKER_BIN
   if (workerBinary) {
-    return spawn(workerBinary, ["--pi-worker"], {
+    return spawn(workerBinary, ['--pi-worker'], {
       env: { ...process.env, ...env },
-      stdio: ["ignore", "inherit", "inherit", "ipc"],
+      stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
       windowsHide: true,
     })
   }
-  return spawn(process.execPath, ["--pi-worker"], {
+  return spawn(process.execPath, ['--pi-worker'], {
     env: { ...process.env, ...env },
-    stdio: ["ignore", "inherit", "inherit", "ipc"],
+    stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
     windowsHide: true,
   })
 }

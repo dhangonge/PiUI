@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto"
-import type { CommandEnvelope, CommandRecord, CommandStatus, JsonValue } from "@piui/protocol"
+import { createHash } from 'node:crypto'
+import type { CommandEnvelope, CommandRecord, CommandStatus, JsonValue } from '@piui/protocol'
 
 const MAX_RETAINED_COMMANDS = 512
 
@@ -24,19 +24,16 @@ export class SessionExecutor {
 
   constructor(private readonly onUpdate?: (record: CommandRecord) => void) {}
 
-  submit(
-    envelope: CommandEnvelope,
-    run: () => Promise<JsonValue | undefined>,
-  ): SubmittedCommand {
+  submit(envelope: CommandEnvelope, run: () => Promise<JsonValue | undefined>): SubmittedCommand {
     if (envelope.sessionId && (this.closing.has(envelope.sessionId) || this.closed.has(envelope.sessionId))) {
-      throw Object.assign(new Error("session runtime is closing"), { code: "RUNTIME_CLOSING" })
+      throw Object.assign(new Error('session runtime is closing'), { code: 'RUNTIME_CLOSING' })
     }
-    const requestFingerprint = createHash("sha256").update(JSON.stringify(envelope)).digest("hex")
+    const requestFingerprint = createHash('sha256').update(JSON.stringify(envelope)).digest('hex')
     const existing = this.commands.get(envelope.id)
     if (existing) {
       if (existing.requestFingerprint !== requestFingerprint) {
-        throw Object.assign(new Error("command id already used for another command"), {
-          code: "COMMAND_ALREADY_ACCEPTED",
+        throw Object.assign(new Error('command id already used for another command'), {
+          code: 'COMMAND_ALREADY_ACCEPTED',
         })
       }
       return { record: existing.record, promise: existing.promise, reused: true }
@@ -46,44 +43,44 @@ export class SessionExecutor {
       id: envelope.id,
       type: envelope.type,
       sessionId: envelope.sessionId,
-      status: "accepted",
+      status: 'accepted',
       submittedAt: new Date().toISOString(),
     }
     const crashEpoch = envelope.sessionId ? (this.crashEpochs.get(envelope.sessionId) ?? 0) : 0
-    const promise = Promise.resolve()
-      .then(async () => {
-        if (
-          record.status === "cancelled" ||
-          (envelope.sessionId && (this.crashEpochs.get(envelope.sessionId) ?? 0) !== crashEpoch)
-        ) {
-          throw record.error?.code === "RUNTIME_CLOSING" ? runtimeClosingError() : runtimeCrashError()
-        }
-        record.status = "running"
-        record.startedAt = new Date().toISOString()
+    const promise = Promise.resolve().then(async () => {
+      if (
+        record.status === 'cancelled' ||
+        (envelope.sessionId && (this.crashEpochs.get(envelope.sessionId) ?? 0) !== crashEpoch)
+      ) {
+        throw record.error?.code === 'RUNTIME_CLOSING' ? runtimeClosingError() : runtimeCrashError()
+      }
+      record.status = 'running'
+      record.startedAt = new Date().toISOString()
+      this.emit(record)
+      try {
+        const result = await run()
+        if ((record as CommandRecord).status === 'unknown_after_crash') throw runtimeCrashError()
+        record.status = 'completed'
+        record.result = result
+        record.completedAt = new Date().toISOString()
         this.emit(record)
-        try {
-          const result = await run()
-          if ((record as CommandRecord).status === "unknown_after_crash") throw runtimeCrashError()
-          record.status = "completed"
-          record.result = result
+        return result
+      } catch (error) {
+        if (!isCrashTerminalStatus(record.status)) {
+          record.status = 'failed'
           record.completedAt = new Date().toISOString()
-          this.emit(record)
-          return result
-        } catch (error) {
-          if (!isCrashTerminalStatus(record.status)) {
-            record.status = "failed"
-            record.completedAt = new Date().toISOString()
-            record.error = {
-              code: error && typeof error === "object" && "code" in error
-                ? String(error.code) as NonNullable<CommandRecord["error"]>["code"]
-                : "INTERNAL",
-              message: error instanceof Error ? error.message : String(error),
-            }
-            this.emit(record)
+          record.error = {
+            code:
+              error && typeof error === 'object' && 'code' in error
+                ? (String(error.code) as NonNullable<CommandRecord['error']>['code'])
+                : 'INTERNAL',
+            message: error instanceof Error ? error.message : String(error),
           }
-          throw error
+          this.emit(record)
         }
-      })
+        throw error
+      }
+    })
 
     this.commands.set(envelope.id, { record, promise, requestFingerprint })
     this.pruneFinishedCommands()
@@ -95,7 +92,7 @@ export class SessionExecutor {
     if (this.commands.size <= MAX_RETAINED_COMMANDS) return
     for (const [commandId, entry] of this.commands) {
       if (this.commands.size <= MAX_RETAINED_COMMANDS) return
-      if (entry.record.status === "accepted" || entry.record.status === "running") continue
+      if (entry.record.status === 'accepted' || entry.record.status === 'running') continue
       this.commands.delete(commandId)
     }
   }
@@ -108,17 +105,17 @@ export class SessionExecutor {
     this.crashEpochs.set(sessionId, (this.crashEpochs.get(sessionId) ?? 0) + 1)
     for (const { record } of this.commands.values()) {
       if (record.sessionId !== sessionId) continue
-      if (record.status === "running") {
-        record.status = "unknown_after_crash"
-      } else if (record.status === "accepted") {
-        record.status = "cancelled"
+      if (record.status === 'running') {
+        record.status = 'unknown_after_crash'
+      } else if (record.status === 'accepted') {
+        record.status = 'cancelled'
       } else {
         continue
       }
       record.completedAt = new Date().toISOString()
       record.error = {
-        code: "SESSION_RUNTIME_CRASHED",
-        message: "Pi worker crashed before command completion could be confirmed",
+        code: 'SESSION_RUNTIME_CRASHED',
+        message: 'Pi worker crashed before command completion could be confirmed',
         retryable: true,
       }
       this.emit(record)
@@ -136,26 +133,30 @@ export class SessionExecutor {
   }
 
   hasPendingWork(sessionId: string): boolean {
-    return [...this.commands.values()].some(({ record }) =>
-      record.sessionId === sessionId && (record.status === "accepted" || record.status === "running"))
+    return [...this.commands.values()].some(
+      ({ record }) => record.sessionId === sessionId && (record.status === 'accepted' || record.status === 'running'),
+    )
   }
 
-  close(sessionId: string, options: {
-    interrupt?: () => Promise<void>
-    dispose: () => Promise<void>
-  }): Promise<void> {
+  close(
+    sessionId: string,
+    options: {
+      interrupt?: () => Promise<void>
+      dispose: () => Promise<void>
+    },
+  ): Promise<void> {
     const existing = this.closeFlights.get(sessionId)
     if (existing) return existing
     if (this.closed.has(sessionId)) return Promise.resolve()
 
     this.closing.add(sessionId)
     for (const entry of this.commands.values()) {
-      if (entry.record.sessionId !== sessionId || entry.record.status !== "accepted") continue
-      entry.record.status = "cancelled"
+      if (entry.record.sessionId !== sessionId || entry.record.status !== 'accepted') continue
+      entry.record.status = 'cancelled'
       entry.record.completedAt = new Date().toISOString()
       entry.record.error = {
-        code: "RUNTIME_CLOSING",
-        message: "Session runtime is closing",
+        code: 'RUNTIME_CLOSING',
+        message: 'Session runtime is closing',
       }
       this.emit(entry.record)
     }
@@ -182,15 +183,15 @@ export class SessionExecutor {
 }
 
 function runtimeCrashError(): Error {
-  return Object.assign(new Error("Pi worker crashed before command completion could be confirmed"), {
-    code: "SESSION_RUNTIME_CRASHED",
+  return Object.assign(new Error('Pi worker crashed before command completion could be confirmed'), {
+    code: 'SESSION_RUNTIME_CRASHED',
   })
 }
 
 function runtimeClosingError(): Error {
-  return Object.assign(new Error("Session runtime is closing"), { code: "RUNTIME_CLOSING" })
+  return Object.assign(new Error('Session runtime is closing'), { code: 'RUNTIME_CLOSING' })
 }
 
 function isCrashTerminalStatus(status: CommandStatus): boolean {
-  return status === "unknown_after_crash" || status === "cancelled"
+  return status === 'unknown_after_crash' || status === 'cancelled'
 }

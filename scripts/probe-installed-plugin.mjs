@@ -14,11 +14,22 @@ const sources = manifest.pi?.extensions?.map(entry => path.resolve(packageDir, e
 if (!sources.length) throw new Error('No declared plugin entry points')
 mkdirSync('/fixture/agent', { recursive: true })
 mkdirSync('/fixture/workspace', { recursive: true })
-writeFileSync('/fixture/agent/settings.json', JSON.stringify({ extensions: [...sources, '-builtin:mcp'], packages: [], theme: 'dark' }))
+writeFileSync(
+  '/fixture/agent/settings.json',
+  JSON.stringify({ extensions: [...sources, '-builtin:mcp'], packages: [], theme: 'dark' }),
+)
 await loadPiSdk()
 const session = await RealPiSession.open('/fixture/workspace', undefined, { agentDir: '/fixture/agent' })
 const started = Date.now()
-const report = { name, version: manifest.version, tools: [], commands: [], diagnostics: [], exercise: 'startup only', elapsedMs: 0 }
+const report = {
+  name,
+  version: manifest.version,
+  tools: [],
+  commands: [],
+  diagnostics: [],
+  exercise: 'startup only',
+  elapsedMs: 0,
+}
 try {
   await session.initializeExtensions()
   const registry = session.getRegistry()
@@ -38,38 +49,85 @@ try {
       if (event.type === 'tuiFrame' && event.data.includes('Sandbox task')) rendered = true
     })
     try {
-      const result = await session.invokeTool('todo', { action: 'create', subject: 'Sandbox task', description: 'Isolated test; no personal state' })
+      const result = await session.invokeTool('todo', {
+        action: 'create',
+        subject: 'Sandbox task',
+        description: 'Isolated test; no personal state',
+      })
       // Manual invokeTool intentionally bypasses agent events. Replay the documented
       // post-tool event to exercise the real plugin's lazy widget path as well.
-      await session.runtime.session.extensionRunner.emit({ type: 'tool_execution_end', toolCallId: 'sandbox-fixture', toolName: 'todo', result, isError: false })
+      await session.runtime.session.extensionRunner.emit({
+        type: 'tool_execution_end',
+        toolCallId: 'sandbox-fixture',
+        toolName: 'todo',
+        result,
+        isError: false,
+      })
       const deadline = Date.now() + 3000
       while (!rendered && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20))
-      if (!session.extensionUi.listTuiPanels().some(panel => panel.kind === 'widget') || !rendered) throw new Error('Todo widget did not render its task')
-      if (!session.extensionUi.getStateMirror().patches.some(patch => patch.kind === 'widget' && patch.lines?.some(line => line.includes('Sandbox task')))) throw new Error('Todo widget has no mobile snapshot')
-    } finally { stopFrames() }
+      if (!session.extensionUi.listTuiPanels().some(panel => panel.kind === 'widget') || !rendered)
+        throw new Error('Todo widget did not render its task')
+      if (
+        !session.extensionUi
+          .getStateMirror()
+          .patches.some(patch => patch.kind === 'widget' && patch.lines?.some(line => line.includes('Sandbox task')))
+      )
+        throw new Error('Todo widget has no mobile snapshot')
+    } finally {
+      stopFrames()
+    }
     report.exercise = 'created one isolated task; verified TUI frame and persistent mobile widget snapshot'
   }
   if (name === '@juicesharp/rpiv-ask-user-question') {
     const unsubscribe = session.extensionUi.onEvent(event => {
       if (event.type !== 'requested') return
       const request = event.request
-      session.extensionUi.respond(request.requestId, request.kind === 'confirm' ? { confirmed: false }
-        : { value: request.kind === 'select' ? request.options[0] : '1,2' })
+      session.extensionUi.respond(
+        request.requestId,
+        request.kind === 'confirm'
+          ? { confirmed: false }
+          : { value: request.kind === 'select' ? request.options[0] : '1,2' },
+      )
     })
     try {
-      const result = await session.invokeTool('ask_user_question', { questions: [{ question: 'Select fixture items?', header: 'Fixture', multiSelect: true,
-        options: [{ label: 'One', description: 'First fixture' }, { label: 'Two', description: 'Second fixture' }] }] })
-      if (!JSON.stringify(result).includes('One') || !JSON.stringify(result).includes('Two')) throw new Error('Multiple choices not preserved')
+      const result = await session.invokeTool('ask_user_question', {
+        questions: [
+          {
+            question: 'Select fixture items?',
+            header: 'Fixture',
+            multiSelect: true,
+            options: [
+              { label: 'One', description: 'First fixture' },
+              { label: 'Two', description: 'Second fixture' },
+            ],
+          },
+        ],
+      })
+      if (!JSON.stringify(result).includes('One') || !JSON.stringify(result).includes('Two'))
+        throw new Error('Multiple choices not preserved')
       report.exercise = 'answered an isolated RPC multi-select'
-    } finally { unsubscribe() }
+    } finally {
+      unsubscribe()
+    }
   }
   await new Promise(resolve => setTimeout(resolve, 250))
-  report.diagnostics = session.extensionUi.getStateMirror().patches.filter(patch => patch.kind === 'status' && patch.key.startsWith('piui-host:')).map(patch => patch.text)
+  report.diagnostics = session.extensionUi
+    .getStateMirror()
+    .patches.filter(patch => patch.kind === 'status' && patch.key.startsWith('piui-host:'))
+    .map(patch => patch.text)
   report.panels = session.extensionUi.listTuiPanels().map(panel => panel.kind)
   report.elapsedMs = Date.now() - started
-  if (session.extensionUi.getStateMirror().patches.some(patch => patch.kind === 'status' && patch.key.startsWith('piui-host:error:'))) process.exitCode = 1
+  if (
+    session.extensionUi
+      .getStateMirror()
+      .patches.some(patch => patch.kind === 'status' && patch.key.startsWith('piui-host:error:'))
+  )
+    process.exitCode = 1
 } catch {
-  report.diagnostics = session.extensionUi.getStateMirror().patches.filter(patch => patch.kind === 'status' && patch.key.startsWith('piui-host:')).map(patch => patch.text)
+  report.diagnostics = session.extensionUi
+    .getStateMirror()
+    .patches.filter(patch => patch.kind === 'status' && patch.key.startsWith('piui-host:'))
+    .map(patch => patch.text)
   report.exercise = 'probe action failed; inspect isolated logs'
   process.exitCode = 1
 } finally {

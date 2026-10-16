@@ -90,9 +90,19 @@ export function SettingsSelect<T extends string>({
         className={`${settingsFieldClass} flex items-center justify-between gap-2 text-left ${disabled ? 'opacity-55 cursor-not-allowed' : ''} ${className ?? ''}`}
       >
         <span className={`truncate ${selected ? '' : 'text-text-400'}`}>{selected?.label ?? value ?? ''}</span>
-        <ChevronDownIcon size={14} className={`shrink-0 text-text-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDownIcon
+          size={14}
+          className={`shrink-0 text-text-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+        />
       </button>
-      <DropdownMenu triggerRef={triggerRef} isOpen={isOpen} position="bottom" align="left" width={menuWidth} zIndex={400}>
+      <DropdownMenu
+        triggerRef={triggerRef}
+        isOpen={isOpen}
+        position="bottom"
+        align="left"
+        width={menuWidth}
+        zIndex={400}
+      >
         <div
           id={listboxId}
           ref={menuRef}
@@ -170,7 +180,10 @@ export function SettingsDisclosure({
         onClick={toggle}
         className="group flex items-center gap-1.5 text-[length:var(--fs-xs)] text-text-300 transition-colors hover:text-text-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent-main-100 rounded"
       >
-        <ChevronDownIcon size={13} className={`shrink-0 text-text-400 transition-transform duration-200 ${isOpen ? '' : '-rotate-90'}`} />
+        <ChevronDownIcon
+          size={13}
+          className={`shrink-0 text-text-400 transition-transform duration-200 ${isOpen ? '' : '-rotate-90'}`}
+        />
         <span>{title}</span>
         {count !== undefined && <span className="text-text-500">({count})</span>}
       </button>
@@ -178,9 +191,7 @@ export function SettingsDisclosure({
         id={panelId}
         className={`grid transition-[grid-template-rows] duration-200 ease-out ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
       >
-        <div className="overflow-hidden">
-          {hasOpened ? <div className="pt-2">{children}</div> : null}
-        </div>
+        <div className="overflow-hidden">{hasOpened ? <div className="pt-2">{children}</div> : null}</div>
       </div>
     </div>
   )
@@ -256,7 +267,10 @@ export interface SegmentedControlProps<T extends string> {
 }
 
 export function SegmentedControl<T extends string>({ value, options, onChange }: SegmentedControlProps<T>) {
-  const activeIndex = Math.max(0, options.findIndex(o => o.value === value))
+  const activeIndex = Math.max(
+    0,
+    options.findIndex(o => o.value === value),
+  )
 
   return (
     <div
@@ -268,7 +282,9 @@ export function SegmentedControl<T extends string>({ value, options, onChange }:
           const dir = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1
           const next = (activeIndex + dir + options.length) % options.length
           const accepted = onChange(options[next].value)
-          e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')[accepted === false ? activeIndex : next]?.focus()
+          e.currentTarget
+            .querySelectorAll<HTMLElement>('[role="tab"]')
+            [accepted === false ? activeIndex : next]?.focus()
         }
       }}
     >
@@ -412,9 +428,7 @@ export function SettingsSection({ title, description, actions, children, classNa
           {actions && <div className="shrink-0 flex items-center gap-1.5">{actions}</div>}
         </div>
         {description && (
-          <p className="text-[length:var(--fs-xs)] text-text-300 mt-1 leading-relaxed max-w-[52ch]">
-            {description}
-          </p>
+          <p className="text-[length:var(--fs-xs)] text-text-300 mt-1 leading-relaxed max-w-[52ch]">{description}</p>
         )}
       </div>
       <div className="flex flex-col gap-3">{children}</div>
@@ -442,7 +456,9 @@ export function SettingsSubgroup({
       {title && (
         <div className="mb-2.5 px-0.5">
           <div className="text-[length:var(--fs-sm)] font-medium text-text-100">{title}</div>
-          {description && <div className="text-[length:var(--fs-xs)] text-text-400 mt-0.5 leading-relaxed">{description}</div>}
+          {description && (
+            <div className="text-[length:var(--fs-xs)] text-text-400 mt-0.5 leading-relaxed">{description}</div>
+          )}
         </div>
       )}
       <div className="space-y-2.5">{children}</div>

@@ -33,10 +33,7 @@ export function PiProviderManagement() {
 
   const load = useCallback(async () => {
     try {
-      const [nextProviders, nextRuntime] = await Promise.all([
-        listPiProviders(),
-        inspectModelRuntime(),
-      ])
+      const [nextProviders, nextRuntime] = await Promise.all([listPiProviders(), inspectModelRuntime()])
       setProviders(nextProviders)
       setRuntime(nextRuntime)
       trackManagementProviders(nextProviders.map(provider => provider.id))
@@ -47,7 +44,9 @@ export function PiProviderManagement() {
   }, [])
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void load() }, 0)
+    const timer = window.setTimeout(() => {
+      void load()
+    }, 0)
     return () => window.clearTimeout(timer)
   }, [load, providerRevision])
 
@@ -81,12 +80,12 @@ export function PiProviderManagement() {
   const visibleProviders = useMemo(() => {
     const keyword = query.trim().toLowerCase()
     const filtered = keyword
-      ? providers.filter(provider => provider.name.toLowerCase().includes(keyword) || provider.id.toLowerCase().includes(keyword))
+      ? providers.filter(
+          provider => provider.name.toLowerCase().includes(keyword) || provider.id.toLowerCase().includes(keyword),
+        )
       : providers
     // 已配置的排前面，同组内按名称排序
-    return [...filtered].sort(
-      (a, b) => Number(b.configured) - Number(a.configured) || a.name.localeCompare(b.name),
-    )
+    return [...filtered].sort((a, b) => Number(b.configured) - Number(a.configured) || a.name.localeCompare(b.name))
   }, [providers, query])
 
   return (
@@ -95,12 +94,40 @@ export function PiProviderManagement() {
       description={t('pi.providersDescription')}
       actions={
         <>
-          <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('refresh', async () => { await refreshModelRuntime(); await loadPiModels() })}>{t('common:refresh')}</Button>
-          <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run('reload', async () => { await reloadModelRuntime(); await loadPiModels() })}>{t('common:reload')}</Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy !== null}
+            onClick={() =>
+              void run('refresh', async () => {
+                await refreshModelRuntime()
+                await loadPiModels()
+              })
+            }
+          >
+            {t('common:refresh')}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy !== null}
+            onClick={() =>
+              void run('reload', async () => {
+                await reloadModelRuntime()
+                await loadPiModels()
+              })
+            }
+          >
+            {t('common:reload')}
+          </Button>
         </>
       }
     >
-      {error ? <p role="alert" className="text-[length:var(--fs-xs)] text-danger-100">{error}</p> : null}
+      {error ? (
+        <p role="alert" className="text-[length:var(--fs-xs)] text-danger-100">
+          {error}
+        </p>
+      ) : null}
 
       <p className="text-[length:var(--fs-xs)] text-text-400">
         {runtime
@@ -135,19 +162,68 @@ export function PiProviderManagement() {
           <div key={provider.id} className="space-y-2 rounded-lg border border-border-200 bg-bg-100 p-3">
             <div className="flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-[length:var(--fs-sm)] text-text-200">{provider.name}</span>
-              <span className={`text-[length:var(--fs-xs)] ${provider.configured ? 'text-success-100' : 'text-text-500'}`}>{provider.configured ? t('pi.configured') : t('pi.notConfigured')}</span>
-              {provider.methods.filter(method => method.loginAvailable).map(method => (
-                <Button key={method.type} size="sm" variant="secondary" disabled={busy !== null} isLoading={busy === `auth:${provider.id}:${method.type}`} onClick={() => void beginAuth(provider, method.type)}>{method.name || method.type}</Button>
-              ))}
+              <span
+                className={`text-[length:var(--fs-xs)] ${provider.configured ? 'text-success-100' : 'text-text-500'}`}
+              >
+                {provider.configured ? t('pi.configured') : t('pi.notConfigured')}
+              </span>
+              {provider.methods
+                .filter(method => method.loginAvailable)
+                .map(method => (
+                  <Button
+                    key={method.type}
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy !== null}
+                    isLoading={busy === `auth:${provider.id}:${method.type}`}
+                    onClick={() => void beginAuth(provider, method.type)}
+                  >
+                    {method.name || method.type}
+                  </Button>
+                ))}
             </div>
             <div className="flex flex-wrap gap-1.5">
-              <input type="password" className={`${settingsFieldClass} min-w-44 flex-1`} placeholder={t('pi.apiKeyPlaceholder')} value={apiKeys[provider.id] ?? ''} onChange={event => setApiKeys(keys => ({ ...keys, [provider.id]: event.target.value }))} />
-              <Button size="sm" disabled={busy !== null || !apiKeys[provider.id]?.trim()} onClick={() => void run(`key:${provider.id}`, async () => {
-                await setProviderApiKey(provider.id, apiKeys[provider.id])
-                setApiKeys(keys => ({ ...keys, [provider.id]: '' }))
-              })}>{t('pi.setKey')}</Button>
-              <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void run(`clear:${provider.id}`, () => removeProviderApiKey(provider.id).then(() => undefined))}>{t('pi.clearKey')}</Button>
-              {provider.configured ? <Button size="sm" variant="danger" disabled={busy !== null} onClick={() => void run(`logout:${provider.id}`, () => logoutProvider(provider.id).then(() => undefined))}>{t('pi.logout')}</Button> : null}
+              <input
+                type="password"
+                className={`${settingsFieldClass} min-w-44 flex-1`}
+                placeholder={t('pi.apiKeyPlaceholder')}
+                value={apiKeys[provider.id] ?? ''}
+                onChange={event => setApiKeys(keys => ({ ...keys, [provider.id]: event.target.value }))}
+              />
+              <Button
+                size="sm"
+                disabled={busy !== null || !apiKeys[provider.id]?.trim()}
+                onClick={() =>
+                  void run(`key:${provider.id}`, async () => {
+                    await setProviderApiKey(provider.id, apiKeys[provider.id])
+                    setApiKeys(keys => ({ ...keys, [provider.id]: '' }))
+                  })
+                }
+              >
+                {t('pi.setKey')}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy !== null}
+                onClick={() =>
+                  void run(`clear:${provider.id}`, () => removeProviderApiKey(provider.id).then(() => undefined))
+                }
+              >
+                {t('pi.clearKey')}
+              </Button>
+              {provider.configured ? (
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={busy !== null}
+                  onClick={() =>
+                    void run(`logout:${provider.id}`, () => logoutProvider(provider.id).then(() => undefined))
+                  }
+                >
+                  {t('pi.logout')}
+                </Button>
+              ) : null}
             </div>
             {provider.status != null ? (
               <SettingsDisclosure title={t('pi.authStatus')}>

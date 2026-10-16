@@ -16,10 +16,15 @@ import {
   GitBranchIcon,
   PuzzleIcon,
   SettingsIcon,
-  TerminalIcon
+  TerminalIcon,
 } from './Icons'
 import { layoutStore, useLayoutStore, type PanelTab, type PanelPosition, type PanelTabType } from '../store/layoutStore'
-import { getInternalDragSnapshot, startInternalDrag, subscribeInternalDrag, subscribeInternalDrop } from '../lib/internalDragCore'
+import {
+  getInternalDragSnapshot,
+  startInternalDrag,
+  subscribeInternalDrag,
+  subscribeInternalDrop,
+} from '../lib/internalDragCore'
 import { useDragEdgeAutoScroll } from '../hooks/useDragEdgeAutoScroll'
 import { IconButton } from './ui/IconButton'
 import { usePiCapabilities } from '../pi/capabilities'
@@ -47,7 +52,7 @@ const TAB_ICONS: Record<PanelTabType, React.ReactNode> = {
   'session-controls': <SettingsIcon size={12} />,
   skill: <TeachIcon size={12} />,
   extensions: <PuzzleIcon size={12} />,
-  terminal: <TerminalIcon size={12} />
+  terminal: <TerminalIcon size={12} />,
 }
 
 // Tab 显示名称
@@ -90,7 +95,7 @@ export const PanelContainer = memo(function PanelContainer({
   forceOpen = false,
   onNewTerminal,
   onCloseTerminal,
-  onRenameTerminal
+  onRenameTerminal,
 }: PanelContainerProps) {
   const { t } = useTranslation(['components', 'common'])
   const capabilities = usePiCapabilities()
@@ -127,7 +132,7 @@ export const PanelContainer = memo(function PanelContainer({
   const tabsContainerRef = useRef<HTMLDivElement>(null)
 
   useDragEdgeAutoScroll(tabsContainerRef, {
-    payloadKind: 'panel-tab'
+    payloadKind: 'panel-tab',
   })
 
   // Add 菜单状态
@@ -193,7 +198,7 @@ export const PanelContainer = memo(function PanelContainer({
     (tabId: string) => {
       layoutStore.setActiveTab(position, tabId)
     },
-    [position]
+    [position],
   )
 
   // 关闭 tab
@@ -205,7 +210,7 @@ export const PanelContainer = memo(function PanelContainer({
       }
       layoutStore.removeTab(tabId)
     },
-    [onCloseTerminal]
+    [onCloseTerminal],
   )
 
   const beginRename = useCallback(
@@ -216,7 +221,7 @@ export const PanelContainer = memo(function PanelContainer({
       setEditingTabId(tab.id)
       setEditingValue(tab.customTitle ?? tab.title ?? '')
     },
-    [manualTerminalTitles, position]
+    [manualTerminalTitles, position],
   )
 
   // 编辑态保护：手动命名关闭或对应 tab 消失时退出编辑
@@ -261,7 +266,7 @@ export const PanelContainer = memo(function PanelContainer({
         } else {
           layoutStore.updateTerminalTab(tab.id, {
             title: nextTitle,
-            customTitle: nextTitle
+            customTitle: nextTitle,
           })
         }
       } catch (error) {
@@ -270,7 +275,7 @@ export const PanelContainer = memo(function PanelContainer({
         cancelRename()
       }
     },
-    [cancelRename, editingValue, onRenameTerminal]
+    [cancelRename, editingValue, onRenameTerminal],
   )
 
   // 右键菜单
@@ -300,7 +305,9 @@ export const PanelContainer = memo(function PanelContainer({
       }
 
       setDraggedId(active.payload.tabId)
-      const target = document.elementFromPoint(active.current.x, active.current.y)?.closest<HTMLElement>('[data-panel-tab-id]')
+      const target = document
+        .elementFromPoint(active.current.x, active.current.y)
+        ?.closest<HTMLElement>('[data-panel-tab-id]')
       const targetId = target?.dataset.panelTabId
       setDragOverId(targetId && targetId !== active.payload.tabId ? targetId : null)
     })
@@ -309,7 +316,9 @@ export const PanelContainer = memo(function PanelContainer({
   useEffect(() => {
     return subscribeInternalDrop(event => {
       if (event.payload.kind !== 'panel-tab' || event.payload.position !== position) return
-      const target = document.elementFromPoint(event.point.x, event.point.y)?.closest<HTMLElement>('[data-panel-tab-id]')
+      const target = document
+        .elementFromPoint(event.point.x, event.point.y)
+        ?.closest<HTMLElement>('[data-panel-tab-id]')
       const targetId = target?.dataset.panelTabId
       if (targetId && targetId !== event.payload.tabId) {
         layoutStore.reorderTabs(position, event.payload.tabId, targetId)
@@ -332,7 +341,11 @@ export const PanelContainer = memo(function PanelContainer({
         className={`${position === 'right' ? 'mobile-safe-topbar-14' : ''} flex items-center justify-between px-3 z-20 bg-bg-100 relative shrink-0`}
       >
         {/* Tabs Container - 水平滚动 */}
-        <div ref={tabsContainerRef} onWheel={handleWheel} className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-none">
+        <div
+          ref={tabsContainerRef}
+          onWheel={handleWheel}
+          className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-none"
+        >
           {tabs.map(tab => (
             <PanelTabButton
               key={tab.id}
@@ -372,7 +385,7 @@ export const PanelContainer = memo(function PanelContainer({
                   setAddMenuPos({
                     x: align === 'left' ? rect.left : rect.right,
                     y: rect.bottom + 4,
-                    align
+                    align,
                   })
                 }
               }}
@@ -430,7 +443,7 @@ export const PanelContainer = memo(function PanelContainer({
               {otherPanelLabel}
             </button>
           </div>,
-          document.body
+          document.body,
         )}
 
       {/* Add Menu - Portal */}
@@ -442,7 +455,7 @@ export const PanelContainer = memo(function PanelContainer({
             style={{
               top: addMenuPos.y,
               left: addMenuPos.align === 'left' ? addMenuPos.x : undefined,
-              right: addMenuPos.align === 'right' ? window.innerWidth - addMenuPos.x : undefined
+              right: addMenuPos.align === 'right' ? window.innerWidth - addMenuPos.x : undefined,
             }}
           >
             {onNewTerminal && (
@@ -536,7 +549,7 @@ export const PanelContainer = memo(function PanelContainer({
               {t('panelContainer.extensions')}
             </button>
           </div>,
-          document.body
+          document.body,
         )}
     </>
   )
@@ -583,7 +596,7 @@ const PanelTabButton = memo(function PanelTabButton({
   editInputRef,
   onEditingValueChange,
   onEditSubmit,
-  onEditCancel
+  onEditCancel,
 }: PanelTabButtonProps) {
   const { t } = useTranslation(['components', 'common'])
   const statusColor =
@@ -592,7 +605,7 @@ const PanelTabButton = memo(function PanelTabButton({
           connecting: 'bg-warning-100',
           connected: 'bg-success-100',
           disconnected: 'bg-text-500',
-          exited: 'bg-danger-100'
+          exited: 'bg-danger-100',
         }[tab.status]
       : null
 
@@ -603,7 +616,7 @@ const PanelTabButton = memo(function PanelTabButton({
       if (target.closest('button, input')) return
       startInternalDrag(event, { kind: 'panel-tab', position, tabId: tab.id })
     },
-    [isEditing, position, tab.id]
+    [isEditing, position, tab.id],
   )
 
   const handleMiddleClose = useCallback(
@@ -613,7 +626,7 @@ const PanelTabButton = memo(function PanelTabButton({
       event.stopPropagation()
       onClose(event)
     },
-    [onClose]
+    [onClose],
   )
 
   return (

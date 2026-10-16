@@ -554,20 +554,14 @@ export function FolderRecentList({
               const nextId = index < displayOrder.length - 1 ? displayOrder[index + 1] : null
               const nextProjectChecked = !!nextId && (selectedProjectIds?.has(nextId) ?? false)
               // 折叠时：和相邻文件夹拼接；展开时：和首条 session 的拼接在 section 内部处理
-              const prevExpanded =
-                !!prevId && !isDragging && expandedProjectIds.includes(prevId)
+              const prevExpanded = !!prevId && !isDragging && expandedProjectIds.includes(prevId)
               const projectCheckedPrev =
                 isEditMode &&
                 isProjectChecked &&
                 !!prevId &&
                 !prevExpanded &&
                 (selectedProjectIds?.has(prevId) ?? false)
-              const projectCheckedNext =
-                isEditMode &&
-                isProjectChecked &&
-                !!nextId &&
-                !isExpanded &&
-                nextProjectChecked
+              const projectCheckedNext = isEditMode && isProjectChecked && !!nextId && !isExpanded && nextProjectChecked
               return (
                 <FolderRecentSection
                   key={project.id}
@@ -693,45 +687,42 @@ function PinnedFolderSection({
         <div onTouchStart={e => e.stopPropagation()}>
           {sessions.map((session, index) => {
             const isChecked = selectedSessionIds?.has(session.id) ?? false
-            const prevChecked =
-              isEditMode && index > 0 && (selectedSessionIds?.has(sessions[index - 1].id) ?? false)
+            const prevChecked = isEditMode && index > 0 && (selectedSessionIds?.has(sessions[index - 1].id) ?? false)
             const nextChecked =
-              isEditMode &&
-              index < sessions.length - 1 &&
-              (selectedSessionIds?.has(sessions[index + 1].id) ?? false)
+              isEditMode && index < sessions.length - 1 && (selectedSessionIds?.has(sessions[index + 1].id) ?? false)
             return (
-            <div key={session.id}>
-              <SessionListItem
-                session={session}
-                isSelected={session.id === selectedSessionId}
-                onSelect={() => onSelectSession(session)}
-                onRename={newTitle => onRenameSession(session, newTitle)}
-                onDelete={() => onRequestDeleteSession({ session, removeLocal: () => {} })}
-                preferTouchUi={preferTouchUi}
-                density="minimal"
-                showDirectory={false}
-                isEditMode={isEditMode}
-                isChecked={isChecked}
-                checkedPrev={prevChecked}
-                checkedNext={nextChecked}
-                onToggleCheck={
-                  onToggleSessionSelection ? options => onToggleSessionSelection(session.id, options) : undefined
-                }
-              />
-              {onSelectChildSession &&
-                (expandedChildSessionIds?.has(session.id) || inlineChildSessions?.has(session.id)) && (
-                  <SessionChildrenSlot
-                    parentSession={session}
-                    selectedSessionId={selectedSessionId}
-                    fetchAll={expandedChildSessionIds?.has(session.id)}
-                    children={inlineChildSessions?.get(session.id)}
-                    onSelect={onSelectChildSession}
-                    isEditMode={isEditMode}
-                    selectedSessionIds={selectedSessionIds}
-                    onToggleSessionSelection={onToggleSessionSelection}
-                  />
-                )}
-            </div>
+              <div key={session.id}>
+                <SessionListItem
+                  session={session}
+                  isSelected={session.id === selectedSessionId}
+                  onSelect={() => onSelectSession(session)}
+                  onRename={newTitle => onRenameSession(session, newTitle)}
+                  onDelete={() => onRequestDeleteSession({ session, removeLocal: () => {} })}
+                  preferTouchUi={preferTouchUi}
+                  density="minimal"
+                  showDirectory={false}
+                  isEditMode={isEditMode}
+                  isChecked={isChecked}
+                  checkedPrev={prevChecked}
+                  checkedNext={nextChecked}
+                  onToggleCheck={
+                    onToggleSessionSelection ? options => onToggleSessionSelection(session.id, options) : undefined
+                  }
+                />
+                {onSelectChildSession &&
+                  (expandedChildSessionIds?.has(session.id) || inlineChildSessions?.has(session.id)) && (
+                    <SessionChildrenSlot
+                      parentSession={session}
+                      selectedSessionId={selectedSessionId}
+                      fetchAll={expandedChildSessionIds?.has(session.id)}
+                      children={inlineChildSessions?.get(session.id)}
+                      onSelect={onSelectChildSession}
+                      isEditMode={isEditMode}
+                      selectedSessionIds={selectedSessionIds}
+                      onToggleSessionSelection={onToggleSessionSelection}
+                    />
+                  )}
+              </div>
             )
           })}
           {unavailableEntries.map(entry => (
@@ -950,11 +941,7 @@ function FolderRecentSection({
             projectCheckedPrev,
             folderCheckedNext,
             'md',
-          )} ${
-            isEditMode && isProjectChecked
-              ? 'bg-bg-200/80'
-              : 'hover:bg-bg-200/40'
-          }`}
+          )} ${isEditMode && isProjectChecked ? 'bg-bg-200/80' : 'hover:bg-bg-200/40'}`}
           {...(isEditMode
             ? {
                 'data-selection-kind': 'project' as const,
@@ -1013,7 +1000,11 @@ function FolderRecentSection({
                 onToggle()
               }}
               className="shrink-0 flex items-center justify-center w-6 h-6 mr-1 rounded-md text-text-500 hover:text-text-200 hover:bg-bg-300/50 transition-colors"
-              title={isExpanded ? t('common:collapse', { defaultValue: 'Collapse' }) : t('common:expand', { defaultValue: 'Expand' })}
+              title={
+                isExpanded
+                  ? t('common:collapse', { defaultValue: 'Collapse' })
+                  : t('common:expand', { defaultValue: 'Expand' })
+              }
               aria-expanded={isExpanded}
             >
               <ChevronDownIcon
@@ -1086,9 +1077,7 @@ function FolderRecentSection({
                     // 上：前一条 session，或（首条时）父文件夹已选中
                     const prevChecked =
                       isEditMode &&
-                      (index > 0
-                        ? (selectedSessionIds?.has(visibleSessions[index - 1].id) ?? false)
-                        : isProjectChecked)
+                      (index > 0 ? (selectedSessionIds?.has(visibleSessions[index - 1].id) ?? false) : isProjectChecked)
                     // 下：下一条 session，或（末条时）下一个文件夹已选中
                     const nextChecked =
                       isEditMode &&
@@ -1096,40 +1085,40 @@ function FolderRecentSection({
                         ? (selectedSessionIds?.has(visibleSessions[index + 1].id) ?? false)
                         : nextProjectChecked)
                     return (
-                    <div key={session.id}>
-                      <SessionListItem
-                        session={session}
-                        isSelected={session.id === selectedSessionId}
-                        onSelect={() => onSelectSession(session)}
-                        onRename={newTitle => handleRename(session.id, newTitle)}
-                        onDelete={() => handleDelete(session.id)}
-                        preferTouchUi={preferTouchUi}
-                        density="minimal"
-                        showDirectory={false}
-                        isEditMode={isEditMode}
-                        isChecked={isChecked}
-                        checkedPrev={prevChecked}
-                        checkedNext={nextChecked}
-                        onToggleCheck={
-                          onToggleSessionSelection
-                            ? options => onToggleSessionSelection(session.id, options)
-                            : undefined
-                        }
-                      />
-                      {onSelectChildSession &&
-                        (expandedChildSessionIds?.has(session.id) || inlineChildSessions?.has(session.id)) && (
-                          <SessionChildrenSlot
-                            parentSession={session}
-                            selectedSessionId={selectedSessionId}
-                            fetchAll={expandedChildSessionIds?.has(session.id)}
-                            children={inlineChildSessions?.get(session.id)}
-                            onSelect={onSelectChildSession}
-                            isEditMode={isEditMode}
-                            selectedSessionIds={selectedSessionIds}
-                            onToggleSessionSelection={onToggleSessionSelection}
-                          />
-                        )}
-                    </div>
+                      <div key={session.id}>
+                        <SessionListItem
+                          session={session}
+                          isSelected={session.id === selectedSessionId}
+                          onSelect={() => onSelectSession(session)}
+                          onRename={newTitle => handleRename(session.id, newTitle)}
+                          onDelete={() => handleDelete(session.id)}
+                          preferTouchUi={preferTouchUi}
+                          density="minimal"
+                          showDirectory={false}
+                          isEditMode={isEditMode}
+                          isChecked={isChecked}
+                          checkedPrev={prevChecked}
+                          checkedNext={nextChecked}
+                          onToggleCheck={
+                            onToggleSessionSelection
+                              ? options => onToggleSessionSelection(session.id, options)
+                              : undefined
+                          }
+                        />
+                        {onSelectChildSession &&
+                          (expandedChildSessionIds?.has(session.id) || inlineChildSessions?.has(session.id)) && (
+                            <SessionChildrenSlot
+                              parentSession={session}
+                              selectedSessionId={selectedSessionId}
+                              fetchAll={expandedChildSessionIds?.has(session.id)}
+                              children={inlineChildSessions?.get(session.id)}
+                              onSelect={onSelectChildSession}
+                              isEditMode={isEditMode}
+                              selectedSessionIds={selectedSessionIds}
+                              onToggleSessionSelection={onToggleSessionSelection}
+                            />
+                          )}
+                      </div>
                     )
                   })}
 

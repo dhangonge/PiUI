@@ -4,19 +4,15 @@ import { FileExplorer } from './FileExplorer'
 import type { DesktopPlatform } from '../utils/tauri'
 import { FullscreenProvider } from '../contexts'
 
-const {
-  useFileExplorerMock,
-  isTauriMock,
-  isTauriMobileMock,
-  getDesktopPlatformMock,
-  revealItemInDirMock,
-} = vi.hoisted(() => ({
-  useFileExplorerMock: vi.fn(),
-  isTauriMock: vi.fn(() => true),
-  isTauriMobileMock: vi.fn(() => false),
-  getDesktopPlatformMock: vi.fn((): DesktopPlatform => 'windows'),
-  revealItemInDirMock: vi.fn(async (_path: string | string[]) => {}),
-}))
+const { useFileExplorerMock, isTauriMock, isTauriMobileMock, getDesktopPlatformMock, revealItemInDirMock } = vi.hoisted(
+  () => ({
+    useFileExplorerMock: vi.fn(),
+    isTauriMock: vi.fn(() => true),
+    isTauriMobileMock: vi.fn(() => false),
+    getDesktopPlatformMock: vi.fn((): DesktopPlatform => 'windows'),
+    revealItemInDirMock: vi.fn(async (_path: string | string[]) => {}),
+  }),
+)
 
 vi.mock('../hooks', () => ({
   useFileExplorer: (options?: unknown) => useFileExplorerMock(options),
@@ -50,8 +46,22 @@ vi.mock('../lib/internalDragCore', () => ({
 }))
 
 vi.mock('./CodePreview', () => ({
-  CodePreview: ({ code, readOnly, onChange }: { code: string; readOnly?: boolean; onChange?: (value: string) => void }) =>
-    <textarea aria-label="code editor" value={code} readOnly={readOnly} onChange={event => onChange?.(event.target.value)} />,
+  CodePreview: ({
+    code,
+    readOnly,
+    onChange,
+  }: {
+    code: string
+    readOnly?: boolean
+    onChange?: (value: string) => void
+  }) => (
+    <textarea
+      aria-label="code editor"
+      value={code}
+      readOnly={readOnly}
+      onChange={event => onChange?.(event.target.value)}
+    />
+  ),
 }))
 
 describe('FileExplorer', () => {
@@ -87,13 +97,7 @@ describe('FileExplorer', () => {
 
   it('reveals the selected file in the system explorer from the context menu', async () => {
     render(
-      <FileExplorer
-        panelTabId="files-1"
-        directory="C:/repo"
-        previewFile={null}
-        previewFiles={[]}
-        position="right"
-      />,
+      <FileExplorer panelTabId="files-1" directory="C:/repo" previewFile={null} previewFiles={[]} position="right" />,
     )
 
     fireEvent.contextMenu(screen.getByRole('button', { name: 'app.ts' }))
@@ -108,13 +112,7 @@ describe('FileExplorer', () => {
     isTauriMock.mockReturnValue(false)
 
     render(
-      <FileExplorer
-        panelTabId="files-1"
-        directory="C:/repo"
-        previewFile={null}
-        previewFiles={[]}
-        position="right"
-      />,
+      <FileExplorer panelTabId="files-1" directory="C:/repo" previewFile={null} previewFiles={[]} position="right" />,
     )
 
     fireEvent.contextMenu(screen.getByRole('button', { name: 'app.ts' }))
@@ -125,13 +123,7 @@ describe('FileExplorer', () => {
     getDesktopPlatformMock.mockReturnValue('macos')
 
     render(
-      <FileExplorer
-        panelTabId="files-1"
-        directory="C:/repo"
-        previewFile={null}
-        previewFiles={[]}
-        position="right"
-      />,
+      <FileExplorer panelTabId="files-1" directory="C:/repo" previewFile={null} previewFiles={[]} position="right" />,
     )
 
     fireEvent.contextMenu(screen.getByRole('button', { name: 'app.ts' }))

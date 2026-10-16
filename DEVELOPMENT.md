@@ -75,40 +75,42 @@ Host 区也使用 registry/dispatch，不保留 workspace/files/git REST shortcu
 每个 host capability 由 `registerHostCapability` 显式注册，返回字段包括：`name/domain/description/paramsSchema/resultSchema/queue/idempotent/mutatesWorkspace/emits`。
 
 扩展自省：
+
 - `POST /api/v1/pi/sessions/:id/commands/registry.get` → tools(含 JSON Schema)/commands/extensions/eventHandlers，运行时枚举
 - `POST /api/v1/pi/sessions/:id/commands/invokeTool` + `{name, arguments}` → 直接执行扩展 tool(ctx.ui 交互走 extension.ui 桥)
 - `POST /api/v1/pi/sessions/:id/commands/invokeCommand` + `{name, args}` → 执行扩展 slash command
 
 ## 包职责
 
-| 包 | 职责 |
-|---|---|
-| `packages/protocol` | 信封/命令名/宿主类型。**只有 type 没有 interface**(JsonValue 兼容需要）；不声明 Pi 数据结构 |
-| `packages/pi-worker/src/runtime/` | real/mock runtime、catalog、pagination、extension UI、provider auth；唯一直接碰 Pi SDK runtime 的实现区 |
-| `packages/pi-worker/src/` | worker 框架：sdk-host、IPC、命令表、参数校验、scheduler、entry |
-| `packages/server/src/pi/` | Pi 面分发：worker-client、supervisor、session-host、executor、lease |
-| `packages/server/src/host/` | host 面能力：workspace 注册/监听、files、file-search、git、auth/security/path-safety |
-| `packages/server/src/` | HTTP/WS/event-hub/shutdown/index 组装层 |
-| `packages/app` | 客户端（React + Tauri）：`src/pi` 消费协议、`src/features/pi-chat` 渲染 Pi 原生数据；`src/features/chat` 是上游 OCUI 视觉壳（GPL） |
+| 包                                | 职责                                                                                                                               |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/protocol`               | 信封/命令名/宿主类型。**只有 type 没有 interface**(JsonValue 兼容需要）；不声明 Pi 数据结构                                        |
+| `packages/pi-worker/src/runtime/` | real/mock runtime、catalog、pagination、extension UI、provider auth；唯一直接碰 Pi SDK runtime 的实现区                            |
+| `packages/pi-worker/src/`         | worker 框架：sdk-host、IPC、命令表、参数校验、scheduler、entry                                                                     |
+| `packages/server/src/pi/`         | Pi 面分发：worker-client、supervisor、session-host、executor、lease                                                                |
+| `packages/server/src/host/`       | host 面能力：workspace 注册/监听、files、file-search、git、auth/security/path-safety                                               |
+| `packages/server/src/`            | HTTP/WS/event-hub/shutdown/index 组装层                                                                                            |
+| `packages/app`                    | 客户端（React + Tauri）：`src/pi` 消费协议、`src/features/pi-chat` 渲染 Pi 原生数据；`src/features/chat` 是上游 OCUI 视觉壳（GPL） |
 
 ## 工程规范
 
-| 文件 | 作用 |
-|---|---|
-| `tsconfig.base.json` | 四个包共享的 TS 基线（strict、noUnusedLocals/Parameters、noImplicitOverride…）。只放所有包都同意的选项；`module`/`moduleResolution`/`lib`/`jsx`/`erasableSyntaxOnly` 由各包自己定 |
-| `.editorconfig` | 行尾 LF、UTF-8、缩进 2 空格（Kotlin/Java 4 空格） |
-| `eslint.config.js`（根） | Node 侧包（protocol / pi-worker / server）+ `scripts/` 的 lint 基线 |
-| `packages/app/eslint.config.js` | app 自己的配置（React hooks / refresh 规则），继承同样的 warn 策略 |
-| `packages/app/.prettierrc.json` | prettier 目前只覆盖 app（Node 侧包是分号风格，单独迁移） |
-| `docs/app-architecture.md` | app 的分层、依赖方向、新代码放哪、单文件行数上限（配 `npm run check:size`） |
-| `scripts/node-coverage.mjs` | Node 侧三包的覆盖率阈值 + 度量范围校验（见「工程规范」下的门禁表） |
+| 文件                            | 作用                                                                                                                                                                              |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tsconfig.base.json`            | 四个包共享的 TS 基线（strict、noUnusedLocals/Parameters、noImplicitOverride…）。只放所有包都同意的选项；`module`/`moduleResolution`/`lib`/`jsx`/`erasableSyntaxOnly` 由各包自己定 |
+| `.editorconfig`                 | 行尾 LF、UTF-8、缩进 2 空格（Kotlin/Java 4 空格）                                                                                                                                 |
+| `eslint.config.js`（根）        | Node 侧包（protocol / pi-worker / server）+ `scripts/` 的 lint 基线                                                                                                               |
+| `packages/app/eslint.config.js` | app 自己的配置（React hooks / refresh 规则），继承同样的 warn 策略                                                                                                                |
+| `.prettierrc.json`（根）        | 全仓唯一格式配置（无分号、单引号、printWidth 120）；`packages/app` 不再有自己的副本，`npm run format:check` 进 validate                                                           |
+| `docs/app-architecture.md`      | app 的分层、依赖方向、新代码放哪、单文件行数上限（配 `npm run check:size`）                                                                                                       |
+| `scripts/node-coverage.mjs`     | Node 侧三包的覆盖率阈值 + 度量范围校验（见「工程规范」下的门禁表）                                                                                                                |
 
 门禁入口：
 
 ```bash
-npm run validate        # check:docs → conformance:sdk:check → check:size → typecheck → lint → test → build
+npm run validate        # check:docs → conformance:sdk:check → check:size → format:check → typecheck → lint → test → build
 npm run check:docs      # 文档里声明的版本基线/CHANGELOG/workspace 版本一致性
 npm run check:size      # packages/*/src 下单文件 1000 行上限（基线见 scripts/file-size-baseline.json）
+npm run format:check    # prettier 全仓校验（`npm run format` 就地修复）
 npm run lint            # app（eslint）+ 根（protocol/pi-worker/server/scripts）
 npm run test:coverage   # 同 test，另收两套覆盖率并按门槛判定（见下）
 npm run smoke           # 需先 build：两个 Chromium 冒烟（timeline 顺序 + 双后端移动 UI）
@@ -116,12 +118,14 @@ npm run smoke           # 需先 build：两个 Chromium 冒烟（timeline 顺�
 
 覆盖率两套门禁，同一开关 `--coverage` / `PIUI_TEST_COVERAGE=1` 一起开：
 
-| 范围 | 工具 | 门槛位置 |
-|---|---|---|
-| `packages/app` | vitest + coverage-v8 | `packages/app/vitest.config.ts`（include 全量 src，阈值 43/35/40/45） |
-| protocol / pi-worker / server | node `--test` 内置覆盖率 | `scripts/node-coverage.mjs`（每包一组阈值） |
+| 范围                          | 工具                     | 门槛位置                                                              |
+| ----------------------------- | ------------------------ | --------------------------------------------------------------------- |
+| `packages/app`                | vitest + coverage-v8     | `packages/app/vitest.config.ts`（include 全量 src，阈值 43/35/40/45） |
+| protocol / pi-worker / server | node `--test` 内置覆盖率 | `scripts/node-coverage.mjs`（每包一组阈值）                           |
 
 Node 侧那份还有一道额外的检查：Node 22 的内置覆盖率**只报告被测试加载过的文件**（`--test-coverage-include-all` 要 Node 25+），所以脚本把「应该被度量」的文件集合写明，跑完逐一核对——新加了源文件但没测试加载它会直接失败，不会偷偷把分母缩小。排除项（入口、barrel、纯类型）都写在脚本里并附理由。
+
+格式：prettier 配置在根（`.prettierrc.json` + `.prettierignore`），一个配置覆盖四个包、`scripts/`、文档和 workflow。`packages/app/CHANGELOG.opencodeui.md`、`README.opencodeui.md` 是上游冻结快照，在 `.prettierignore` 里排除，保持原始字节。
 
 CI：`.github/workflows/ci.yml` 在 ubuntu + windows 跑 `npm run validate`；ubuntu 那支带 `PIUI_TEST_COVERAGE=1`（避免两支重复跑一遍测试）+ Chromium 冒烟；`tauri-check` job 跑 `cargo clippy --all-targets -- -D warnings` + `cargo test --lib`。触发条件是 push 到 `main`、`v*` tag、以及所有 PR。
 

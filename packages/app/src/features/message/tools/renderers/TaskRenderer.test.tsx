@@ -14,7 +14,11 @@ function renderHeader(options: { sessionId?: string; parentId?: string } = { ses
 
   render(
     <SessionNavigationContext.Provider
-      value={{ navigateToSession, currentSessionId: options.parentId ?? 'parent-session', currentDirectory: 'E:\\workspace' }}
+      value={{
+        navigateToSession,
+        currentSessionId: options.parentId ?? 'parent-session',
+        currentDirectory: 'E:\\workspace',
+      }}
     >
       <TaskHeader
         agentType="explore"

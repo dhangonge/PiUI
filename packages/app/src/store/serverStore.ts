@@ -96,14 +96,16 @@ function formatExceptionDiagnostics(url: string, err: unknown): string {
   if (!(err instanceof Error)) return `Request: GET ${url}\n\nError: ${String(err)}`
 
   const cause = 'cause' in err && err.cause !== undefined ? `\n\nCause:\n${String(err.cause)}` : ''
-  return [
-    `Request: GET ${url}`,
-    `Error name: ${err.name}`,
-    `Message: ${err.message}`,
-    err.stack ? `Stack:\n${err.stack}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n\n') + cause
+  return (
+    [
+      `Request: GET ${url}`,
+      `Error name: ${err.name}`,
+      `Message: ${err.message}`,
+      err.stack ? `Stack:\n${err.stack}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n') + cause
+  )
 }
 
 const STORAGE_KEY = 'piui-servers'
@@ -171,7 +173,8 @@ class ServerStore {
       // 回退到 localStorage（新窗口首次打开时继承上次默认）
       const preferred = localStorage.getItem(DEFAULT_SERVER_KEY)
       this.defaultServerId = preferred && this.servers.some(server => server.id === preferred) ? preferred : null
-      const activeId = this.defaultServerId ?? sessionStorage.getItem(ACTIVE_SERVER_KEY) ?? localStorage.getItem(ACTIVE_SERVER_KEY)
+      const activeId =
+        this.defaultServerId ?? sessionStorage.getItem(ACTIVE_SERVER_KEY) ?? localStorage.getItem(ACTIVE_SERVER_KEY)
       if (activeId && this.servers.some(s => s.id === activeId)) {
         this.activeServerId = activeId
       } else {
@@ -544,7 +547,9 @@ class ServerStore {
       })
 
       const latency = Date.now() - startTime
-      const responseBody = await response.text().catch(err => `[Failed to read response body: ${normalizeConnectionError(err)}]`)
+      const responseBody = await response
+        .text()
+        .catch(err => `[Failed to read response body: ${normalizeConnectionError(err)}]`)
       const details = formatResponseDiagnostics({ url: healthUrl, response, latency, body: responseBody })
 
       if (response.ok) {
@@ -576,7 +581,12 @@ class ServerStore {
           return commitHealth(health)
         }
 
-        if (!isRecord(data) || data.ok !== true || data.service !== 'piui-server' || data.protocolVersion !== PROTOCOL_VERSION) {
+        if (
+          !isRecord(data) ||
+          data.ok !== true ||
+          data.service !== 'piui-server' ||
+          data.protocolVersion !== PROTOCOL_VERSION
+        ) {
           const health: ServerHealth = {
             status: 'error',
             latency,
@@ -679,8 +689,11 @@ function normalizeServerBackup(raw: unknown): ServerSettingsBackup {
   return {
     servers: normalizedServers,
     activeServerId,
-    defaultServerId: typeof parsed?.defaultServerId === 'string' && normalizedServers.some(server => server.id === parsed.defaultServerId)
-      ? parsed.defaultServerId : null,
+    defaultServerId:
+      typeof parsed?.defaultServerId === 'string' &&
+      normalizedServers.some(server => server.id === parsed.defaultServerId)
+        ? parsed.defaultServerId
+        : null,
   }
 }
 

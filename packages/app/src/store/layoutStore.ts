@@ -14,7 +14,8 @@ function terminalDirectoryKey(directory: string | undefined, serverId?: string):
 export type PanelPosition = 'bottom' | 'right'
 
 // 面板内容类型
-export type PanelTabType = 'terminal' | 'files' | 'changes' | 'session-tree' | 'session-controls' | 'skill' | 'extensions'
+export type PanelTabType =
+  'terminal' | 'files' | 'changes' | 'session-tree' | 'session-controls' | 'skill' | 'extensions'
 type PersistedPanelTabType = Exclude<PanelTabType, 'terminal'>
 
 // 统一的面板标签
@@ -173,7 +174,14 @@ interface PersistedTerminalSessionState {
 }
 
 const PANEL_POSITIONS: PanelPosition[] = ['bottom', 'right']
-const PERSISTED_PANEL_TAB_TYPES: PersistedPanelTabType[] = ['files', 'changes', 'session-tree', 'session-controls', 'skill', 'extensions']
+const PERSISTED_PANEL_TAB_TYPES: PersistedPanelTabType[] = [
+  'files',
+  'changes',
+  'session-tree',
+  'session-controls',
+  'skill',
+  'extensions',
+]
 
 function isPanelPosition(value: unknown): value is PanelPosition {
   return typeof value === 'string' && PANEL_POSITIONS.includes(value as PanelPosition)
@@ -191,7 +199,7 @@ function normalizePersistedPanelTab(tab: PersistedPanelTab): PanelTab {
       position: tab.position,
       title: tab.title,
       previewFile: null,
-      previewFiles: []
+      previewFiles: [],
     }
   }
 
@@ -199,7 +207,7 @@ function normalizePersistedPanelTab(tab: PersistedPanelTab): PanelTab {
     id: tab.id,
     type: tab.type,
     position: tab.position,
-    title: tab.title
+    title: tab.title,
   }
 }
 
@@ -207,7 +215,12 @@ function sanitizePersistedPanelLayout(raw: unknown): PersistedPanelLayout | null
   if (!raw || typeof raw !== 'object') return null
 
   const data = raw as Partial<PersistedPanelLayout>
-  if (data.version !== 1 || !Array.isArray(data.panelTabs) || !data.activeTabId || typeof data.activeTabId !== 'object') {
+  if (
+    data.version !== 1 ||
+    !Array.isArray(data.panelTabs) ||
+    !data.activeTabId ||
+    typeof data.activeTabId !== 'object'
+  ) {
     return null
   }
 
@@ -224,7 +237,7 @@ function sanitizePersistedPanelLayout(raw: unknown): PersistedPanelLayout | null
       id: tab.id,
       type: tab.type,
       position: tab.position,
-      title: tab.title
+      title: tab.title,
     })
   }
 
@@ -233,10 +246,10 @@ function sanitizePersistedPanelLayout(raw: unknown): PersistedPanelLayout | null
     panelTabs,
     activeTabId: {
       bottom: typeof data.activeTabId.bottom === 'string' ? data.activeTabId.bottom : null,
-      right: typeof data.activeTabId.right === 'string' ? data.activeTabId.right : null
+      right: typeof data.activeTabId.right === 'string' ? data.activeTabId.right : null,
     },
     rightPanelOpen: data.rightPanelOpen === true,
-    bottomPanelOpen: data.bottomPanelOpen === true
+    bottomPanelOpen: data.bottomPanelOpen === true,
   }
 }
 
@@ -257,8 +270,12 @@ function sanitizePersistedTerminalLayoutMap(raw: unknown): PersistedTerminalLayo
     if (!rawOrder || typeof rawOrder !== 'object' || !rawActiveTabId || typeof rawActiveTabId !== 'object') continue
 
     const order = {
-      bottom: Array.isArray(rawOrder.bottom) ? rawOrder.bottom.filter((id): id is string => typeof id === 'string' && id.length > 0) : [],
-      right: Array.isArray(rawOrder.right) ? rawOrder.right.filter((id): id is string => typeof id === 'string' && id.length > 0) : []
+      bottom: Array.isArray(rawOrder.bottom)
+        ? rawOrder.bottom.filter((id): id is string => typeof id === 'string' && id.length > 0)
+        : [],
+      right: Array.isArray(rawOrder.right)
+        ? rawOrder.right.filter((id): id is string => typeof id === 'string' && id.length > 0)
+        : [],
     }
 
     const sessions: Record<string, PersistedTerminalSessionState> = {}
@@ -274,7 +291,7 @@ function sanitizePersistedTerminalLayoutMap(raw: unknown): PersistedTerminalLayo
           scrollY: typeof data.scrollY === 'number' ? data.scrollY : undefined,
           cursor: typeof data.cursor === 'number' ? data.cursor : undefined,
           rows: typeof data.rows === 'number' ? data.rows : undefined,
-          cols: typeof data.cols === 'number' ? data.cols : undefined
+          cols: typeof data.cols === 'number' ? data.cols : undefined,
         }
       }
     }
@@ -283,9 +300,9 @@ function sanitizePersistedTerminalLayoutMap(raw: unknown): PersistedTerminalLayo
       order,
       activeTabId: {
         bottom: typeof rawActiveTabId.bottom === 'string' ? rawActiveTabId.bottom : null,
-        right: typeof rawActiveTabId.right === 'string' ? rawActiveTabId.right : null
+        right: typeof rawActiveTabId.right === 'string' ? rawActiveTabId.right : null,
       },
-      sessions
+      sessions,
     }
   }
 
@@ -309,7 +326,7 @@ function buildTerminalPanelTab(tab: TerminalTab, position: PanelPosition, existi
     cursor: existing?.cursor ?? tab.cursor,
     rows: existing?.rows ?? tab.rows,
     cols: existing?.cols ?? tab.cols,
-    status: tab.status
+    status: tab.status,
   }
 }
 
@@ -322,15 +339,15 @@ export class LayoutStore {
         type: 'files',
         position: 'right',
         previewFile: null,
-        previewFiles: []
+        previewFiles: [],
       },
       { id: 'changes', type: 'changes', position: 'right' },
       { id: 'session-tree', type: 'session-tree', position: 'right' },
-      { id: 'extensions', type: 'extensions', position: 'right' }
+      { id: 'extensions', type: 'extensions', position: 'right' },
     ],
     activeTabId: {
       bottom: null,
-      right: 'files'
+      right: 'files',
     },
     sidebarExpanded: true,
     sidebarFolderRecents: false,
@@ -341,7 +358,7 @@ export class LayoutStore {
     bottomPanelHeight: 250,
     wakeLock: false,
     terminalCopyOnSelect: false,
-    terminalRightClickPaste: false
+    terminalRightClickPaste: false,
   }
   private subscribers = new Set<Subscriber>()
   private currentTerminalDirectory: string | null = null
@@ -352,17 +369,17 @@ export class LayoutStore {
         version: 1,
         panelTabs: this.state.panelTabs
           .filter((tab): tab is PanelTab & { type: PersistedPanelTabType } =>
-            (PERSISTED_PANEL_TAB_TYPES as readonly string[]).includes(tab.type)
+            (PERSISTED_PANEL_TAB_TYPES as readonly string[]).includes(tab.type),
           )
           .map(tab => ({
             id: tab.id,
             type: tab.type,
             position: tab.position,
-            title: tab.title
+            title: tab.title,
           })),
         activeTabId: { ...this.state.activeTabId },
         rightPanelOpen: this.state.rightPanelOpen,
-        bottomPanelOpen: this.state.bottomPanelOpen
+        bottomPanelOpen: this.state.bottomPanelOpen,
       }
       storageSet(STORAGE_KEY_PANEL_LAYOUT, JSON.stringify(persisted))
     } catch {
@@ -397,7 +414,8 @@ export class LayoutStore {
       const savedTerminalCopyOnSelect = storageGet('piui-terminal-copy-on-select')
       if (savedTerminalCopyOnSelect !== null) this.state.terminalCopyOnSelect = savedTerminalCopyOnSelect === 'true'
       const savedTerminalRightClickPaste = storageGet('piui-terminal-right-click-paste')
-      if (savedTerminalRightClickPaste !== null) this.state.terminalRightClickPaste = savedTerminalRightClickPaste === 'true'
+      if (savedTerminalRightClickPaste !== null)
+        this.state.terminalRightClickPaste = savedTerminalRightClickPaste === 'true'
 
       // 右侧面板宽度
       const savedWidth = storageGet(STORAGE_KEY_RIGHT_PANEL_WIDTH)
@@ -431,7 +449,7 @@ export class LayoutStore {
         this.state.panelTabs.push({
           id: 'session-tree',
           type: 'session-tree',
-          position: 'right'
+          position: 'right',
         })
       }
     } catch {
@@ -468,7 +486,7 @@ export class LayoutStore {
     layoutMap.directories[this.currentTerminalDirectory] = {
       order: {
         bottom: this.getTabsForPosition('bottom').map(tab => tab.id),
-        right: this.getTabsForPosition('right').map(tab => tab.id)
+        right: this.getTabsForPosition('right').map(tab => tab.id),
       },
       activeTabId: { ...this.state.activeTabId },
       sessions: Object.fromEntries(
@@ -484,10 +502,10 @@ export class LayoutStore {
               scrollY: tab.scrollY,
               cursor: tab.cursor,
               rows: tab.rows,
-              cols: tab.cols
-            }
-          ])
-      )
+              cols: tab.cols,
+            },
+          ]),
+      ),
     }
     storageSet(STORAGE_KEY_TERMINAL_LAYOUT, JSON.stringify(layoutMap))
   }
@@ -648,7 +666,7 @@ export class LayoutStore {
       type: 'files',
       position,
       previewFile: null,
-      previewFiles: []
+      previewFiles: [],
     })
   }
 
@@ -907,7 +925,9 @@ export class LayoutStore {
   private getTargetFilesTab(position?: PanelPosition): PanelTab | null {
     if (position) {
       const activeId = this.state.activeTabId[position]
-      const activeFilesTab = this.state.panelTabs.find(t => t.id === activeId && t.type === 'files' && t.position === position)
+      const activeFilesTab = this.state.panelTabs.find(
+        t => t.id === activeId && t.type === 'files' && t.position === position,
+      )
       if (activeFilesTab) return activeFilesTab
 
       const filesTab = this.state.panelTabs.find(t => t.type === 'files' && t.position === position)
@@ -918,7 +938,11 @@ export class LayoutStore {
     }
 
     const preferred = (['right', 'bottom'] as const)
-      .map(pos => this.state.panelTabs.find(t => t.id === this.state.activeTabId[pos] && t.type === 'files' && t.position === pos))
+      .map(pos =>
+        this.state.panelTabs.find(
+          t => t.id === this.state.activeTabId[pos] && t.type === 'files' && t.position === pos,
+        ),
+      )
       .find(Boolean)
     if (preferred) return preferred
 
@@ -956,7 +980,9 @@ export class LayoutStore {
     }
 
     const savedLayout = directory ? layoutMap.directories[directory] : undefined
-    const existingTerminalById = new Map((directoryChanged ? [] : this.state.panelTabs).filter(tab => tab.type === 'terminal').map(tab => [tab.id, tab]))
+    const existingTerminalById = new Map(
+      (directoryChanged ? [] : this.state.panelTabs).filter(tab => tab.type === 'terminal').map(tab => [tab.id, tab]),
+    )
     const sessionById = new Map(
       sessions.map(session => {
         const previous = existingTerminalById.get(session.id)
@@ -969,22 +995,23 @@ export class LayoutStore {
           shellTitle: saved?.shellTitle ?? previous?.shellTitle ?? session.shell,
           shell: session.shell,
           cwd: session.cwd,
-          status: session.status === 'running' ? (previous?.status === 'connected' ? 'connected' : 'disconnected') : 'exited',
+          status:
+            session.status === 'running' ? (previous?.status === 'connected' ? 'connected' : 'disconnected') : 'exited',
           buffer: saved?.buffer ?? previous?.buffer,
           scrollY: saved?.scrollY ?? previous?.scrollY,
           cursor: saved?.cursor ?? previous?.cursor ?? session.cursor,
           rows: saved?.rows ?? previous?.rows,
-          cols: saved?.cols ?? previous?.cols
+          cols: saved?.cols ?? previous?.cols,
         }
         return [session.id, terminal] as const
-      })
+      }),
     )
 
     const nonTerminalTabs = this.state.panelTabs.filter(tab => tab.type !== 'terminal')
     const nonTerminalById = new Map(nonTerminalTabs.map(tab => [tab.id, tab]))
     const orderByPosition: Record<PanelPosition, string[]> = {
       bottom: savedLayout?.order.bottom ? [...savedLayout.order.bottom] : [],
-      right: savedLayout?.order.right ? [...savedLayout.order.right] : []
+      right: savedLayout?.order.right ? [...savedLayout.order.right] : [],
     }
 
     for (const position of PANEL_POSITIONS) {
@@ -996,7 +1023,7 @@ export class LayoutStore {
     const assignedTerminalIds = new Set<string>()
     const tabsByPosition: Record<PanelPosition, PanelTab[]> = {
       bottom: [],
-      right: []
+      right: [],
     }
     for (const position of PANEL_POSITIONS) {
       for (const id of orderByPosition[position]) {
@@ -1017,7 +1044,8 @@ export class LayoutStore {
     for (const session of sessions) {
       if (assignedTerminalIds.has(session.id)) continue
       const terminal = sessionById.get(session.id)
-      if (terminal) tabsByPosition.bottom.push(buildTerminalPanelTab(terminal, 'bottom', existingTerminalById.get(session.id)))
+      if (terminal)
+        tabsByPosition.bottom.push(buildTerminalPanelTab(terminal, 'bottom', existingTerminalById.get(session.id)))
     }
 
     this.state.panelTabs = [...tabsByPosition.right, ...tabsByPosition.bottom]
@@ -1028,7 +1056,9 @@ export class LayoutStore {
         : false
 
       if (directoryChanged) {
-        this.state.activeTabId[position] = hasSavedActive ? (savedActiveId ?? null) : (this.getTabsForPosition(position)[0]?.id ?? null)
+        this.state.activeTabId[position] = hasSavedActive
+          ? (savedActiveId ?? null)
+          : (this.getTabsForPosition(position)[0]?.id ?? null)
         continue
       }
 
@@ -1038,7 +1068,9 @@ export class LayoutStore {
         : false
       if (hasCurrentActive) continue
 
-      this.state.activeTabId[position] = hasSavedActive ? (savedActiveId ?? null) : (this.getTabsForPosition(position)[0]?.id ?? null)
+      this.state.activeTabId[position] = hasSavedActive
+        ? (savedActiveId ?? null)
+        : (this.getTabsForPosition(position)[0]?.id ?? null)
     }
     this.notify()
   }
@@ -1052,7 +1084,7 @@ export class LayoutStore {
         shellTitle: existing.shellTitle ?? tab.shellTitle ?? tab.shell ?? tab.title,
         shell: tab.shell,
         cwd: tab.cwd,
-        status: tab.status
+        status: tab.status,
       })
       if (!existing.customTitle) existing.title = tab.title
       existing.position = position
@@ -1170,17 +1202,17 @@ function buildPersistedPanelLayout(state: LayoutState): PersistedPanelLayout {
     version: 1,
     panelTabs: state.panelTabs
       .filter((tab): tab is PanelTab & { type: PersistedPanelTabType } =>
-        (PERSISTED_PANEL_TAB_TYPES as readonly string[]).includes(tab.type)
+        (PERSISTED_PANEL_TAB_TYPES as readonly string[]).includes(tab.type),
       )
       .map(tab => ({
         id: tab.id,
         type: tab.type,
         position: tab.position,
-        title: tab.title
+        title: tab.title,
       })),
     activeTabId: { ...state.activeTabId },
     rightPanelOpen: state.rightPanelOpen,
-    bottomPanelOpen: state.bottomPanelOpen
+    bottomPanelOpen: state.bottomPanelOpen,
   }
 }
 
@@ -1205,18 +1237,23 @@ export function exportLayoutBackup(): LayoutBackup {
     bottomPanelHeight: state.bottomPanelHeight,
     panelLayout: buildPersistedPanelLayout(state),
     terminalLayout,
-    sidebarWidth: Number.isFinite(sidebarWidth) ? sidebarWidth : null
+    sidebarWidth: Number.isFinite(sidebarWidth) ? sidebarWidth : null,
   }
 }
 
 export function importLayoutBackup(raw: unknown): void {
   const parsed = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : undefined
-  const panelLayout = sanitizePersistedPanelLayout(parsed?.panelLayout) ?? buildPersistedPanelLayout(layoutStore.getState())
+  const panelLayout =
+    sanitizePersistedPanelLayout(parsed?.panelLayout) ?? buildPersistedPanelLayout(layoutStore.getState())
   const terminalLayout = sanitizePersistedTerminalLayoutMap(parsed?.terminalLayout)
   const rightPanelWidth =
-    typeof parsed?.rightPanelWidth === 'number' ? Math.min(Math.max(Math.round(parsed.rightPanelWidth), 160), MAX_RIGHT_PANEL_WIDTH) : 450
+    typeof parsed?.rightPanelWidth === 'number'
+      ? Math.min(Math.max(Math.round(parsed.rightPanelWidth), 160), MAX_RIGHT_PANEL_WIDTH)
+      : 450
   const bottomPanelHeight =
-    typeof parsed?.bottomPanelHeight === 'number' ? Math.min(Math.max(Math.round(parsed.bottomPanelHeight), 100), 500) : 250
+    typeof parsed?.bottomPanelHeight === 'number'
+      ? Math.min(Math.max(Math.round(parsed.bottomPanelHeight), 100), 500)
+      : 250
   const sidebarWidth =
     typeof parsed?.sidebarWidth === 'number' && Number.isFinite(parsed.sidebarWidth) && parsed.sidebarWidth > 0
       ? Math.round(parsed.sidebarWidth)
@@ -1258,7 +1295,7 @@ function getSnapshot(): LayoutSnapshot {
     cachedSnapshot = {
       ...state,
       // 派生属性
-      rightPanelView: layoutStore.rightPanelView
+      rightPanelView: layoutStore.rightPanelView,
     }
   }
   return cachedSnapshot

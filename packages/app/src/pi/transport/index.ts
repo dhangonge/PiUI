@@ -35,10 +35,26 @@ import type {
   TerminalUpdateParams,
 } from '@piui/protocol'
 import type { SessionInfo, SessionTreeNode, Skill, PromptTemplate } from '@earendil-works/pi-coding-agent'
-import type { PiBranchPage, PiConfiguredPackage, PiModelRuntimeSnapshot, PiPackageUpdate, PiProjectTrust, PiProviderAuthInfo, PiSettingsSnapshot, ResolvedPaths } from '../domain/index.js'
+import type {
+  PiBranchPage,
+  PiConfiguredPackage,
+  PiModelRuntimeSnapshot,
+  PiPackageUpdate,
+  PiProjectTrust,
+  PiProviderAuthInfo,
+  PiSettingsSnapshot,
+  ResolvedPaths,
+} from '../domain/index.js'
 import { getApiBase, getPiAuthToken, piFetch } from '../httpClient.js'
 import { getPiCommandStore } from '../state/index.js'
-import { isScopedSessionKey, makeSessionKey, resolveSessionTarget, scopeSessionResult, sessionKeyToSessionId, getSessionRevision } from '../../utils/sessionKey.js'
+import {
+  isScopedSessionKey,
+  makeSessionKey,
+  resolveSessionTarget,
+  scopeSessionResult,
+  sessionKeyToSessionId,
+  getSessionRevision,
+} from '../../utils/sessionKey.js'
 
 // Response types
 export type PiCommandResponse<T = JsonValue | undefined> = {
@@ -100,21 +116,26 @@ export async function fetchPiRegistry(signal?: AbortSignal, serverId?: string): 
   return readJson<PiRegistrySnapshot>(`${getApiBase(serverId)}/api/v1/pi/registry`, { signal }, serverId)
 }
 
-export async function postPiGlobalCommand<T = JsonValue | undefined, K extends PiGlobalCommandName = PiGlobalCommandName>(
-  name: K,
-  params?: PiParamsFor<K>,
-  signal?: AbortSignal,
-  serverId?: string,
-): Promise<T extends undefined ? null : T> {
+export async function postPiGlobalCommand<
+  T = JsonValue | undefined,
+  K extends PiGlobalCommandName = PiGlobalCommandName,
+>(name: K, params?: PiParamsFor<K>, signal?: AbortSignal, serverId?: string): Promise<T extends undefined ? null : T> {
   const body = params ? JSON.stringify(params) : '{}'
-  const response = await readJson<PiCommandResponse<T>>(`${getApiBase(serverId)}/api/v1/pi/commands/${encodeURIComponent(name)}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body,
-    signal,
-  }, serverId)
+  const response = await readJson<PiCommandResponse<T>>(
+    `${getApiBase(serverId)}/api/v1/pi/commands/${encodeURIComponent(name)}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+      signal,
+    },
+    serverId,
+  )
   if (response.command) getPiCommandStore(serverId).upsert(response.command)
-  const command = response.command && serverId ? { ...response.command, id: makeSessionKey(serverId, response.command.id) } : response.command
+  const command =
+    response.command && serverId
+      ? { ...response.command, id: makeSessionKey(serverId, response.command.id) }
+      : response.command
   return (response.data !== undefined ? response.data : command) as T extends undefined ? null : T
 }
 
@@ -139,17 +160,18 @@ export async function postPiSessionCommand<T = JsonValue | undefined, K extends 
     scope,
   )
   if (response.command) getPiCommandStore(scope).upsert(response.command)
-  const command = response.command && scope ? { ...response.command, id: makeSessionKey(scope, response.command.id) } : response.command
+  const command =
+    response.command && scope
+      ? { ...response.command, id: makeSessionKey(scope, response.command.id) }
+      : response.command
   return (response.data !== undefined ? response.data : command) as T extends undefined ? null : T
 }
 
 // Host commands (workspaces / files / git), POST /api/v1/host/commands/:name
-export async function postHostCommand<T = JsonValue | undefined, K extends keyof HostCommandParams = keyof HostCommandParams>(
-  name: K,
-  params?: HostCommandParams[K],
-  signal?: AbortSignal,
-  serverId?: string,
-): Promise<T> {
+export async function postHostCommand<
+  T = JsonValue | undefined,
+  K extends keyof HostCommandParams = keyof HostCommandParams,
+>(name: K, params?: HostCommandParams[K], signal?: AbortSignal, serverId?: string): Promise<T> {
   const response = await readJson<{ data: T }>(
     `${getApiBase(serverId)}/api/v1/host/commands/${encodeURIComponent(name)}`,
     {
@@ -164,7 +186,11 @@ export async function postHostCommand<T = JsonValue | undefined, K extends keyof
 }
 
 // Host git commands (git.*), workspace-scoped
-export function getHostGitInfo(workspacePath: string, signal?: AbortSignal, serverId?: string): Promise<GitInfoResponse> {
+export function getHostGitInfo(
+  workspacePath: string,
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<GitInfoResponse> {
   return postHostCommand('git.info', { workspacePath }, signal, serverId)
 }
 
@@ -172,11 +198,20 @@ export function getHostGitStatus(workspacePath: string, signal?: AbortSignal): P
   return postHostCommand('git.status', { workspacePath }, signal)
 }
 
-export function getHostGitDiff(workspacePath: string, mode: GitDiffMode, signal?: AbortSignal): Promise<GitDiffResponse> {
+export function getHostGitDiff(
+  workspacePath: string,
+  mode: GitDiffMode,
+  signal?: AbortSignal,
+): Promise<GitDiffResponse> {
   return postHostCommand('git.diff', { workspacePath, mode }, signal)
 }
 
-export function getHostGitFileDiff(workspacePath: string, path: string, mode: GitDiffMode, signal?: AbortSignal): Promise<GitFileDiffResponse> {
+export function getHostGitFileDiff(
+  workspacePath: string,
+  path: string,
+  mode: GitDiffMode,
+  signal?: AbortSignal,
+): Promise<GitFileDiffResponse> {
   return postHostCommand('git.fileDiff', { workspacePath, path, mode }, signal)
 }
 
@@ -204,15 +239,28 @@ export function writeHostFile(
   return postHostCommand('files.write', { workspacePath, path, content, ...options }, signal)
 }
 
-export function createHostFileEntry(workspacePath: string, request: FileCreateRequest, signal?: AbortSignal): Promise<FileOperationResponse> {
+export function createHostFileEntry(
+  workspacePath: string,
+  request: FileCreateRequest,
+  signal?: AbortSignal,
+): Promise<FileOperationResponse> {
   return postHostCommand('files.create', { workspacePath, ...request }, signal)
 }
 
-export function moveHostFileEntry(workspacePath: string, request: FileMoveRequest, signal?: AbortSignal): Promise<FileOperationResponse> {
+export function moveHostFileEntry(
+  workspacePath: string,
+  request: FileMoveRequest,
+  signal?: AbortSignal,
+): Promise<FileOperationResponse> {
   return postHostCommand('files.move', { workspacePath, ...request }, signal)
 }
 
-export function deleteHostFileEntry(workspacePath: string, path: string, recursive = false, signal?: AbortSignal): Promise<{ ok: boolean }> {
+export function deleteHostFileEntry(
+  workspacePath: string,
+  path: string,
+  recursive = false,
+  signal?: AbortSignal,
+): Promise<{ ok: boolean }> {
   return postHostCommand('files.delete', { workspacePath, path, recursive }, signal)
 }
 
@@ -225,7 +273,12 @@ export function searchHostFilesByName(
   return postHostCommand('files.searchName', { workspacePath, query, ...options }, signal)
 }
 
-export function searchHostFilesText(workspacePath: string, query: string, limit?: number, signal?: AbortSignal): Promise<FileTextSearchResponse> {
+export function searchHostFilesText(
+  workspacePath: string,
+  query: string,
+  limit?: number,
+  signal?: AbortSignal,
+): Promise<FileTextSearchResponse> {
   return postHostCommand('files.searchText', { workspacePath, query, limit }, signal)
 }
 
@@ -234,7 +287,11 @@ export function listHostShells(signal?: AbortSignal): Promise<{ shells: Terminal
   return postHostCommand('terminals.shells', {}, signal)
 }
 
-export function listHostTerminals(workspacePath: string, signal?: AbortSignal, serverId?: string): Promise<{ terminals: TerminalInfo[] }> {
+export function listHostTerminals(
+  workspacePath: string,
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<{ terminals: TerminalInfo[] }> {
   return postHostCommand('terminals.list', { workspacePath }, signal, serverId)
 }
 
@@ -259,25 +316,43 @@ export function updateHostTerminal(
   return postHostCommand('terminals.update', { workspacePath, terminalId: target.sessionId, ...params }, signal, scope)
 }
 
-export function removeHostTerminal(workspacePath: string, terminalId: string, signal?: AbortSignal, serverId?: string): Promise<{ ok: boolean }> {
+export function removeHostTerminal(
+  workspacePath: string,
+  terminalId: string,
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<{ ok: boolean }> {
   const target = resolveSessionTarget(terminalId, serverId)
   const scope = serverId ?? (isScopedSessionKey(terminalId) ? target.serverId : undefined)
   return postHostCommand('terminals.remove', { workspacePath, terminalId: target.sessionId }, signal, scope)
 }
 
-export function issueHostTerminalToken(workspacePath: string, terminalId: string, signal?: AbortSignal, serverId?: string): Promise<{ token: string; expiresIn: number }> {
+export function issueHostTerminalToken(
+  workspacePath: string,
+  terminalId: string,
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<{ token: string; expiresIn: number }> {
   const target = resolveSessionTarget(terminalId, serverId)
   const scope = serverId ?? (isScopedSessionKey(terminalId) ? target.serverId : undefined)
   return postHostCommand('terminals.connectToken', { workspacePath, terminalId: target.sessionId }, signal, scope)
 }
 
-export function getHostTerminalWebSocketUrl(terminalId: string, ticket: string, cursor?: number, serverId?: string): string {
+export function getHostTerminalWebSocketUrl(
+  terminalId: string,
+  ticket: string,
+  cursor?: number,
+  serverId?: string,
+): string {
   const target = resolveSessionTarget(terminalId, serverId)
   const scope = serverId ?? (isScopedSessionKey(terminalId) ? target.serverId : undefined)
   const base = getApiBase(scope) || (typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:8787')
-  const url = new URL(`${base.replace(/^http/, 'ws')}/api/v1/host/terminals/${encodeURIComponent(target.sessionId)}/stream`)
+  const url = new URL(
+    `${base.replace(/^http/, 'ws')}/api/v1/host/terminals/${encodeURIComponent(target.sessionId)}/stream`,
+  )
   url.searchParams.set('ticket', ticket)
-  if (cursor !== undefined && Number.isSafeInteger(cursor) && cursor >= 0) url.searchParams.set('cursor', String(cursor))
+  if (cursor !== undefined && Number.isSafeInteger(cursor) && cursor >= 0)
+    url.searchParams.set('cursor', String(cursor))
   // 同源模式（无 API base）下 WebSocket 升级请求无法携带 Authorization 头，
   // 因此只要配置了 token 就必须走 query 参数，与事件流保持一致。
   const token = getPiAuthToken(scope)
@@ -311,11 +386,20 @@ export function listActiveProviderFlows(signal?: AbortSignal): Promise<JsonValue
   return postPiGlobalCommand('providers.activeFlows', undefined, signal)
 }
 
-export function startProviderAuth(providerId: string, authType?: 'api_key' | 'oauth', signal?: AbortSignal): Promise<{ flowId: string }> {
+export function startProviderAuth(
+  providerId: string,
+  authType?: 'api_key' | 'oauth',
+  signal?: AbortSignal,
+): Promise<{ flowId: string }> {
   return postPiGlobalCommand('providers.startAuth', { providerId, authType }, signal)
 }
 
-export function respondProviderAuth(flowId: string, promptId: string, value: string, signal?: AbortSignal): Promise<JsonValue> {
+export function respondProviderAuth(
+  flowId: string,
+  promptId: string,
+  value: string,
+  signal?: AbortSignal,
+): Promise<JsonValue> {
   return postPiGlobalCommand('providers.respondAuth', { flowId, promptId, value }, signal)
 }
 
@@ -353,13 +437,23 @@ export function listPiPackages(cwd: string, signal?: AbortSignal): Promise<PiCon
 
 export function managePiPackage(
   cwd: string,
-  params: { commandId: string; action: 'install' | 'remove' | 'update'; source?: string; local?: boolean; persist?: boolean },
+  params: {
+    commandId: string
+    action: 'install' | 'remove' | 'update'
+    source?: string
+    local?: boolean
+    persist?: boolean
+  },
   signal?: AbortSignal,
 ): Promise<PiConfiguredPackage[]> {
   return postPiGlobalCommand('packages.manage', { cwd, ...params }, signal)
 }
 
-export function resolvePiPackages(cwd: string, missingAction?: 'install' | 'skip' | 'error', signal?: AbortSignal): Promise<ResolvedPaths> {
+export function resolvePiPackages(
+  cwd: string,
+  missingAction?: 'install' | 'skip' | 'error',
+  signal?: AbortSignal,
+): Promise<ResolvedPaths> {
   return postPiGlobalCommand('packages.resolve', { cwd, missingAction }, signal)
 }
 
@@ -372,18 +466,33 @@ export function resolvePiExtensionSources(
   return postPiGlobalCommand('packages.resolveSources', { cwd, sources, ...options }, signal)
 }
 
-export function changePiPackageSource(cwd: string, source: string, operation: 'add' | 'remove', local?: boolean, signal?: AbortSignal): Promise<{ changed: boolean; packages: PiConfiguredPackage[] }> {
+export function changePiPackageSource(
+  cwd: string,
+  source: string,
+  operation: 'add' | 'remove',
+  local?: boolean,
+  signal?: AbortSignal,
+): Promise<{ changed: boolean; packages: PiConfiguredPackage[] }> {
   return postPiGlobalCommand('packages.changeSource', { cwd, source, operation, local }, signal)
 }
 
-export function getPiPackageInstalledPath(cwd: string, source: string, scope?: 'user' | 'project', signal?: AbortSignal): Promise<string | null> {
+export function getPiPackageInstalledPath(
+  cwd: string,
+  source: string,
+  scope?: 'user' | 'project',
+  signal?: AbortSignal,
+): Promise<string | null> {
   return postPiGlobalCommand('packages.installedPath', { cwd, source, scope }, signal)
 }
 
 export function checkPiPackageUpdates(cwd: string, signal?: AbortSignal): Promise<PiPackageUpdate[]> {
   return postPiGlobalCommand('packages.checkUpdates', { cwd }, signal)
 }
-export function listPiSessions(params: PiSessionListParams, signal?: AbortSignal, serverId?: string): Promise<PiSessionListResult> {
+export function listPiSessions(
+  params: PiSessionListParams,
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<PiSessionListResult> {
   return postPiGlobalCommand<PiSessionListResult>('session.list', params, signal, serverId)
 }
 
@@ -395,17 +504,36 @@ export function createPiSession(cwd: string, signal?: AbortSignal, serverId?: st
   return postPiGlobalCommand<PiSessionCreateResult>('session.create', { cwd }, signal, serverId)
 }
 
-export function previewPiSession(sessionId: string, params: PiBranchGetParams = {}, signal?: AbortSignal, serverId?: string): Promise<PiSessionPreviewResult> {
+export function previewPiSession(
+  sessionId: string,
+  params: PiBranchGetParams = {},
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<PiSessionPreviewResult> {
   const target = resolveSessionTarget(sessionId, serverId)
   const scope = serverId !== undefined || isScopedSessionKey(sessionId) ? target.serverId : undefined
-  return postPiGlobalCommand<PiSessionPreviewResult>('session.preview', { sessionId: target.sessionId, ...params }, signal, scope)
+  return postPiGlobalCommand<PiSessionPreviewResult>(
+    'session.preview',
+    { sessionId: target.sessionId, ...params },
+    signal,
+    scope,
+  )
 }
 
-export function openPiSession(params: PiSessionOpenParams, signal?: AbortSignal, serverId?: string): Promise<PiSessionOpenResult> {
+export function openPiSession(
+  params: PiSessionOpenParams,
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<PiSessionOpenResult> {
   return postPiGlobalCommand<PiSessionOpenResult>('session.open', params, signal, serverId)
 }
 
-export function deletePiSession(cwd: string, sessionFile: string, signal?: AbortSignal, serverId?: string): Promise<null> {
+export function deletePiSession(
+  cwd: string,
+  sessionFile: string,
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<null> {
   return postPiGlobalCommand('session.delete', { cwd, sessionFile }, signal, serverId)
 }
 
@@ -419,7 +547,11 @@ export function getPiSessionState(sessionId: string, signal?: AbortSignal): Prom
   return postPiSessionCommand(sessionId, 'state.get', undefined, signal)
 }
 
-export function getPiBranchPage(sessionId: string, params: PiBranchGetParams, signal?: AbortSignal): Promise<PiBranchPage> {
+export function getPiBranchPage(
+  sessionId: string,
+  params: PiBranchGetParams,
+  signal?: AbortSignal,
+): Promise<PiBranchPage> {
   return postPiSessionCommand(sessionId, 'branch.get', params, signal)
 }
 
@@ -439,7 +571,10 @@ export function getPiPrompts(sessionId: string, signal?: AbortSignal): Promise<P
   return postPiSessionCommand(sessionId, 'prompts.list', undefined, signal)
 }
 
-export function getPiAgentsFiles(sessionId: string, signal?: AbortSignal): Promise<Array<{ path: string; content: string }>> {
+export function getPiAgentsFiles(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<Array<{ path: string; content: string }>> {
   return postPiSessionCommand(sessionId, 'agentsFiles.list', undefined, signal)
 }
 
@@ -460,7 +595,11 @@ export function abortPi(sessionId: string, signal?: AbortSignal): Promise<JsonVa
   return postPiSessionCommand(sessionId, 'abort', undefined, signal)
 }
 
-export function compactPi(sessionId: string, customInstructions?: string, signal?: AbortSignal): Promise<CommandRecord> {
+export function compactPi(
+  sessionId: string,
+  customInstructions?: string,
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'compact', customInstructions ? { customInstructions } : undefined, signal)
 }
 
@@ -469,14 +608,25 @@ export function reloadPiSession(sessionId: string, signal?: AbortSignal): Promis
 }
 
 export function newPiSession(sessionId: string, parentSession?: string, signal?: AbortSignal): Promise<CommandRecord> {
-  return postPiSessionCommand(sessionId, 'newSession', parentSession ? { parentSession: sessionKeyToSessionId(parentSession) } : undefined, signal)
+  return postPiSessionCommand(
+    sessionId,
+    'newSession',
+    parentSession ? { parentSession: sessionKeyToSessionId(parentSession) } : undefined,
+    signal,
+  )
 }
 
 export function setPiScopedModels(sessionId: string, patterns: string[], signal?: AbortSignal): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'setScopedModels', { patterns }, signal)
 }
 
-export function executePiBash(sessionId: string, command: string, excludeFromContext?: boolean, clientId?: string, signal?: AbortSignal): Promise<CommandRecord> {
+export function executePiBash(
+  sessionId: string,
+  command: string,
+  excludeFromContext?: boolean,
+  clientId?: string,
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'bash', { command, excludeFromContext, clientId }, signal)
 }
 
@@ -484,11 +634,19 @@ export function abortPiBash(sessionId: string, signal?: AbortSignal): Promise<Js
   return postPiSessionCommand(sessionId, 'abortBash', undefined, signal)
 }
 
-export function exportPiSessionHtml(sessionId: string, outputPath: string, signal?: AbortSignal): Promise<CommandRecord> {
+export function exportPiSessionHtml(
+  sessionId: string,
+  outputPath: string,
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'exportHtml', { outputPath }, signal)
 }
 
-export function exportPiSessionJsonl(sessionId: string, outputPath: string, signal?: AbortSignal): Promise<CommandRecord> {
+export function exportPiSessionJsonl(
+  sessionId: string,
+  outputPath: string,
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'exportJsonl', { outputPath }, signal)
 }
 
@@ -496,7 +654,9 @@ export function waitPiForIdle(sessionId: string, signal?: AbortSignal): Promise<
   return postPiSessionCommand(sessionId, 'waitForIdle', undefined, signal)
 }
 
-export type PiCustomMessageContent = Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>
+export type PiCustomMessageContent = Array<
+  { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
+>
 
 export function sendPiCustomMessage(
   sessionId: string,
@@ -513,8 +673,18 @@ export function sendPiCustomMessage(
   return postPiSessionCommand(sessionId, 'sendCustomMessage', params, signal)
 }
 
-export function appendPiCustomEntry(sessionId: string, customType: string, data: JsonValue, signal?: AbortSignal): Promise<CommandRecord> {
-  return postPiSessionCommand(sessionId, 'appendCustomEntry', { customType, data: data === undefined ? null : data }, signal)
+export function appendPiCustomEntry(
+  sessionId: string,
+  customType: string,
+  data: JsonValue,
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
+  return postPiSessionCommand(
+    sessionId,
+    'appendCustomEntry',
+    { customType, data: data === undefined ? null : data },
+    signal,
+  )
 }
 
 export type PiImageInput = ImageInput
@@ -549,7 +719,12 @@ export function sendExtensionTuiInput(sessionId: string, data: string, signal?: 
   return postPiSessionCommand(sessionId, 'extensionUi.tuiInput', { data }, signal)
 }
 
-export function sendExtensionTuiResize(sessionId: string, cols: number, rows: number, signal?: AbortSignal): Promise<JsonValue> {
+export function sendExtensionTuiResize(
+  sessionId: string,
+  cols: number,
+  rows: number,
+  signal?: AbortSignal,
+): Promise<JsonValue> {
   return postPiSessionCommand(sessionId, 'extensionUi.tuiResize', { cols, rows }, signal)
 }
 
@@ -608,16 +783,29 @@ export type PiNavigateTreeResult = {
   aborted?: boolean
 }
 
-export function navigatePiTree(sessionId: string, params: PiNavigateTreeParams, signal?: AbortSignal): Promise<CommandRecord> {
+export function navigatePiTree(
+  sessionId: string,
+  params: PiNavigateTreeParams,
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'navigateTree', params, signal)
 }
 
-
-export function importPiSession(sessionId: string, inputPath: string, cwdOverride?: string, signal?: AbortSignal): Promise<CommandRecord> {
+export function importPiSession(
+  sessionId: string,
+  inputPath: string,
+  cwdOverride?: string,
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'importSession', { inputPath, cwdOverride }, signal)
 }
 
-export function setPiLabel(sessionId: string, entryId: string, label?: string, signal?: AbortSignal): Promise<CommandRecord> {
+export function setPiLabel(
+  sessionId: string,
+  entryId: string,
+  label?: string,
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'setLabel', { entryId, label }, signal)
 }
 
@@ -650,11 +838,19 @@ export function clearPiQueue(sessionId: string, signal?: AbortSignal): Promise<J
   return postPiSessionCommand(sessionId, 'clearQueue', undefined, signal)
 }
 
-export function setPiSteeringMode(sessionId: string, mode: 'all' | 'one-at-a-time', signal?: AbortSignal): Promise<JsonValue> {
+export function setPiSteeringMode(
+  sessionId: string,
+  mode: 'all' | 'one-at-a-time',
+  signal?: AbortSignal,
+): Promise<JsonValue> {
   return postPiSessionCommand(sessionId, 'setSteeringMode', { mode }, signal)
 }
 
-export function setPiFollowUpMode(sessionId: string, mode: 'all' | 'one-at-a-time', signal?: AbortSignal): Promise<JsonValue> {
+export function setPiFollowUpMode(
+  sessionId: string,
+  mode: 'all' | 'one-at-a-time',
+  signal?: AbortSignal,
+): Promise<JsonValue> {
   return postPiSessionCommand(sessionId, 'setFollowUpMode', { mode }, signal)
 }
 
@@ -662,7 +858,12 @@ export function setPiFollowUpMode(sessionId: string, mode: 'all' | 'one-at-a-tim
  * Poll a submitted command until it completes/fails (serialized commands
  * like fork return 'accepted' immediately; the result lands later).
  */
-export async function waitHostCommand(commandId: string, signal?: AbortSignal, timeoutMs = 30_000, serverId?: string): Promise<JsonValue> {
+export async function waitHostCommand(
+  commandId: string,
+  signal?: AbortSignal,
+  timeoutMs = 30_000,
+  serverId?: string,
+): Promise<JsonValue> {
   const target = resolveSessionTarget(commandId, serverId)
   const scope = serverId ?? (isScopedSessionKey(commandId) ? target.serverId : undefined)
   const revisionKey = scope ? makeSessionKey(scope, target.sessionId) : target.sessionId
@@ -714,11 +915,19 @@ export function setPiModel(sessionId: string, params: SetModelParams, signal?: A
   return postPiSessionCommand(sessionId, 'setModel', params, signal)
 }
 
-export function cyclePiModel(sessionId: string, direction?: 'forward' | 'backward', signal?: AbortSignal): Promise<CommandRecord> {
+export function cyclePiModel(
+  sessionId: string,
+  direction?: 'forward' | 'backward',
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'cycleModel', direction ? { direction } : undefined, signal)
 }
 
-export function setPiThinkingLevel(sessionId: string, params: SetThinkingLevelParams, signal?: AbortSignal): Promise<CommandRecord> {
+export function setPiThinkingLevel(
+  sessionId: string,
+  params: SetThinkingLevelParams,
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
   return postPiSessionCommand(sessionId, 'setThinkingLevel', params, signal)
 }
 
@@ -743,5 +952,5 @@ async function readJson<T>(url: string, init?: RequestInit, serverId?: string): 
       code,
     })
   }
-  return await response.json() as T
+  return (await response.json()) as T
 }

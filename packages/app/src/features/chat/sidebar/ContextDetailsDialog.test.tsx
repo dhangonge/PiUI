@@ -60,9 +60,7 @@ vi.mock('../../../pi/hooks/index.js', () => ({
 }))
 
 function renderDialog() {
-  return render(
-    <ContextDetailsDialog isOpen onClose={vi.fn()} contextLimit={200_000} />,
-  )
+  return render(<ContextDetailsDialog isOpen onClose={vi.fn()} contextLimit={200_000} />)
 }
 
 describe('ContextDetailsDialog', () => {

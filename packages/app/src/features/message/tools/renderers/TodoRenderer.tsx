@@ -36,7 +36,15 @@ export function TodoRenderer({ execution, partKey }: ToolRendererProps) {
 // ============================================
 
 /** Shared presentation for tool results and the live extension todo widget. */
-export function TodoList({ todos, stateKey, counts }: { todos: TodoItem[]; stateKey: string; counts?: { completed: number; total: number } }) {
+export function TodoList({
+  todos,
+  stateKey,
+  counts,
+}: {
+  todos: TodoItem[]
+  stateKey: string
+  counts?: { completed: number; total: number }
+}) {
   const { t } = useTranslation('message')
   const [collapsed, setCollapsed] = useUiDisclosureState(stateKey, false)
   const shouldRenderBody = useMessageExpandRender(!collapsed)
@@ -45,7 +53,10 @@ export function TodoList({ todos, stateKey, counts }: { todos: TodoItem[]; state
   const total = counts?.total ?? todos.length
 
   return (
-    <div ref={rootRef} className="border border-border-200/50 rounded-md overflow-hidden bg-bg-100 text-[length:var(--fs-sm)]">
+    <div
+      ref={rootRef}
+      className="border border-border-200/50 rounded-md overflow-hidden bg-bg-100 text-[length:var(--fs-sm)]"
+    >
       {/* Header */}
       <div
         ref={headerRef}

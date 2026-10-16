@@ -10,26 +10,26 @@
 
 ## Coverage decisions
 
-| OCUI change family | PiUI Android result |
-| --- | --- |
-| Markdown math, escaped/single delimiters, incremental rendering | Already present in Pi's marked/morphdom pipeline; retained and regression-tested. Duplicate imported tests removed. |
-| Mobile IME delete-all and input-capsule spacing | Already present; no second implementation. |
-| Message animation cancellation | Stop animation controls during cleanup; preserve normal completion and StrictMode safety. |
-| Streamed timeline derived-data reuse | Retain native ChatArea entry cache and stable maps/sets; OCUI message-part model is incompatible. |
-| Session-list retries and empty/error states | Four attempts, 500/1500/3000ms backoff; loading covers retries; stale work cancelled on unmount, search, directory, endpoint changes. Existing rows survive failures. |
-| Parallel servers and composite session identity | Explicit HTTP clients, per-server WS streams and raw protocol IDs; composite `serverId::sessionId` only at the UI boundary. |
-| Router, sidebar, session tree and child task links | Legacy raw routes supported; server-aware navigation, fork linkage, task jump/abort, retained background panes. |
-| Server/folder/chat search and folder ordering | Per-server results including saved empty folders; up/down folder controls work on touch screens. |
-| Subscription/focus churn | Stable subscription snapshots and incremental connection updates; adding B or focusing B does not reconnect A. |
-| Permissions and inline tool requests | Preserve Pi extension UI/TUI and keyed pending actions; do not recreate OpenCode PermissionDialog/usePermissionHandler. |
-| Directory, path style, pinned sessions, model visibility/preferences | Server-sharded persistence and snapshots; inactive Windows-path detection does not alter Linux preferences. |
-| Terminal/file/Git panels | Qualified terminal IDs and owner-bound tickets/actions; snapshots keyed by server/endpoint/workspace. File/Git views remount on focused connection changes. |
-| Startup default server and settings | Persist explicit preference separately from the protected built-in local server; backup/import compatible with old data. Preference changes do not switch focus. |
-| First action inside a background pane | Capture-phase pointer/focus/click selects the owner before child handlers; navigation context uses the session's own workspace. |
-| Storage backup and browser test fixture | Export actual `srv:` keys as well as historical backup keys; real JSDOM Storage supports enumeration. |
-| Dependency and Android CI fixes | fast-uri 3.1.8 override (3.1.6 was still affected by later advisories); install Android platform-tools rather than removed SDK tools package. |
-| OpenCode update-channel freeze | Deliberately excluded: OpenCode v1 EOL is not evidence of PiUI EOL. PiUI update behavior retained. |
-| Desktop controls, WSL, Docker, OpenCode SDK/API | Excluded from the Android/Pi scope. No desktop runtime, WSL management or OpenCode transport restored. |
+| OCUI change family                                                   | PiUI Android result                                                                                                                                                   |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Markdown math, escaped/single delimiters, incremental rendering      | Already present in Pi's marked/morphdom pipeline; retained and regression-tested. Duplicate imported tests removed.                                                   |
+| Mobile IME delete-all and input-capsule spacing                      | Already present; no second implementation.                                                                                                                            |
+| Message animation cancellation                                       | Stop animation controls during cleanup; preserve normal completion and StrictMode safety.                                                                             |
+| Streamed timeline derived-data reuse                                 | Retain native ChatArea entry cache and stable maps/sets; OCUI message-part model is incompatible.                                                                     |
+| Session-list retries and empty/error states                          | Four attempts, 500/1500/3000ms backoff; loading covers retries; stale work cancelled on unmount, search, directory, endpoint changes. Existing rows survive failures. |
+| Parallel servers and composite session identity                      | Explicit HTTP clients, per-server WS streams and raw protocol IDs; composite `serverId::sessionId` only at the UI boundary.                                           |
+| Router, sidebar, session tree and child task links                   | Legacy raw routes supported; server-aware navigation, fork linkage, task jump/abort, retained background panes.                                                       |
+| Server/folder/chat search and folder ordering                        | Per-server results including saved empty folders; up/down folder controls work on touch screens.                                                                      |
+| Subscription/focus churn                                             | Stable subscription snapshots and incremental connection updates; adding B or focusing B does not reconnect A.                                                        |
+| Permissions and inline tool requests                                 | Preserve Pi extension UI/TUI and keyed pending actions; do not recreate OpenCode PermissionDialog/usePermissionHandler.                                               |
+| Directory, path style, pinned sessions, model visibility/preferences | Server-sharded persistence and snapshots; inactive Windows-path detection does not alter Linux preferences.                                                           |
+| Terminal/file/Git panels                                             | Qualified terminal IDs and owner-bound tickets/actions; snapshots keyed by server/endpoint/workspace. File/Git views remount on focused connection changes.           |
+| Startup default server and settings                                  | Persist explicit preference separately from the protected built-in local server; backup/import compatible with old data. Preference changes do not switch focus.      |
+| First action inside a background pane                                | Capture-phase pointer/focus/click selects the owner before child handlers; navigation context uses the session's own workspace.                                       |
+| Storage backup and browser test fixture                              | Export actual `srv:` keys as well as historical backup keys; real JSDOM Storage supports enumeration.                                                                 |
+| Dependency and Android CI fixes                                      | fast-uri 3.1.8 override (3.1.6 was still affected by later advisories); install Android platform-tools rather than removed SDK tools package.                         |
+| OpenCode update-channel freeze                                       | Deliberately excluded: OpenCode v1 EOL is not evidence of PiUI EOL. PiUI update behavior retained.                                                                    |
+| Desktop controls, WSL, Docker, OpenCode SDK/API                      | Excluded from the Android/Pi scope. No desktop runtime, WSL management or OpenCode transport restored.                                                                |
 
 Replaced OCUI-only controllers/view models remain replaced: PiChatPane, native session lists, Pi management pages, and Pi extension stores implement their corresponding responsibilities. Desktop-only guarded components are inert in Android and are not a second supported platform.
 
@@ -96,17 +96,17 @@ Local release outputs without signing configuration are unsigned. They require s
 
 Source commit: `2d2f5470` (the subsequent documentation commit does not change app binaries).
 
-| Check | Result |
-| --- | --- |
-| App Vitest | 134 files, 752 passed; final rerun with maxWorkers=1, 349.39s |
-| Protocol Node tests | 15 passed |
-| Pi worker Node tests | 59 passed |
-| Server Node tests | 126 passed, 2 pre-existing skips |
-| Rust bridge tests | 3 passed; cargo check also passed |
-| Static checks | All four package typechecks; app ESLint passed |
-| Production build | Passed, including both Android before-build Vite runs |
-| Browser smoke | Three checks passed; screenshot `/tmp/piui-smoke-1791184266643.png` |
-| Android release | arm64-v8a and armeabi-v7a builds exited 0; aapt verified each ABI |
+| Check                | Result                                                              |
+| -------------------- | ------------------------------------------------------------------- |
+| App Vitest           | 134 files, 752 passed; final rerun with maxWorkers=1, 349.39s       |
+| Protocol Node tests  | 15 passed                                                           |
+| Pi worker Node tests | 59 passed                                                           |
+| Server Node tests    | 126 passed, 2 pre-existing skips                                    |
+| Rust bridge tests    | 3 passed; cargo check also passed                                   |
+| Static checks        | All four package typechecks; app ESLint passed                      |
+| Production build     | Passed, including both Android before-build Vite runs               |
+| Browser smoke        | Three checks passed; screenshot `/tmp/piui-smoke-1791184266643.png` |
+| Android release      | arm64-v8a and armeabi-v7a builds exited 0; aapt verified each ABI   |
 
 The Node-package results are from `/tmp/piui-final-suite-VV7YQ7/output.log`. Its app stage exposed one missing React `act` boundary in the existing HTML-touch-control test. After fixing that fixture, the complete app suite passed separately in `/tmp/piui-final-app-DifQop/output.log`; the earlier combined invocation itself did not exit successfully. No application assertion was removed or weakened. The two server skips are Windows-only case renaming on Linux and the already-disabled SessionRuntimeRegistry concurrent-open test.
 
@@ -114,9 +114,9 @@ Final totals: 952 JavaScript/TypeScript tests passed, 2 skipped; 3 additional Ru
 
 Artifacts are ignored build outputs under `packages/app/src-tauri/target/apk-delivery-2d2f5470/`:
 
-| File | Size in bytes | SHA-256 |
-| --- | ---: | --- |
-| piui-android-arm64-v8a-unsigned.apk | 14232685 | edee2a1bd894c10a72b3707eb0e5ea66ce4ef1b30a02df4d671dea9eb2328762 |
-| piui-android-armeabi-v7a-unsigned.apk | 11342679 | 70dc6d2e36f435617595cfa1e2ea67245047745d63fc9ac368866ea2bb12e1d9 |
+| File                                  | Size in bytes | SHA-256                                                          |
+| ------------------------------------- | ------------: | ---------------------------------------------------------------- |
+| piui-android-arm64-v8a-unsigned.apk   |      14232685 | edee2a1bd894c10a72b3707eb0e5ea66ce4ef1b30a02df4d671dea9eb2328762 |
+| piui-android-armeabi-v7a-unsigned.apk |      11342679 | 70dc6d2e36f435617595cfa1e2ea67245047745d63fc9ac368866ea2bb12e1d9 |
 
 Both declare package `com.piui.app`, versionName `0.6.21`, versionCode `6021`, minSdk `24`, targetSdk `36`. Built with local NDK `28.0.13004108`, Java 21, Rust 1.99.0 and Gradle 8.14.3. Build logs: `/tmp/piui-final-apk-arm64.log`, `/tmp/piui-final-apk-armv7.log`. Unsigned APKs need release or development signing before installation; no private signing material was generated.

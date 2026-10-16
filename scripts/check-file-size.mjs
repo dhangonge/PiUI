@@ -8,13 +8,13 @@
 //
 // 拆不动/确实需要临时加的，用 `npm run check:size -- --update` 刷新基线，
 // 刷新的数字会出现在 diff 里，review 时能一眼看到是哪个文件又胖了。
-import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
+import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const LIMIT = 1000
-const root = fileURLToPath(new URL("..", import.meta.url))
-const baselinePath = path.join(root, "scripts", "file-size-baseline.json")
+const root = fileURLToPath(new URL('..', import.meta.url))
+const baselinePath = path.join(root, 'scripts', 'file-size-baseline.json')
 
 function walk(dir, found = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -26,19 +26,19 @@ function walk(dir, found = []) {
 }
 
 function collect() {
-  const packagesDir = path.join(root, "packages")
+  const packagesDir = path.join(root, 'packages')
   const sizes = new Map()
   for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
-    const src = path.join(packagesDir, entry.name, "src")
+    const src = path.join(packagesDir, entry.name, 'src')
     try {
       if (!statSync(src).isDirectory()) continue
     } catch {
       continue
     }
     for (const file of walk(src)) {
-      const lines = readFileSync(file, "utf8").split("\n").length - 1
-      sizes.set(path.relative(root, file).split(path.sep).join("/"), lines)
+      const lines = readFileSync(file, 'utf8').split('\n').length - 1
+      sizes.set(path.relative(root, file).split(path.sep).join('/'), lines)
     }
   }
   return sizes
@@ -46,11 +46,11 @@ function collect() {
 
 const sizes = collect()
 const oversized = [...sizes].filter(([, lines]) => lines > LIMIT).sort((a, b) => b[1] - a[1])
-const baseline = JSON.parse(readFileSync(baselinePath, "utf8"))
+const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'))
 
-if (process.argv.includes("--update")) {
+if (process.argv.includes('--update')) {
   const next = Object.fromEntries(oversized)
-  writeFileSync(baselinePath, JSON.stringify(next, null, 2) + "\n")
+  writeFileSync(baselinePath, JSON.stringify(next, null, 2) + '\n')
   console.log(`file size baseline updated: ${oversized.length} files over ${LIMIT} lines`)
   process.exit(0)
 }
@@ -78,10 +78,8 @@ for (const [file, allowed] of Object.entries(baseline)) {
 }
 
 if (problems.length > 0) {
-  console.error("file size check failed:\n" + problems.map(p => `  - ${p}`).join("\n"))
+  console.error('file size check failed:\n' + problems.map(p => `  - ${p}`).join('\n'))
   process.exit(1)
 }
 
-console.log(
-  `file size OK: ${sizes.size} files, 上限 ${LIMIT} 行, 基线内 ${Object.keys(baseline).length} 个待拆文件`,
-)
+console.log(`file size OK: ${sizes.size} files, 上限 ${LIMIT} 行, 基线内 ${Object.keys(baseline).length} 个待拆文件`)

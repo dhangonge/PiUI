@@ -57,7 +57,10 @@ function loadEntries(): PinnedSessionEntry[] {
 function scopedEntries(sessionId: string): PinnedSessionEntry[] {
   return parseEntries(serverStorage.getJSONFor(STORAGE_KEY, splitSessionKey(sessionId).serverId))
 }
-function mutateScoped(sessionId: string, update: (entries: PinnedSessionEntry[], rawId: string) => PinnedSessionEntry[]): void {
+function mutateScoped(
+  sessionId: string,
+  update: (entries: PinnedSessionEntry[], rawId: string) => PinnedSessionEntry[],
+): void {
   const target = splitSessionKey(sessionId)
   serverStorage.setJSONFor(STORAGE_KEY, update(scopedEntries(sessionId), target.sessionId), target.serverId)
 }
@@ -82,28 +85,32 @@ class PinnedSessionsStore {
   private reload() {
     this.entries = loadEntries()
     this.scopedSnapshot = serverStore.getServers().flatMap(server =>
-      parseEntries(serverStorage.getJSONFor(STORAGE_KEY, server.id)).map(entry => ({ ...entry, sessionId: makeSessionKey(server.id, entry.sessionId) })))
+      parseEntries(serverStorage.getJSONFor(STORAGE_KEY, server.id)).map(entry => ({
+        ...entry,
+        sessionId: makeSessionKey(server.id, entry.sessionId),
+      })),
+    )
   }
 
   isPinned(sessionId: string): boolean {
-    if (isScopedSessionKey(sessionId)) return scopedEntries(sessionId).some(entry => entry.sessionId === splitSessionKey(sessionId).sessionId)
+    if (isScopedSessionKey(sessionId))
+      return scopedEntries(sessionId).some(entry => entry.sessionId === splitSessionKey(sessionId).sessionId)
     return this.entries.some(e => e.sessionId === sessionId)
   }
 
   pin(entry: PinnedSessionEntry) {
     if (isScopedSessionKey(entry.sessionId)) {
-      mutateScoped(entry.sessionId, (entries, rawId) => [...entries.filter(item => item.sessionId !== rawId), { ...entry, sessionId: rawId }])
+      mutateScoped(entry.sessionId, (entries, rawId) => [
+        ...entries.filter(item => item.sessionId !== rawId),
+        { ...entry, sessionId: rawId },
+      ])
       return
     }
     const existingIndex = this.entries.findIndex(e => e.sessionId === entry.sessionId)
     if (existingIndex !== -1) {
       const existing = this.entries[existingIndex]
       if (existing.directory === entry.directory && existing.title === entry.title) return
-      this.entries = [
-        ...this.entries.slice(0, existingIndex),
-        entry,
-        ...this.entries.slice(existingIndex + 1),
-      ]
+      this.entries = [...this.entries.slice(0, existingIndex), entry, ...this.entries.slice(existingIndex + 1)]
       this.persist()
       this.emit()
       return
@@ -115,7 +122,9 @@ class PinnedSessionsStore {
 
   update(sessionId: string, patch: Partial<Omit<PinnedSessionEntry, 'sessionId'>>) {
     if (isScopedSessionKey(sessionId)) {
-      mutateScoped(sessionId, (entries, rawId) => entries.map(entry => entry.sessionId === rawId ? { ...entry, ...patch } : entry))
+      mutateScoped(sessionId, (entries, rawId) =>
+        entries.map(entry => (entry.sessionId === rawId ? { ...entry, ...patch } : entry)),
+      )
       return
     }
     const index = this.entries.findIndex(e => e.sessionId === sessionId)

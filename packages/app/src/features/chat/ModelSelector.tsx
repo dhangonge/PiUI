@@ -53,8 +53,7 @@ interface ModelSelectorProps {
 // ============================================
 
 type FlatListItem =
-  | { type: 'header'; data: { name: string }; key: string }
-  | { type: 'item'; data: ModelInfo; key: string }
+  { type: 'header'; data: { name: string }; key: string } | { type: 'item'; data: ModelInfo; key: string }
 
 // ============================================
 // Flat list hook（分组 + 置顶 + 最近）
@@ -286,7 +285,9 @@ const ModelListPanel = memo(function ModelListPanel({
                     <div className="flex items-center gap-2 text-[length:var(--fs-sm)] font-mono flex-shrink-0">
                       <span className="text-text-500 max-w-[100px] truncate text-right">{model.provider}</span>
                       {model.contextWindow > 0 && (
-                        <span className="text-text-500 w-[4ch] text-right hidden sm:inline">{formatContext(model.contextWindow)}</span>
+                        <span className="text-text-500 w-[4ch] text-right hidden sm:inline">
+                          {formatContext(model.contextWindow)}
+                        </span>
                       )}
                       {isSelected && (
                         <span className="w-5 flex items-center justify-center flex-shrink-0 text-accent-secondary-100">
@@ -394,9 +395,7 @@ export const ModelSelector = memo(
       const normalize = (value: unknown) => (typeof value === 'string' ? value : '').toLowerCase()
       return visibleModels.filter(
         m =>
-          normalize(m.name).includes(query) ||
-          normalize(m.id).includes(query) ||
-          normalize(m.provider).includes(query),
+          normalize(m.name).includes(query) || normalize(m.id).includes(query) || normalize(m.provider).includes(query),
       )
     }, [models, searchQuery, hiddenModelKeySet])
 
@@ -448,28 +447,31 @@ export const ModelSelector = memo(
 
     // ---- Open / Close ----
 
-    const openMenu = useCallback((focusTarget: 'search' | 'list' = 'search', preferredIndex?: number) => {
-      if (disabled || isLoading) return
-      let targetIndex = 0
-      if (typeof preferredIndex === 'number') {
-        targetIndex = Math.max(0, Math.min(preferredIndex, itemIndices.length - 1))
-      } else if (selectedModelKey) {
-        const index = flatList.findIndex(item => item.type === 'item' && getModelKey(item.data) === selectedModelKey)
-        if (index !== -1) {
-          const interactiveIndex = itemIndices.indexOf(index)
-          if (interactiveIndex !== -1) targetIndex = interactiveIndex
+    const openMenu = useCallback(
+      (focusTarget: 'search' | 'list' = 'search', preferredIndex?: number) => {
+        if (disabled || isLoading) return
+        let targetIndex = 0
+        if (typeof preferredIndex === 'number') {
+          targetIndex = Math.max(0, Math.min(preferredIndex, itemIndices.length - 1))
+        } else if (selectedModelKey) {
+          const index = flatList.findIndex(item => item.type === 'item' && getModelKey(item.data) === selectedModelKey)
+          if (index !== -1) {
+            const interactiveIndex = itemIndices.indexOf(index)
+            if (interactiveIndex !== -1) targetIndex = interactiveIndex
+          }
         }
-      }
-      openFocusTargetRef.current = focusTarget
-      openHighlightedIndexRef.current = targetIndex
-      setHighlightedIndex(targetIndex)
-      setIsOpen(true)
-      setSearchQuery('')
-      ignoreMouseRef.current = true
-      setTimeout(() => {
-        ignoreMouseRef.current = false
-      }, 300)
-    }, [disabled, isLoading, selectedModelKey, flatList, itemIndices])
+        openFocusTargetRef.current = focusTarget
+        openHighlightedIndexRef.current = targetIndex
+        setHighlightedIndex(targetIndex)
+        setIsOpen(true)
+        setSearchQuery('')
+        ignoreMouseRef.current = true
+        setTimeout(() => {
+          ignoreMouseRef.current = false
+        }, 300)
+      },
+      [disabled, isLoading, selectedModelKey, flatList, itemIndices],
+    )
 
     const closeMenu = useCallback((options?: { focusTrigger?: boolean }) => {
       setIsOpen(false)
@@ -482,7 +484,9 @@ export const ModelSelector = memo(
     const focusToolbarInput = useCallback(() => {
       if (trigger !== 'toolbar') return
       const container = constrainToRef?.current
-      const input = container?.querySelector<HTMLElement>('textarea, input:not([type="file"]):not([disabled]), [contenteditable="true"]')
+      const input = container?.querySelector<HTMLElement>(
+        'textarea, input:not([type="file"]):not([disabled]), [contenteditable="true"]',
+      )
       input?.focus()
     }, [constrainToRef, trigger])
 
@@ -506,32 +510,38 @@ export const ModelSelector = memo(
       [onSelect, closeMenu, focusToolbarInput, trigger, serverId],
     )
 
-    const handleTogglePin = useCallback((e: React.MouseEvent<HTMLButtonElement>, model: ModelInfo) => {
-      e.stopPropagation()
-      if (e.detail === 0) {
-        pendingFocusRestoreRef.current = { modelKey: getModelKey(model), target: 'pin' }
-      } else {
-        pendingFocusRestoreRef.current = null
-        e.currentTarget.blur()
-      }
-      toggleModelPin(model, serverId)
-      setRefreshTrigger(c => c + 1)
-    }, [serverId])
+    const handleTogglePin = useCallback(
+      (e: React.MouseEvent<HTMLButtonElement>, model: ModelInfo) => {
+        e.stopPropagation()
+        if (e.detail === 0) {
+          pendingFocusRestoreRef.current = { modelKey: getModelKey(model), target: 'pin' }
+        } else {
+          pendingFocusRestoreRef.current = null
+          e.currentTarget.blur()
+        }
+        toggleModelPin(model, serverId)
+        setRefreshTrigger(c => c + 1)
+      },
+      [serverId],
+    )
 
     // ---- Long press to pin (touch devices) ----
 
     const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const longPressFiredRef = useRef(false)
 
-    const handleTouchStart = useCallback((model: ModelInfo) => {
-      longPressFiredRef.current = false
-      longPressTimerRef.current = setTimeout(() => {
-        longPressFiredRef.current = true
-        toggleModelPin(model, serverId)
-        setRefreshTrigger(c => c + 1)
-        if (navigator.vibrate) navigator.vibrate(30)
-      }, 500)
-    }, [serverId])
+    const handleTouchStart = useCallback(
+      (model: ModelInfo) => {
+        longPressFiredRef.current = false
+        longPressTimerRef.current = setTimeout(() => {
+          longPressFiredRef.current = true
+          toggleModelPin(model, serverId)
+          setRefreshTrigger(c => c + 1)
+          if (navigator.vibrate) navigator.vibrate(30)
+        }, 500)
+      },
+      [serverId],
+    )
 
     const handleTouchEnd = useCallback(() => {
       if (longPressTimerRef.current) {
@@ -588,11 +598,7 @@ export const ModelSelector = memo(
       if (!isOpen) return
       const handleClickOutside = (e: MouseEvent) => {
         const target = e.target as Node
-        if (
-          containerRef.current &&
-          !containerRef.current.contains(target) &&
-          !menuRef.current?.contains(target)
-        ) {
+        if (containerRef.current && !containerRef.current.contains(target) && !menuRef.current?.contains(target)) {
           closeMenu({ focusTrigger: !isFocusableElement(target) })
         }
       }
@@ -695,7 +701,15 @@ export const ModelSelector = memo(
             break
         }
       },
-      [itemIndices, flatList, highlightedIndex, handleSelect, closeMenu, focusItemAtInteractiveIndex, focusRelativeToTrigger],
+      [
+        itemIndices,
+        flatList,
+        highlightedIndex,
+        handleSelect,
+        closeMenu,
+        focusItemAtInteractiveIndex,
+        focusRelativeToTrigger,
+      ],
     )
 
     const handleItemKeyDown = useCallback(
@@ -794,7 +808,7 @@ export const ModelSelector = memo(
     // ---- Trigger button ----
 
     const triggerButton =
-                trigger === 'header' ? (
+      trigger === 'header' ? (
         <button
           ref={triggerRef}
           onClick={() => (isOpen ? closeMenu() : openMenu())}

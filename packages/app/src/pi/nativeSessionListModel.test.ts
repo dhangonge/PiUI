@@ -4,17 +4,19 @@ import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } fro
 
 describe('Pi session list model', () => {
   it('uses an explicit name as title while preserving Pi metadata', () => {
-    expect(piSessionInfoToUiSession({
-      id: 's1',
-      path: '/sessions/s1.jsonl',
-      cwd: '/workspace/piui',
-      name: 'Registry refactor',
-      firstMessage: 'Please review the API',
-      allMessagesText: 'Please review the API and tests',
-      messageCount: 12,
-      created: new Date('2026-07-28T10:00:00.000Z'),
-      modified: new Date('2026-07-29T10:00:00.000Z'),
-    })).toMatchObject({
+    expect(
+      piSessionInfoToUiSession({
+        id: 's1',
+        path: '/sessions/s1.jsonl',
+        cwd: '/workspace/piui',
+        name: 'Registry refactor',
+        firstMessage: 'Please review the API',
+        allMessagesText: 'Please review the API and tests',
+        messageCount: 12,
+        created: new Date('2026-07-28T10:00:00.000Z'),
+        modified: new Date('2026-07-29T10:00:00.000Z'),
+      }),
+    ).toMatchObject({
       id: 's1',
       title: 'Registry refactor',
       firstMessage: 'Please review the API',

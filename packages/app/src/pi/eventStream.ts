@@ -16,7 +16,13 @@ import type { ProviderAuthEvent, SessionsActivitySnapshot, SessionActivityStatus
 import { getApiBase, getPiAuthToken } from './httpClient.js'
 import { openPiSocket, PI_SOCKET_CLOSED, PI_SOCKET_CLOSING, PI_SOCKET_OPEN, type PiSocket } from './piSocket'
 import { piBranchStore, getPiCommandStore, piSessionStateStore } from './state/index.js'
-import { isScopedSessionKey, makeSessionKey, splitSessionKey, getServerRevision, scopeSessionResult } from '../utils/sessionKey'
+import {
+  isScopedSessionKey,
+  makeSessionKey,
+  splitSessionKey,
+  getServerRevision,
+  scopeSessionResult,
+} from '../utils/sessionKey'
 import { extensionUiStore } from './extensionUiStore'
 import { getPiModelsStore } from './state/piModelsStore'
 import { piSessionInfoStore } from './piSessionInfoStore'
@@ -38,11 +44,7 @@ import {
   type PackageProgress,
 } from './managementEventStore'
 import type { SessionStatus } from '../types/session'
-import {
-  loadPiSessionData,
-  refreshPiBranch,
-  refreshPiSessionState,
-} from './controllers/index.js'
+import { loadPiSessionData, refreshPiBranch, refreshPiSessionState } from './controllers/index.js'
 
 const PING_INTERVAL_MS = 25_000
 const RECONNECT_DELAY_MS = 1_000
@@ -102,8 +104,12 @@ export class PiEventStream {
     return this.serverId ? makeSessionKey(this.serverId, id) : id
   }
 
-  private get commandStore() { return getPiCommandStore(this.serverId) }
-  private providers(): string[] { return this.serverId ? [] : getTrackedManagementProviders() }
+  private get commandStore() {
+    return getPiCommandStore(this.serverId)
+  }
+  private providers(): string[] {
+    return this.serverId ? [] : getTrackedManagementProviders()
+  }
   private serverRefs = 0
 
   connectServer(): void {
@@ -211,7 +217,13 @@ export class PiEventStream {
   }
 
   invalidate(): void {
-    const ids = new Set([...this.knownActiveSessions, ...Object.keys(extensionUiStore.getSnapshot().sessions).filter(id => this.serverId && id.startsWith(`${this.serverId}::`)), ...[...this.refCounts.keys()].map(id => this.sessionKey(id))])
+    const ids = new Set([
+      ...this.knownActiveSessions,
+      ...Object.keys(extensionUiStore.getSnapshot().sessions).filter(
+        id => this.serverId && id.startsWith(`${this.serverId}::`),
+      ),
+      ...[...this.refCounts.keys()].map(id => this.sessionKey(id)),
+    ])
     this.disconnectAll()
     this.knownActiveSessions.clear()
     for (const id of ids) {
@@ -371,13 +383,30 @@ export class PiEventStream {
   private handleEvent(envelope: EventEnvelope): void {
     const sessionId = envelope.stream.kind === 'session' ? this.sessionKey(envelope.stream.id) : null
     this.cursors.set(eventStreamKey(envelope.stream), envelope.cursor)
-    if (!this.serverId && streams.has(serverStore.getActiveServerId()) &&
-      ['sessions.updated', 'sessions.activity'].includes(envelope.channel)) return
+    if (
+      !this.serverId &&
+      streams.has(serverStore.getActiveServerId()) &&
+      ['sessions.updated', 'sessions.activity'].includes(envelope.channel)
+    )
+      return
     // Management and workspace panels are bound to the focused server. Never
     // feed another endpoint's auth, files or terminals into those global stores.
-    if (this.serverId && this.serverId !== serverStore.getActiveServerId() &&
-      ['provider.auth', 'packages.progress', 'resources.updated', 'workspace.files', 'workspace.git',
-        'terminal.created', 'terminal.updated', 'terminal.exited', 'terminal.deleted'].includes(envelope.channel)) return
+    if (
+      this.serverId &&
+      this.serverId !== serverStore.getActiveServerId() &&
+      [
+        'provider.auth',
+        'packages.progress',
+        'resources.updated',
+        'workspace.files',
+        'workspace.git',
+        'terminal.created',
+        'terminal.updated',
+        'terminal.exited',
+        'terminal.deleted',
+      ].includes(envelope.channel)
+    )
+      return
     switch (envelope.channel) {
       case 'pi.event':
         if (sessionId) this.handlePiEvent(sessionId, envelope.payload as unknown as PiEventPayload)
@@ -401,7 +430,11 @@ export class PiEventStream {
         if (isCommandRecord(envelope.payload)) {
           this.commandStore.upsert(envelope.payload)
           const detail = scopeSessionResult<CommandRecord>(envelope.payload, this.serverId)
-          window.dispatchEvent(new CustomEvent('piui:command-updated', { detail: this.serverId ? { ...detail, id: makeSessionKey(this.serverId, detail.id) } : detail }))
+          window.dispatchEvent(
+            new CustomEvent('piui:command-updated', {
+              detail: this.serverId ? { ...detail, id: makeSessionKey(this.serverId, detail.id) } : detail,
+            }),
+          )
         }
         break
       case 'extension.ui':
@@ -427,9 +460,11 @@ export class PiEventStream {
       case 'registry.updated': {
         const payload = envelope.payload as { sessionId?: string } | undefined
         if (sessionId || payload?.sessionId) {
-          window.dispatchEvent(new CustomEvent('piui:registry-updated', {
-            detail: { sessionId: sessionId ?? (payload?.sessionId ? this.sessionKey(payload.sessionId) : undefined) },
-          }))
+          window.dispatchEvent(
+            new CustomEvent('piui:registry-updated', {
+              detail: { sessionId: sessionId ?? (payload?.sessionId ? this.sessionKey(payload.sessionId) : undefined) },
+            }),
+          )
         }
         break
       }
@@ -437,9 +472,11 @@ export class PiEventStream {
       case 'terminal.updated':
       case 'terminal.exited':
       case 'terminal.deleted':
-        window.dispatchEvent(new CustomEvent('piui:terminals-changed', {
-          detail: { workspacePath: envelope.stream.kind === 'workspace' ? envelope.stream.id : undefined },
-        }))
+        window.dispatchEvent(
+          new CustomEvent('piui:terminals-changed', {
+            detail: { workspacePath: envelope.stream.kind === 'workspace' ? envelope.stream.id : undefined },
+          }),
+        )
         break
     }
   }
@@ -493,7 +530,9 @@ export class PiEventStream {
         break
       case 'settled':
         extensionUiStore.requestSettled(sessionId, event.requestId)
-        activeSessionStore.resolvePendingRequest(isScopedSessionKey(sessionId) ? `${sessionId}:${event.requestId}` : event.requestId)
+        activeSessionStore.resolvePendingRequest(
+          isScopedSessionKey(sessionId) ? `${sessionId}:${event.requestId}` : event.requestId,
+        )
         break
       case 'state':
         extensionUiStore.statePatched(sessionId, event.patch)
@@ -541,7 +580,9 @@ export class PiEventStream {
    * Feeds activeSessionStore so the sidebar shows working/retrying dots.
    */
   private handleActivitySnapshot(snapshot: SessionsActivitySnapshot): void {
-    const active = Object.fromEntries(Object.entries(snapshot?.sessions ?? {}).map(([id, status]) => [this.sessionKey(id), status]))
+    const active = Object.fromEntries(
+      Object.entries(snapshot?.sessions ?? {}).map(([id, status]) => [this.sessionKey(id), status]),
+    )
     for (const [sessionId, status] of Object.entries(active)) {
       if (!this.knownActiveSessions.has(sessionId)) notifySessionStarted(sessionId)
       activeSessionStore.updateStatus(sessionId, activityToSessionStatus(status))
@@ -587,8 +628,13 @@ export class PiEventStream {
       case 'bash_execution_update': {
         // 用户 `!cmd`/`/bash` 的流式输出（pi TUI onChunk 的事件流对应物）。
         // id = worker 透传的 clientId，delta 是增量 chunk。
-        if ('id' in event && typeof event.id === 'string' && event.id
-          && 'delta' in event && typeof event.delta === 'string') {
+        if (
+          'id' in event &&
+          typeof event.id === 'string' &&
+          event.id &&
+          'delta' in event &&
+          typeof event.delta === 'string'
+        ) {
           liveToolOutputStore.append(event.id, sessionId, event.delta)
         }
         this.scheduleStateRefresh(sessionId)
@@ -658,12 +704,16 @@ export class PiEventStream {
     } else if (stream.kind === 'provider') {
       receiveProviderAuthUpdated()
     } else if (stream.kind === 'workspace') {
-      window.dispatchEvent(new CustomEvent('piui:workspace-files-changed', {
-        detail: { workspacePath: stream.id, changes: [], rescan: true },
-      }))
-      window.dispatchEvent(new CustomEvent('piui:workspace-git-updated', {
-        detail: { workspacePath: stream.id },
-      }))
+      window.dispatchEvent(
+        new CustomEvent('piui:workspace-files-changed', {
+          detail: { workspacePath: stream.id, changes: [], rescan: true },
+        }),
+      )
+      window.dispatchEvent(
+        new CustomEvent('piui:workspace-git-updated', {
+          detail: { workspacePath: stream.id },
+        }),
+      )
     }
   }
 
@@ -693,7 +743,9 @@ export class PiEventStream {
   }
 
   private hasSubscriptions(): boolean {
-    return this.serverRefs > 0 || this.refCounts.size > 0 || this.workspaceRefCounts.size > 0 || this.providers().length > 0
+    return (
+      this.serverRefs > 0 || this.refCounts.size > 0 || this.workspaceRefCounts.size > 0 || this.providers().length > 0
+    )
   }
 }
 
@@ -726,11 +778,17 @@ serverStore.subscribe(() => {
 
 function isCommandRecord(value: unknown): value is CommandRecord {
   if (!isJsonObject(value)) return false
-  return typeof value.id === 'string' &&
+  return (
+    typeof value.id === 'string' &&
     typeof value.type === 'string' &&
-    (value.status === 'accepted' || value.status === 'running' || value.status === 'completed' ||
-      value.status === 'failed' || value.status === 'cancelled' || value.status === 'unknown_after_crash') &&
+    (value.status === 'accepted' ||
+      value.status === 'running' ||
+      value.status === 'completed' ||
+      value.status === 'failed' ||
+      value.status === 'cancelled' ||
+      value.status === 'unknown_after_crash') &&
     typeof value.submittedAt === 'string'
+  )
 }
 
 function activityToSessionStatus(status: SessionActivityStatus): SessionStatus {

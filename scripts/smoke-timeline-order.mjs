@@ -49,19 +49,28 @@ function fixtureEntries() {
   const callId = 'call-one'
   push({ type: 'model_change', timestamp: iso(), provider: 'mock', modelId: 'mock' })
   push({
-    type: 'message', timestamp: iso(),
+    type: 'message',
+    timestamp: iso(),
     message: { role: 'user', content: [{ type: 'text', text: 'first question' }], timestamp: Date.now() },
   })
   // Plannotator and friends inject model context this way; the TUI hides them.
   push({
-    id: HIDDEN_HOOK_ID, type: 'custom_message', timestamp: iso(),
-    customType: 'plannotator-framing', display: false,
+    id: HIDDEN_HOOK_ID,
+    type: 'custom_message',
+    timestamp: iso(),
+    customType: 'plannotator-framing',
+    display: false,
     content: '[PLANNOTATOR - PLANNING PHASE] model-only context injection',
   })
   push({
-    type: 'message', timestamp: iso(),
+    type: 'message',
+    timestamp: iso(),
     message: {
-      role: 'assistant', provider: 'mock', model: 'mock', stopReason: 'stop', timestamp: Date.now(),
+      role: 'assistant',
+      provider: 'mock',
+      model: 'mock',
+      stopReason: 'stop',
+      timestamp: Date.now(),
       content: [
         { type: 'thinking', thinking: 'Thinking about the first question' },
         { type: 'toolCall', id: callId, name: 'mock-tool', arguments: { echo: 'probe' } },
@@ -70,16 +79,33 @@ function fixtureEntries() {
     },
   })
   push({
-    type: 'message', timestamp: iso(),
-    message: { role: 'toolResult', toolName: 'mock-tool', toolCallId: callId, isError: false, timestamp: Date.now(), content: [{ type: 'text', text: 'mock-tool echo: probe' }] },
+    type: 'message',
+    timestamp: iso(),
+    message: {
+      role: 'toolResult',
+      toolName: 'mock-tool',
+      toolCallId: callId,
+      isError: false,
+      timestamp: Date.now(),
+      content: [{ type: 'text', text: 'mock-tool echo: probe' }],
+    },
   })
   push({
-    type: 'message', timestamp: iso(),
+    type: 'message',
+    timestamp: iso(),
     message: { role: 'user', content: [{ type: 'text', text: 'second question' }], timestamp: Date.now() },
   })
   push({
-    type: 'message', timestamp: iso(),
-    message: { role: 'assistant', provider: 'mock', model: 'mock', stopReason: 'stop', timestamp: Date.now(), content: [{ type: 'text', text: 'Second answer text' }] },
+    type: 'message',
+    timestamp: iso(),
+    message: {
+      role: 'assistant',
+      provider: 'mock',
+      model: 'mock',
+      stopReason: 'stop',
+      timestamp: Date.now(),
+      content: [{ type: 'text', text: 'Second answer text' }],
+    },
   })
   return entries
 }
@@ -134,10 +160,13 @@ async function startServer() {
   mkdirSync(path.join(home, 'sessions'), { recursive: true })
   mkdirSync(path.join(home, 'data'), { recursive: true })
   const sessionFile = path.join(home, 'sessions', `${SESSION_ID}.jsonl`)
-  writeFileSync(sessionFile, [
-    JSON.stringify({ type: 'session', version: 1, id: SESSION_ID, name: 'Alpha chat', cwd: home, timestamp: iso() }),
-    ...fixtureEntries().map(entry => JSON.stringify(entry)),
-  ].join('\n') + '\n')
+  writeFileSync(
+    sessionFile,
+    [
+      JSON.stringify({ type: 'session', version: 1, id: SESSION_ID, name: 'Alpha chat', cwd: home, timestamp: iso() }),
+      ...fixtureEntries().map(entry => JSON.stringify(entry)),
+    ].join('\n') + '\n',
+  )
   const token = randomUUID()
   app = createAppServer({
     authToken: token,
@@ -147,8 +176,11 @@ async function startServer() {
       worker: {
         handshakeTimeoutMs: 60_000,
         env: {
-          PIUI_DRIVER: 'mock', PIUI_MOCK_DIR: home, PIUI_DATA_DIR: path.join(home, 'data'),
-          PI_CODING_AGENT_DIR: path.join(home, 'agent'), PIUI_FILE_LOG: '0',
+          PIUI_DRIVER: 'mock',
+          PIUI_MOCK_DIR: home,
+          PIUI_DATA_DIR: path.join(home, 'data'),
+          PI_CODING_AGENT_DIR: path.join(home, 'agent'),
+          PIUI_FILE_LOG: '0',
         },
       },
     }),
@@ -171,21 +203,37 @@ async function startServer() {
 async function openBrowser(origin, token) {
   // CHROMIUM_EXTRA_ARGS 用于无特权/容器环境（CI 里通常要给 --no-sandbox）。
   const extraArgs = (process.env.CHROMIUM_EXTRA_ARGS || '').split(/\s+/).filter(Boolean)
-  browser = spawn(process.env.CHROMIUM_BIN || 'chromium', [
-    '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
-    '--remote-debugging-port=0', `--user-data-dir=${path.join(root, 'chromium')}`, ...extraArgs, 'about:blank',
-  ], { stdio: ['ignore', 'ignore', 'pipe'] })
+  browser = spawn(
+    process.env.CHROMIUM_BIN || 'chromium',
+    [
+      '--headless=new',
+      '--disable-gpu',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--remote-debugging-port=0',
+      `--user-data-dir=${path.join(root, 'chromium')}`,
+      ...extraArgs,
+      'about:blank',
+    ],
+    { stdio: ['ignore', 'ignore', 'pipe'] },
+  )
   const endpoint = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Chromium did not expose DevTools')), 20_000)
     browser.once('error', reject)
     browser.stderr.on('data', data => {
       const match = String(data).match(/DevTools listening on (ws:\/\/[^\s]+)/)
-      if (match) { clearTimeout(timer); resolve(match[1]) }
+      if (match) {
+        clearTimeout(timer)
+        resolve(match[1])
+      }
     })
   })
   const socket = new WebSocket(endpoint)
   cdp = socket
-  await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject) })
+  await new Promise((resolve, reject) => {
+    socket.once('open', resolve)
+    socket.once('error', reject)
+  })
   let nextId = 0
   const pending = new Map()
   socket.on('message', raw => {
@@ -197,12 +245,16 @@ async function openBrowser(origin, token) {
     if (message.error) request.reject(new Error(`${request.method}: ${message.error.message}`))
     else request.resolve(message.result)
   })
-  const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
-    const id = ++nextId
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`DevTools timeout: ${method}`)) }, 20_000)
-    pending.set(id, { resolve, reject, timer, method })
-    socket.send(JSON.stringify({ id, method, params, sessionId }))
-  })
+  const send = (method, params = {}, sessionId) =>
+    new Promise((resolve, reject) => {
+      const id = ++nextId
+      const timer = setTimeout(() => {
+        pending.delete(id)
+        reject(new Error(`DevTools timeout: ${method}`))
+      }, 20_000)
+      pending.set(id, { resolve, reject, timer, method })
+      socket.send(JSON.stringify({ id, method, params, sessionId }))
+    })
   const { targetId } = await send('Target.createTarget', { url: 'about:blank' })
   const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true })
   const call = (method, params) => send(method, params, sessionId)
@@ -227,7 +279,10 @@ async function openBrowser(origin, token) {
   })
   const evaluate = async expression => {
     const result = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
-    assert.ok(!result.exceptionDetails, result.exceptionDetails?.exception?.description?.split('\n')[0] || 'browser evaluation failed')
+    assert.ok(
+      !result.exceptionDetails,
+      result.exceptionDetails?.exception?.description?.split('\n')[0] || 'browser evaluation failed',
+    )
     return result.result.value
   }
   const rows = async () => {
@@ -248,7 +303,9 @@ try {
 
   const initial = await rows()
   assert.deepEqual(
-    initial.filter(row => row.text.includes('question') || row.key.startsWith('process-shell')).map(row => row.key.startsWith('process-shell') ? 'shell' : 'user'),
+    initial
+      .filter(row => row.text.includes('question') || row.key.startsWith('process-shell'))
+      .map(row => (row.key.startsWith('process-shell') ? 'shell' : 'user')),
     ['user', 'shell', 'user', 'shell'],
     `unexpected timeline: ${JSON.stringify(initial.map(row => row.key))}`,
   )
@@ -275,7 +332,10 @@ try {
       // While the turn is still working the shell keeps its process content
       // collapsed; the settled shell grows by the final answer below it.
       if (liveShell.text.includes('Working for')) {
-        assert.ok(!liveShell.text.includes('Checking the workspace'), `live process content visible instead of collapsed: ${liveShell.text}`)
+        assert.ok(
+          !liveShell.text.includes('Checking the workspace'),
+          `live process content visible instead of collapsed: ${liveShell.text}`,
+        )
         assert.ok(liveShell.height < 120, `live shell not collapsed: height ${liveShell.height}`)
       }
       sawLiveShell = true
@@ -291,11 +351,15 @@ try {
   const finalShell = settled.find(row => row.text.includes('Mock tool reply'))
   assert.ok(finalShell, 'final answer missing from the timeline')
   assert.ok(finalShell.text.includes('Worked for'), `settled shell still says Working: ${finalShell.text}`)
-  assert.deepEqual(settled.map(row => row.key), [...settled.map(row => row.key)].sort((a, b) => {
-    const aUser = a.startsWith('process-shell:') ? a.slice('process-shell:'.length) : a
-    const bUser = b.startsWith('process-shell:') ? b.slice('process-shell:'.length) : b
-    return settled.findIndex(row => row.key === aUser) - settled.findIndex(row => row.key === bUser)
-  }), `rows out of order: ${JSON.stringify(settled.map(row => row.key))}`)
+  assert.deepEqual(
+    settled.map(row => row.key),
+    [...settled.map(row => row.key)].sort((a, b) => {
+      const aUser = a.startsWith('process-shell:') ? a.slice('process-shell:'.length) : a
+      const bUser = b.startsWith('process-shell:') ? b.slice('process-shell:'.length) : b
+      return settled.findIndex(row => row.key === aUser) - settled.findIndex(row => row.key === bUser)
+    }),
+    `rows out of order: ${JSON.stringify(settled.map(row => row.key))}`,
+  )
   console.log(`live turn: collapsed while streaming, settled to "${finalShell.text.slice(0, 60)}"`)
   console.log('PASS timeline order/expansion smoke')
 } finally {

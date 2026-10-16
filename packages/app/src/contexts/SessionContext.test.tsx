@@ -27,7 +27,12 @@ vi.mock('../pi/controllers/index.js', () => ({
 }))
 
 vi.mock('../pi/eventStream', () => ({
-  getPiEventStream: (id: string) => ({ connectServer: () => mocks.connectServer(id), disconnectServer: () => mocks.disconnectServer(id), connectWorkspace: vi.fn(), disconnectWorkspace: vi.fn() }),
+  getPiEventStream: (id: string) => ({
+    connectServer: () => mocks.connectServer(id),
+    disconnectServer: () => mocks.disconnectServer(id),
+    connectWorkspace: vi.fn(),
+    disconnectWorkspace: vi.fn(),
+  }),
   piEventStream: { disconnect: vi.fn() },
 }))
 
@@ -133,18 +138,29 @@ describe('SessionProvider', () => {
     serverStore.setActiveServer(a)
     multiServerStore.setSubscribedServerIds([a, b])
     multiServerStore.setEnabled(true)
-    mocks.loadPiSessions.mockImplementation(async (_signal, id) => [sessionInfo(makeSessionKey(id!, 'same'), '/shared', id)])
+    mocks.loadPiSessions.mockImplementation(async (_signal, id) => [
+      sessionInfo(makeSessionKey(id!, 'same'), '/shared', id),
+    ])
     const { result } = renderHook(() => useContext(SessionContext), { wrapper: SessionProvider })
     await waitFor(() => expect(result.current?.sessions).toHaveLength(2))
     mocks.loadPiSessions.mockImplementation(async (_signal, id) => {
       if (id === b) throw new Error('offline')
       return [sessionInfo(makeSessionKey(a, 'same'), '/shared', 'updated A')]
     })
-    await act(async () => { await result.current!.refresh() })
+    await act(async () => {
+      await result.current!.refresh()
+    })
     expect(result.current!.sessions.map(item => item.title)).toEqual(['updated A', b])
     mocks.deletePiSession.mockResolvedValue(undefined)
-    await act(async () => { await result.current!.deleteSession(makeSessionKey(b, 'same')) })
-    expect(mocks.deletePiSession).toHaveBeenCalledWith('/shared', `/sessions/${makeSessionKey(b, 'same')}.jsonl`, undefined, b)
+    await act(async () => {
+      await result.current!.deleteSession(makeSessionKey(b, 'same'))
+    })
+    expect(mocks.deletePiSession).toHaveBeenCalledWith(
+      '/shared',
+      `/sessions/${makeSessionKey(b, 'same')}.jsonl`,
+      undefined,
+      b,
+    )
     expect(result.current!.sessions.map(item => item.id)).toEqual([makeSessionKey(a, 'same')])
   })
 

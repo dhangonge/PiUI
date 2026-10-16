@@ -99,20 +99,24 @@ function SessionTitleControl({
           }}
           className={inputClass}
         />
+      ) : canRename ? (
+        <button type="button" onClick={handleStartEdit} className={buttonClass} title={clickToRenameTitle}>
+          {sessionTitle}
+        </button>
       ) : (
-        canRename ? (
-          <button type="button" onClick={handleStartEdit} className={buttonClass} title={clickToRenameTitle}>
-            {sessionTitle}
-          </button>
-        ) : (
-          <span className={buttonClass.replace('cursor-text', 'cursor-default')}>{sessionTitle}</span>
-        )
+        <span className={buttonClass.replace('cursor-text', 'cursor-default')}>{sessionTitle}</span>
       )}
 
       {!isEditingTitle && onShare && (
         <>
           <div className={dividerClass} />
-          <button type="button" className={shareButtonClass} title={shareTitle} aria-label={shareTitle} onClick={onShare}>
+          <button
+            type="button"
+            className={shareButtonClass}
+            title={shareTitle}
+            aria-label={shareTitle}
+            onClick={onShare}
+          >
             <ChevronDownIcon size={12} />
           </button>
         </>
@@ -291,8 +295,10 @@ export function Header({
         </div>
       </div>
 
-
-      <div data-chat-header-shadow className="absolute top-full left-0 right-0 h-8 bg-gradient-to-b from-bg-100 to-transparent pointer-events-none z-10" />
+      <div
+        data-chat-header-shadow
+        className="absolute top-full left-0 right-0 h-8 bg-gradient-to-b from-bg-100 to-transparent pointer-events-none z-10"
+      />
     </div>
   )
 }

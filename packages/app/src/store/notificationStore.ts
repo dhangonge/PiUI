@@ -142,7 +142,14 @@ class NotificationStore {
   // 推送通知（加历史 + 弹 toast）
   // ============================================
 
-  push(type: NotificationType, title: string, body: string, sessionId: string, directory?: string, options?: { target?: NotificationTarget }) {
+  push(
+    type: NotificationType,
+    title: string,
+    body: string,
+    sessionId: string,
+    directory?: string,
+    options?: { target?: NotificationTarget },
+  ) {
     const entry: NotificationEntry = {
       id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       type,

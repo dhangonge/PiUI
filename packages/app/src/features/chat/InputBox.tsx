@@ -1,4 +1,16 @@
-import { useState, useRef, useEffect, useCallback, useMemo, useSyncExternalStore, useLayoutEffect, memo, forwardRef, useImperativeHandle, type ReactNode } from 'react'
+import {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+  useSyncExternalStore,
+  useLayoutEffect,
+  memo,
+  forwardRef,
+  useImperativeHandle,
+  type ReactNode,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { AttachmentPreview, type Attachment } from '../attachment'
 import {
@@ -202,49 +214,52 @@ export interface InputBoxHandle {
   setEditorText: (text: string) => void
 }
 
-const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function InputBoxComponent({
-  paneId,
-  onSend,
-  onAbort,
-  onCommand,
-  onCycleModel,
-  onCycleThinkingLevel,
-  onOpenModelSelector,
-  onNewChat,
-  disabled,
-  isStreaming,
-  sessionActive,
-  isCompacting = false,
-  variants = [],
-  selectedVariant,
-  onVariantChange,
-  supportsImages = false,
-  fileCapabilities: fileCapabilitiesProp,
-  models = [],
-  selectedModelKey = null,
-  onModelChange,
-  modelsLoading = false,
-  modelSelectorRef,
-  rootPath = '',
-  sessionId,
-  aboveComposer,
-  revertedText,
-  revertedAttachments,
-  restoreMode = 'replace',
-  canRedo = false,
-  revertSteps = 0,
-  onRedo,
-  onRedoAll,
-  onClearRevert,
-  registerInputBox,
-  isAtBottom = true,
-  showScrollToBottom = false,
-  onScrollToBottom,
-  collapsedPermission,
-  collapsedQuestion,
-  /** Composer text change callback (extension editor state sync) */
-  onTextChange,
-}: InputBoxProps, ref: React.Ref<InputBoxHandle>) {
+const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function InputBoxComponent(
+  {
+    paneId,
+    onSend,
+    onAbort,
+    onCommand,
+    onCycleModel,
+    onCycleThinkingLevel,
+    onOpenModelSelector,
+    onNewChat,
+    disabled,
+    isStreaming,
+    sessionActive,
+    isCompacting = false,
+    variants = [],
+    selectedVariant,
+    onVariantChange,
+    supportsImages = false,
+    fileCapabilities: fileCapabilitiesProp,
+    models = [],
+    selectedModelKey = null,
+    onModelChange,
+    modelsLoading = false,
+    modelSelectorRef,
+    rootPath = '',
+    sessionId,
+    aboveComposer,
+    revertedText,
+    revertedAttachments,
+    restoreMode = 'replace',
+    canRedo = false,
+    revertSteps = 0,
+    onRedo,
+    onRedoAll,
+    onClearRevert,
+    registerInputBox,
+    isAtBottom = true,
+    showScrollToBottom = false,
+    onScrollToBottom,
+    collapsedPermission,
+    collapsedQuestion,
+    /** Composer text change callback (extension editor state sync) */
+    onTextChange,
+  }: InputBoxProps,
+  ref: React.Ref<InputBoxHandle>,
+) {
   const { t } = useTranslation('chat')
   // 合并文件能力：优先用 fileCapabilities，回退到 supportsImages
   const fileCaps: FileCapabilities = useMemo(
@@ -266,9 +281,13 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   const [text, setText] = useState('')
 
   // 扩展 editor 命令接口（set/paste 已由 store 合并为全量文本）
-  useImperativeHandle(ref, () => ({
-    setEditorText: (next: string) => setText(next),
-  }), [])
+  useImperativeHandle(
+    ref,
+    () => ({
+      setEditorText: (next: string) => setText(next),
+    }),
+    [],
+  )
 
   // 文本变化同步（扩展 editor 状态回传）
   useEffect(() => {
@@ -279,13 +298,14 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [deliveryMode, setDeliveryMode] = useState<'steer' | 'followUp'>('followUp')
   const piCapabilities = usePiCapabilities()
-  const effectiveDeliveryMode = deliveryMode === 'steer' && piCapabilities.promptSteer
-    ? 'steer'
-    : piCapabilities.promptFollowUp
-      ? 'followUp'
-      : piCapabilities.promptSteer
-        ? 'steer'
-        : undefined
+  const effectiveDeliveryMode =
+    deliveryMode === 'steer' && piCapabilities.promptSteer
+      ? 'steer'
+      : piCapabilities.promptFollowUp
+        ? 'followUp'
+        : piCapabilities.promptSteer
+          ? 'steer'
+          : undefined
 
   // @ Mention 状态
   const [mentionOpen, setMentionOpen] = useState(false)
@@ -323,7 +343,10 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   const lastTauriDropAtRef = useRef(0)
 
   const { isCompact, enableCollapsedDock } = useChatViewportSelect(
-    value => ({ isCompact: value.presentation.isCompact, enableCollapsedDock: value.interaction.enableCollapsedInputDock }),
+    value => ({
+      isCompact: value.presentation.isCompact,
+      enableCollapsedDock: value.interaction.enableCollapsedInputDock,
+    }),
     (a, b) => a.isCompact === b.isCompact && a.enableCollapsedDock === b.enableCollapsedDock,
   )
 
@@ -392,12 +415,12 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       frameId = requestAnimationFrame(() => {
         if (restoreMode === 'append' && appendedRestoreRef.current === revertedText) return
         const current = latestDraftRef.current
-        const nextText = restoreMode === 'append' && current.text.trim()
-          ? `${current.text}\n\n${revertedText}`
-          : revertedText
-        const nextAttachments = restoreMode === 'append'
-          ? [...current.attachments, ...(revertedAttachments || [])]
-          : (revertedAttachments || [])
+        const nextText =
+          restoreMode === 'append' && current.text.trim() ? `${current.text}\n\n${revertedText}` : revertedText
+        const nextAttachments =
+          restoreMode === 'append'
+            ? [...current.attachments, ...(revertedAttachments || [])]
+            : revertedAttachments || []
         setText(nextText)
         setAttachments(nextAttachments)
         appendedRestoreRef.current = restoreMode === 'append' ? revertedText : undefined
@@ -449,10 +472,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       TEXTAREA_MIN_HEIGHT + TEXTAREA_VERTICAL_CHROME + toolbarHeight,
       nextComposerMaxHeight - footerHeight,
     )
-    const nextTextareaMaxHeight = Math.max(
-      TEXTAREA_MIN_HEIGHT,
-      nextInputContainerMaxHeight - inputContainerChrome,
-    )
+    const nextTextareaMaxHeight = Math.max(TEXTAREA_MIN_HEIGHT, nextInputContainerMaxHeight - inputContainerChrome)
 
     setComposerMaxHeight(prev => (Math.abs(prev - nextComposerMaxHeight) < 1 ? prev : nextComposerMaxHeight))
     setInputContainerMaxHeight(prev =>
@@ -733,9 +753,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       if (!argCompletionOpenRef.current) setArgCompletionLoading(true)
       try {
         const result = (await getPiCommandCompletions(sessionId, ctx.commandName, prefix)) as
-          | ArgCompletionItem[]
-          | null
-          | undefined
+          ArgCompletionItem[] | null | undefined
         if (requestId !== argCompletionReqRef.current) return
         const items = Array.isArray(result) ? result : []
         if (items.length === 0) {
@@ -985,7 +1003,25 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         handleSend()
       }
     },
-    [mentionOpen, slashOpen, mentionQuery, updateMentionQuery, handleSend, text, attachments, handleHistoryKeyDown, onCycleModel, onCycleThinkingLevel, onOpenModelSelector, argCompletionOpen, argCompletionItems, argCompletionIndex, applyArgCompletion, closeArgCompletions, handleArgCompletionTab],
+    [
+      mentionOpen,
+      slashOpen,
+      mentionQuery,
+      updateMentionQuery,
+      handleSend,
+      text,
+      attachments,
+      handleHistoryKeyDown,
+      onCycleModel,
+      onCycleThinkingLevel,
+      onOpenModelSelector,
+      argCompletionOpen,
+      argCompletionItems,
+      argCompletionIndex,
+      applyArgCompletion,
+      closeArgCompletions,
+      handleArgCompletionTab,
+    ],
   )
 
   const handleChange = useCallback(
@@ -1049,8 +1085,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
           // 回车会被 slash 菜单抢走，重新插入命令并复制一个命令附件；
           // 此时参数补全（attachment 路径）仍然有效，回车应直接应用补全。
           const hasMatchingCommandAttachment = attachments.some(
-            a => a.type === 'command' && a.commandName && a.textRange &&
-              newText.startsWith(`/${a.commandName}`),
+            a => a.type === 'command' && a.commandName && a.textRange && newText.startsWith(`/${a.commandName}`),
           )
           if (!hasMatchingCommandAttachment) {
             setSlashQuery(slashTrigger.query)
@@ -1189,9 +1224,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       // 幂等：同一命令重复选择时替换旧附件（textRange 可能随文本变化），
       // 避免输入框里累积多个相同的命令附件
       setAttachments(prev => {
-        const existingIndex = prev.findIndex(
-          a => a.type === 'command' && a.commandName === command.name,
-        )
+        const existingIndex = prev.findIndex(a => a.type === 'command' && a.commandName === command.name)
         if (existingIndex >= 0) {
           const next = [...prev]
           next[existingIndex] = attachment
@@ -1221,7 +1254,6 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
     setSlashOpen(false)
     textareaRef.current?.focus()
   }, [])
-
 
   // 通用文件上传 — 根据模型能力判断是否接受
   const handleFilesSelected = useCallback(
@@ -1389,7 +1421,10 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
     [text],
   )
 
-  const insertDraggedFile = useCallback((fileInfo: DraggedFileInfo) => insertDraggedFiles([fileInfo]), [insertDraggedFiles])
+  const insertDraggedFile = useCallback(
+    (fileInfo: DraggedFileInfo) => insertDraggedFiles([fileInfo]),
+    [insertDraggedFiles],
+  )
 
   // 命令参数补全菜单：点击外部关闭
   useEffect(() => {
@@ -1502,7 +1537,13 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         console.warn('[InputBox] Failed to process Tauri dropped paths:', err)
       }
     },
-    [buildDraggedFileInfo, createUploadAttachmentFromDroppedPath, externalFileDropMode, insertDraggedFiles, isSubmitting],
+    [
+      buildDraggedFileInfo,
+      createUploadAttachmentFromDroppedPath,
+      externalFileDropMode,
+      insertDraggedFiles,
+      isSubmitting,
+    ],
   )
 
   const handleTauriDragDropEvent = useCallback(
@@ -1584,9 +1625,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
     ? 'max(2rem, var(--safe-area-inset-bottom, 0px))'
     : 'max(0px, calc(var(--safe-area-inset-bottom, 0px) - 2rem))'
   // 收起态视觉下移：把 2rem 撑出的多余缓冲吃掉，只留 0.75rem(12px) 呼吸空间
-  const collapsedVisualOffset = isCollapsed
-    ? 'translateY(calc(2rem - 0.75rem))'
-    : 'none'
+  const collapsedVisualOffset = isCollapsed ? 'translateY(calc(2rem - 0.75rem))' : 'none'
 
   return (
     <div className="w-full">
@@ -1686,10 +1725,14 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
               >
                 <div ref={argCompletionListRef} className="flex-1 overflow-y-auto custom-scrollbar p-1.5">
                   {argCompletionLoading && argCompletionItems.length === 0 && (
-                    <div className="px-2 py-4 text-center text-[length:var(--fs-base)] text-text-400">{t('common:loading')}</div>
+                    <div className="px-2 py-4 text-center text-[length:var(--fs-base)] text-text-400">
+                      {t('common:loading')}
+                    </div>
                   )}
                   {!argCompletionLoading && argCompletionItems.length === 0 && (
-                    <div className="px-2 py-4 text-center text-[length:var(--fs-base)] text-text-400">{t('slashCommand.noMatchingCommands')}</div>
+                    <div className="px-2 py-4 text-center text-[length:var(--fs-base)] text-text-400">
+                      {t('slashCommand.noMatchingCommands')}
+                    </div>
                   )}
                   {argCompletionItems.map((item, index) => (
                     <button
@@ -1699,11 +1742,15 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
                       onClick={() => applyArgCompletion(item)}
                       onPointerEnter={() => setArgCompletionIndex(index)}
                     >
-                      <span className={`font-mono text-[length:var(--fs-base)] flex-shrink-0 truncate leading-5 ${index === argCompletionIndex ? 'text-accent-main-100' : 'text-text-300'}`}>
+                      <span
+                        className={`font-mono text-[length:var(--fs-base)] flex-shrink-0 truncate leading-5 ${index === argCompletionIndex ? 'text-accent-main-100' : 'text-text-300'}`}
+                      >
                         {item.label}
                       </span>
                       {item.description && (
-                        <div className="flex-1 min-w-0 text-[length:var(--fs-sm)] text-text-400 truncate">{item.description}</div>
+                        <div className="flex-1 min-w-0 text-[length:var(--fs-sm)] text-text-400 truncate">
+                          {item.description}
+                        </div>
                       )}
                     </button>
                   ))}
@@ -1738,7 +1785,9 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
               {/* Drop overlay */}
               {(isDragging || isInternalFileDragging) && (
                 <div className="absolute inset-0 z-50 rounded-2xl bg-accent-main-100/5 backdrop-blur-[1px] flex items-center justify-center pointer-events-none">
-                  <span className="text-[length:var(--fs-base)] text-accent-main-100 font-medium">{t('inputBox.dropFilesHere')}</span>
+                  <span className="text-[length:var(--fs-base)] text-accent-main-100 font-medium">
+                    {t('inputBox.dropFilesHere')}
+                  </span>
                 </div>
               )}
 
@@ -1809,9 +1858,6 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
                   {/* Bottom Bar -> InputToolbar */}
                   <div ref={toolbarRef}>
                     <InputToolbar
-
-
-
                       variants={variants}
                       selectedVariant={selectedVariant}
                       onVariantChange={onVariantChange}
@@ -1849,11 +1895,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
           className={`h-8 flex items-center justify-center ${isCollapsed ? 'hidden' : ''}`}
           aria-hidden={isCollapsed || undefined}
         >
-          <InputFooter
-            sessionId={sessionId}
-            onNewChat={onNewChat}
-            inputContainerRef={inputContainerRef}
-          />
+          <InputFooter sessionId={sessionId} onNewChat={onNewChat} inputContainerRef={inputContainerRef} />
         </div>
       </div>
     </div>
@@ -1879,15 +1921,19 @@ function ComposerAccessory({ collapsed, children }: { collapsed: boolean; childr
     previousTop.current = top
     animation.current?.cancel()
     if (delta && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      animation.current = element.animate(
-        [{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }],
-        { duration: 260, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
-      )
+      animation.current = element.animate([{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }], {
+        duration: 260,
+        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      })
     }
   }, [collapsed])
 
   useEffect(() => () => animation.current?.cancel(), [])
 
   if (!children) return null
-  return <div ref={ref} data-composer-accessory className="shrink-0 min-w-0 pointer-events-auto">{children}</div>
+  return (
+    <div ref={ref} data-composer-accessory className="shrink-0 min-w-0 pointer-events-auto">
+      {children}
+    </div>
+  )
 }

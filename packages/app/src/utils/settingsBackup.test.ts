@@ -75,5 +75,4 @@ describe('settingsBackup', () => {
     )
     expect(sessionStorage.getItem('piui-active-server')).toBe('local')
   })
-
 })

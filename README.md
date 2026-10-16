@@ -116,17 +116,17 @@ PiUI API 使用本地 auth token。token 默认位于：
 
 ## 常用环境变量
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `PIUI_HOST` | `127.0.0.1` | server 监听地址 |
-| `PIUI_PORT` | `8787` | server 监听端口 |
-| `PIUI_AUTH_TOKEN` | 自动生成 | 显式指定 API token |
-| `PIUI_DATA_DIR` | `~/.piui` | PiUI 数据目录 |
-| `PIUI_WEB_ROOT` | 自动查找 | 指定前端静态文件目录 |
-| `PIUI_DRIVER` | `pi` | 使用 `mock` 可运行无 LLM 的测试 server |
-| `PIUI_SDK_PATH` | 空 | 指定 Pi SDK 路径 |
-| `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi agent 配置目录 |
-| `PI_CODING_AGENT_SESSION_DIR` | 自动 | Pi session 文件目录 |
+| 变量                          | 默认值        | 说明                                   |
+| ----------------------------- | ------------- | -------------------------------------- |
+| `PIUI_HOST`                   | `127.0.0.1`   | server 监听地址                        |
+| `PIUI_PORT`                   | `8787`        | server 监听端口                        |
+| `PIUI_AUTH_TOKEN`             | 自动生成      | 显式指定 API token                     |
+| `PIUI_DATA_DIR`               | `~/.piui`     | PiUI 数据目录                          |
+| `PIUI_WEB_ROOT`               | 自动查找      | 指定前端静态文件目录                   |
+| `PIUI_DRIVER`                 | `pi`          | 使用 `mock` 可运行无 LLM 的测试 server |
+| `PIUI_SDK_PATH`               | 空            | 指定 Pi SDK 路径                       |
+| `PI_CODING_AGENT_DIR`         | `~/.pi/agent` | Pi agent 配置目录                      |
+| `PI_CODING_AGENT_SESSION_DIR` | 自动          | Pi session 文件目录                    |
 
 设置示例：
 

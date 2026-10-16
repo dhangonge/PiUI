@@ -14,76 +14,76 @@
 
 ## Session
 
-| Pi 能力 | 当前状态 | 下一阶段 |
-|---|---|---|
-| list/listAll/create/open/resume | 完整 | R12：升级 conformance |
-| 持久删除 JSONL | 完整 | R12：故障注入扩展 |
-| session name | 完整 | R12：升级 conformance |
-| entries/tree/leaf 读取 | 完整 | R12：大型 tree fixture |
-| navigateTree/label | 完整 | R12：大型 tree fixture |
-| fork/clone/import | 完整 | R12：更多故障注入 |
-| branch summary 与取消 | 完整 | R12：升级 conformance |
-| stats/context usage | 完整 | R12：升级 conformance |
-| HTML/JSONL export | 完整 | R12：升级 conformance |
+| Pi 能力                         | 当前状态 | 下一阶段               |
+| ------------------------------- | -------- | ---------------------- |
+| list/listAll/create/open/resume | 完整     | R12：升级 conformance  |
+| 持久删除 JSONL                  | 完整     | R12：故障注入扩展      |
+| session name                    | 完整     | R12：升级 conformance  |
+| entries/tree/leaf 读取          | 完整     | R12：大型 tree fixture |
+| navigateTree/label              | 完整     | R12：大型 tree fixture |
+| fork/clone/import               | 完整     | R12：更多故障注入      |
+| branch summary 与取消           | 完整     | R12：升级 conformance  |
+| stats/context usage             | 完整     | R12：升级 conformance  |
+| HTML/JSONL export               | 完整     | R12：升级 conformance  |
 
 > share 不属于 Pi 能力矩阵：Pi SDK 未暴露任何 share 语义（命令表与 AgentSession 均无），PiUI 不消费也不展示入口。
 
 ## Agent Control
 
-| Pi 能力 | 当前状态 | 下一阶段 |
-|---|---|---|
-| text prompt/stream/abort | 完整 | R12：故障注入扩展 |
-| steer/followUp | 完整 | R12：升级 conformance |
-| queue 内容与模式 | 完整 | R12：升级 conformance |
-| clear queue | 完整 | R12：升级 conformance |
-| model select | 完整 | R12：升级 conformance |
-| thinking level | 完整 | R12：升级 conformance |
-| compact | 完整 | R12：大型会话 fixture |
-| auto compaction/retry | 完整 | R12：故障注入扩展 |
-| abort retry | 完整 | R12：故障注入扩展 |
-| user bash `!`/`!!` | 完整 | R12：升级 conformance |
-| active tools 查询/切换 | 完整 | R7：dynamic tools 联动 |
+| Pi 能力                  | 当前状态 | 下一阶段               |
+| ------------------------ | -------- | ---------------------- |
+| text prompt/stream/abort | 完整     | R12：故障注入扩展      |
+| steer/followUp           | 完整     | R12：升级 conformance  |
+| queue 内容与模式         | 完整     | R12：升级 conformance  |
+| clear queue              | 完整     | R12：升级 conformance  |
+| model select             | 完整     | R12：升级 conformance  |
+| thinking level           | 完整     | R12：升级 conformance  |
+| compact                  | 完整     | R12：大型会话 fixture  |
+| auto compaction/retry    | 完整     | R12：故障注入扩展      |
+| abort retry              | 完整     | R12：故障注入扩展      |
+| user bash `!`/`!!`       | 完整     | R12：升级 conformance  |
+| active tools 查询/切换   | 完整     | R7：dynamic tools 联动 |
 
 ## Multimodal And Tools
 
-| Pi 能力 | 当前状态 | 下一阶段 |
-|---|---|---|
-| image prompt（图片附件） | 完整 | R5：file/PDF 附件明确不提取（路径交给 Pi） |
-| file/PDF prompt | 缺失（明确不做提取） | — |
-| text tool result | 完整 | R12：升级 conformance |
-| tool execution updates | 完整 | R12：升级 conformance |
-| image/details/patch/cwd/exitCode | 完整 | R12：升级 conformance |
-| truncated/fullOutputPath | 完整 | R12：升级 conformance |
-| built-in read/bash/edit/write/grep/find/ls | 完整 | R12：升级 conformance |
+| Pi 能力                                    | 当前状态             | 下一阶段                                   |
+| ------------------------------------------ | -------------------- | ------------------------------------------ |
+| image prompt（图片附件）                   | 完整                 | R5：file/PDF 附件明确不提取（路径交给 Pi） |
+| file/PDF prompt                            | 缺失（明确不做提取） | —                                          |
+| text tool result                           | 完整                 | R12：升级 conformance                      |
+| tool execution updates                     | 完整                 | R12：升级 conformance                      |
+| image/details/patch/cwd/exitCode           | 完整                 | R12：升级 conformance                      |
+| truncated/fullOutputPath                   | 完整                 | R12：升级 conformance                      |
+| built-in read/bash/edit/write/grep/find/ls | 完整                 | R12：升级 conformance                      |
 
 ## Extensions And Resources
 
-| Pi 能力 | 当前状态 | 下一阶段 |
-|---|---|---|
-| Skills 元数据 | 完整 | R12：升级 conformance |
-| Prompt templates | 完整 | R12：升级 conformance |
-| Extension commands | 完整 | R12：升级 conformance |
-| Dynamic tools/providers | 完整 | R12：升级 conformance |
-| select/confirm/input/editor | 完整 | R12：升级 conformance（真实 SDK 对话框 E2E 已加入） |
-| notify/status/widget/title | 完整 | R12：升级 conformance（真实 SDK 状态事件 E2E 已加入） |
-| custom entries/renderers | 部分 | R7：custom_message 已渲染，其余类型降级 |
-| arbitrary TUI Component/header/footer | TUI-only | R7：稳定降级与原生入口 |
-| AGENTS/CLAUDE context | 完整 | R12：升级 conformance |
-| resource reload/diagnostics | 完整 | R12：升级 conformance（reload 命令 + PiResourceManagement + 测试） |
-| global/project settings | 完整 | R12：升级 conformance |
-| packages install/update/remove | 完整 | R12：升级 conformance |
-| Pi project trust | 完整 | R12：升级 conformance |
+| Pi 能力                               | 当前状态 | 下一阶段                                                           |
+| ------------------------------------- | -------- | ------------------------------------------------------------------ |
+| Skills 元数据                         | 完整     | R12：升级 conformance                                              |
+| Prompt templates                      | 完整     | R12：升级 conformance                                              |
+| Extension commands                    | 完整     | R12：升级 conformance                                              |
+| Dynamic tools/providers               | 完整     | R12：升级 conformance                                              |
+| select/confirm/input/editor           | 完整     | R12：升级 conformance（真实 SDK 对话框 E2E 已加入）                |
+| notify/status/widget/title            | 完整     | R12：升级 conformance（真实 SDK 状态事件 E2E 已加入）              |
+| custom entries/renderers              | 部分     | R7：custom_message 已渲染，其余类型降级                            |
+| arbitrary TUI Component/header/footer | TUI-only | R7：稳定降级与原生入口                                             |
+| AGENTS/CLAUDE context                 | 完整     | R12：升级 conformance                                              |
+| resource reload/diagnostics           | 完整     | R12：升级 conformance（reload 命令 + PiResourceManagement + 测试） |
+| global/project settings               | 完整     | R12：升级 conformance                                              |
+| packages install/update/remove        | 完整     | R12：升级 conformance                                              |
+| Pi project trust                      | 完整     | R12：升级 conformance                                              |
 
 ## Providers And Auth
 
-| Pi 能力 | 当前状态 | 下一阶段 |
-|---|---|---|
-| `~/.pi/agent` 模型与认证读取 | 部分 | R10 |
-| provider auth status | 完整 | R12：升级 conformance |
-| API key/OAuth login/logout | 完整 | R12：升级 conformance |
-| catalog refresh | 完整 | R12：升级 conformance |
-| extension provider models | 完整 | R12：升级 conformance |
-| scoped models | 完整 | R12：升级 conformance |
+| Pi 能力                      | 当前状态 | 下一阶段              |
+| ---------------------------- | -------- | --------------------- |
+| `~/.pi/agent` 模型与认证读取 | 部分     | R10                   |
+| provider auth status         | 完整     | R12：升级 conformance |
+| API key/OAuth login/logout   | 完整     | R12：升级 conformance |
+| catalog refresh              | 完整     | R12：升级 conformance |
+| extension provider models    | 完整     | R12：升级 conformance |
+| scoped models                | 完整     | R12：升级 conformance |
 
 > llama.cpp 本地模型下载/加载/取消不属于 Pi 能力矩阵：Pi 官方仍在规划
 > （[#3107 `/local` 命令](https://github.com/earendil-works/pi/issues/3107)、[#3567 llama.cpp provider](https://github.com/earendil-works/pi/issues/3567)、
@@ -91,13 +91,13 @@
 
 ## PiUI Host Capabilities
 
-| 能力 | 当前状态 | 说明 |
-|---|---|---|
-| 文件读取、搜索、写入 API | 完整 | R12：升级 conformance |
-| Git status/diff | 完整 | R12：升级 conformance（git/staged/unstaged/branch 四种 mode） |
-| PTY（宿主终端） | 完整 | R12：升级 conformance（terminals.* 命令 + ws e2e） |
-| workspace access | 完整 | R12：升级 conformance |
-| WebSocket replay/resync | 完整 | R12：完整故障注入矩阵 |
+| 能力                     | 当前状态 | 说明                                                          |
+| ------------------------ | -------- | ------------------------------------------------------------- |
+| 文件读取、搜索、写入 API | 完整     | R12：升级 conformance                                         |
+| Git status/diff          | 完整     | R12：升级 conformance（git/staged/unstaged/branch 四种 mode） |
+| PTY（宿主终端）          | 完整     | R12：升级 conformance（terminals.* 命令 + ws e2e）            |
+| workspace access         | 完整     | R12：升级 conformance                                         |
+| WebSocket replay/resync  | 完整     | R12：完整故障注入矩阵                                         |
 
 ## SDK 升级记录
 

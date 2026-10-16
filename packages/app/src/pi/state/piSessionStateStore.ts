@@ -116,7 +116,8 @@ class PiSessionStateStore {
         )
       }
     }
-    const mirror = state.extensionUiState as { patches?: unknown; editorText?: unknown; toolsExpanded?: unknown } | null | undefined
+    const mirror = state.extensionUiState as
+      { patches?: unknown; editorText?: unknown; toolsExpanded?: unknown } | null | undefined
     if (mirror && typeof mirror === 'object' && Array.isArray(mirror.patches)) {
       extensionUiStore.restore(sessionId, {
         patches: mirror.patches as ExtensionUiStatePatch[],
@@ -131,7 +132,12 @@ class PiSessionStateStore {
     if (Array.isArray(tuiPanels)) {
       const attaches = tuiPanels.filter(raw => {
         const attach = raw as { key?: unknown; kind?: unknown } | null
-        return attach !== null && typeof attach === 'object' && typeof attach.key === 'string' && typeof attach.kind === 'string'
+        return (
+          attach !== null &&
+          typeof attach === 'object' &&
+          typeof attach.key === 'string' &&
+          typeof attach.kind === 'string'
+        )
       }) as never[]
       extensionTuiStore.replacePanels(sessionId, attaches)
     }

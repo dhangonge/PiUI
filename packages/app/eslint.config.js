@@ -10,6 +10,7 @@ export default defineConfig([
   globalIgnores([
     'dist',
     'node_modules',
+    'coverage',
     'public/material-icons',
     'src-tauri/target/**',
     // These are bundled extension examples, not app source. Some examples
@@ -62,7 +63,8 @@ export default defineConfig([
           patterns: [
             {
               group: ['**/features/pi-chat/**', '../pi-chat/*', '../../pi-chat/**'],
-              message: 'features/chat 是渲染层，不得依赖 features/pi-chat 容器；需要 Pi 数据请用 src/pi/** 的 store/hook。',
+              message:
+                'features/chat 是渲染层，不得依赖 features/pi-chat 容器；需要 Pi 数据请用 src/pi/** 的 store/hook。',
             },
           ],
         },

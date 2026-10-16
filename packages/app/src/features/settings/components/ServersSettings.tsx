@@ -133,10 +133,7 @@ function ServerItem({
           className="min-w-0 flex-1 overflow-hidden bg-transparent border-none p-0 text-left"
         >
           <div className="min-w-0">
-            <div
-              className="text-[length:var(--fs-md)] font-medium text-text-100 truncate"
-              title={server.name}
-            >
+            <div className="text-[length:var(--fs-md)] font-medium text-text-100 truncate" title={server.name}>
               {server.name}
             </div>
             <div className="text-[length:var(--fs-xs)] text-text-400 truncate font-mono flex items-center gap-1 mt-0.5 min-w-0">
@@ -148,19 +145,35 @@ function ServerItem({
           </div>
         </button>
         <div className="shrink-0 flex items-center gap-0.5">
-          <button type="button" aria-pressed={isStartupDefault}
+          <button
+            type="button"
+            aria-pressed={isStartupDefault}
             aria-label={t(isStartupDefault ? 'servers.clearDefaultServer' : 'servers.setDefaultServer')}
             title={t(isStartupDefault ? 'servers.clearDefaultServer' : 'servers.setDefaultServer')}
             className={`p-1.5 rounded-md hover:bg-bg-200/70 ${isStartupDefault ? 'text-accent-main-100' : 'text-text-400'}`}
-            onClick={event => { event.stopPropagation(); onToggleDefault() }}>
+            onClick={event => {
+              event.stopPropagation()
+              onToggleDefault()
+            }}
+          >
             <CheckIcon size={14} />
           </button>
-          {multiServer.enabled && <button type="button" aria-pressed={multiServer.subscribedServerIds.includes(server.id)}
-            aria-label={t(multiServer.subscribedServerIds.includes(server.id) ? 'servers.unsubscribe' : 'servers.subscribe')}
-            className="p-1.5 rounded-md text-accent-main-100 hover:bg-bg-200/70"
-            onClick={event => { event.stopPropagation(); multiServerStore.setSubscribed(server.id, !multiServerStore.isSubscribed(server.id)) }}>
-            {multiServer.subscribedServerIds.includes(server.id) ? <CheckIcon size={14} /> : <WifiIcon size={14} />}
-          </button>}
+          {multiServer.enabled && (
+            <button
+              type="button"
+              aria-pressed={multiServer.subscribedServerIds.includes(server.id)}
+              aria-label={t(
+                multiServer.subscribedServerIds.includes(server.id) ? 'servers.unsubscribe' : 'servers.subscribe',
+              )}
+              className="p-1.5 rounded-md text-accent-main-100 hover:bg-bg-200/70"
+              onClick={event => {
+                event.stopPropagation()
+                multiServerStore.setSubscribed(server.id, !multiServerStore.isSubscribed(server.id))
+              }}
+            >
+              {multiServer.subscribedServerIds.includes(server.id) ? <CheckIcon size={14} /> : <WifiIcon size={14} />}
+            </button>
+          )}
           {(server.isDefault || server.token) && (
             <button
               type="button"
@@ -412,7 +425,9 @@ function EditServerForm({
 
       {showAuth && (
         <div>
-          <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.token')}</label>
+          <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">
+            {t('servers.token')}
+          </label>
           <input
             type="password"
             value={token}
@@ -466,8 +481,7 @@ function AddServerForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     const connectLink = parseConnectLink(url)
-    const trimmedName =
-      name.trim().slice(0, SERVER_NAME_MAX_LENGTH) || (connectLink ? hostNameOf(connectLink.url) : '')
+    const trimmedName = name.trim().slice(0, SERVER_NAME_MAX_LENGTH) || (connectLink ? hostNameOf(connectLink.url) : '')
     if (!trimmedName) {
       setError(t('servers.nameRequired'))
       return
@@ -538,7 +552,9 @@ function AddServerForm({
       {showAuth && (
         <>
           <div>
-            <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.token')}</label>
+            <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">
+              {t('servers.token')}
+            </label>
             <input
               type="password"
               value={token}
@@ -551,7 +567,9 @@ function AddServerForm({
             />
           </div>
 
-          <div className="text-[length:var(--fs-xs)] text-text-400 leading-relaxed">{t('servers.credentialsStorage')}</div>
+          <div className="text-[length:var(--fs-xs)] text-text-400 leading-relaxed">
+            {t('servers.credentialsStorage')}
+          </div>
         </>
       )}
 
@@ -681,7 +699,9 @@ export function ServersSettings() {
         )}
 
         {servers.length === 0 && !addingServer && (
-          <div className="text-[length:var(--fs-md)] text-text-400 text-center py-8">{t('servers.noServersConfigured')}</div>
+          <div className="text-[length:var(--fs-md)] text-text-400 text-center py-8">
+            {t('servers.noServersConfigured')}
+          </div>
         )}
       </div>
     </SettingsSection>

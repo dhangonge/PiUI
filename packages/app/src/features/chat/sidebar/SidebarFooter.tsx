@@ -2,14 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { ContextDetailsDialog } from './ContextDetailsDialog'
-import {
-  CogIcon,
-  SunIcon,
-  MoonIcon,
-  SystemIcon,
-  MaximizeIcon,
-  MinimizeIcon,
-} from '../../../components/Icons'
+import { CogIcon, SunIcon, MoonIcon, SystemIcon, MaximizeIcon, MinimizeIcon } from '../../../components/Icons'
 import { CircularProgress } from '../../../components/CircularProgress'
 import { formatTokens, formatCost, useTheme, useSessionStats } from '../../../hooks'
 import { useFocusedSessionHasEntries } from '../../../pi/hooks/index.js'

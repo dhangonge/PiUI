@@ -36,7 +36,9 @@ describe('handleSessionsUpdated replacement semantics', () => {
   let replacedEvents: unknown[] = []
   let changedCount = 0
   const onReplaced = (event: Event) => replacedEvents.push((event as CustomEvent).detail)
-  const onChanged = () => { changedCount += 1 }
+  const onChanged = () => {
+    changedCount += 1
+  }
 
   beforeEach(() => {
     replacedEvents = []

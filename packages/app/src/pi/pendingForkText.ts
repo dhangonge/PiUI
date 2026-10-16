@@ -43,4 +43,3 @@ export function subscribeForkSeed(listener: (sessionId: string) => void): () => 
   listeners.add(listener)
   return () => listeners.delete(listener)
 }
-

@@ -41,7 +41,9 @@ vi.mock('../../../pi/hooks/index.js', () => ({
 
 function scopedModelsTextarea(): HTMLTextAreaElement {
   // 第一个 textarea 是 scoped models 输入（第二个是 custom payload）
-  const areas = screen.getAllByRole('textbox').filter((el): el is HTMLTextAreaElement => el instanceof HTMLTextAreaElement)
+  const areas = screen
+    .getAllByRole('textbox')
+    .filter((el): el is HTMLTextAreaElement => el instanceof HTMLTextAreaElement)
   return areas[0]
 }
 

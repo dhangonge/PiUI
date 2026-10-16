@@ -10,21 +10,20 @@
  * 6. directDomUpdates 直接写行位置，不触发 React 重渲染
  */
 import {
-  useRef, useImperativeHandle, forwardRef, memo,
-  useCallback, useEffect, useLayoutEffect, useMemo, useState,
+  useRef,
+  useImperativeHandle,
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
 } from 'react'
-import {
-  useVirtualizer, elementScroll, defaultRangeExtractor,
-  type VirtualItem,
-} from '@tanstack/react-virtual'
+import { useVirtualizer, elementScroll, defaultRangeExtractor, type VirtualItem } from '@tanstack/react-virtual'
 import type { Virtualizer as CoreVirtualizer } from '@tanstack/virtual-core'
 import { useTranslation } from 'react-i18next'
-import {
-  MessageRenderer,
-  ProcessCollapseBlock,
-  assistantHasFinalContent,
-  assistantHasProcessContent,
-} from '../message'
+import { MessageRenderer, ProcessCollapseBlock, assistantHasFinalContent, assistantHasProcessContent } from '../message'
 import { MessageErrorView } from '../message/parts'
 import { SpinnerIcon, ArrowDownIcon, ArrowUpIcon, PencilIcon, TrashIcon } from '../../components/Icons'
 import { CopyButton } from '../../components/ui'
@@ -77,8 +76,7 @@ function sameSet<T>(a: Set<T>, b: Set<T>): boolean {
   return true
 }
 
-const bottomSpacerHeight = (bottomPadding: number) =>
-  bottomPadding > 0 ? bottomPadding + 48 : DEFAULT_BOTTOM_SPACER
+const bottomSpacerHeight = (bottomPadding: number) => (bottomPadding > 0 ? bottomPadding + 48 : DEFAULT_BOTTOM_SPACER)
 
 function estimateTimelineItemSize(item: ProcessTimelineItem | undefined): number {
   if (!item) return ROW_ESTIMATE
@@ -225,8 +223,7 @@ export const QueuedUserMessageQueue = memo(function QueuedUserMessageQueue({
   const actionBarClass = preferTouchUi
     ? 'flex items-center gap-0.5 transition-opacity'
     : 'flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity'
-  const actionBtnClass =
-    'p-1.5 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200/50 transition-colors'
+  const actionBtnClass = 'p-1.5 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200/50 transition-colors'
   return (
     <section
       data-message-queue={kind}
@@ -307,136 +304,141 @@ interface RowProps {
   onEntryGrowComplete?: (messageId: string) => void
 }
 
-const VirtualRow = memo(function VirtualRow({
-  virtualItem,
-  item,
-  maxWidthClass,
-  paddingClass,
-  rowYClass,
-  registerMessage,
-  onUndo,
-  onFork,
-  canUndo,
-  forkMap,
-  turnDurationMap,
-  turnLatestAssistantIds,
-  measureElement,
-  resizeItem,
-  onEntryGrowComplete,
-}: RowProps) {
-  const rowRef = useRef<HTMLDivElement | null>(null)
-  if (isPerfEnabled()) perfRecordRender('VirtualRow', 0)
+const VirtualRow = memo(
+  function VirtualRow({
+    virtualItem,
+    item,
+    maxWidthClass,
+    paddingClass,
+    rowYClass,
+    registerMessage,
+    onUndo,
+    onFork,
+    canUndo,
+    forkMap,
+    turnDurationMap,
+    turnLatestAssistantIds,
+    measureElement,
+    resizeItem,
+    onEntryGrowComplete,
+  }: RowProps) {
+    const rowRef = useRef<HTMLDivElement | null>(null)
+    if (isPerfEnabled()) perfRecordRender('VirtualRow', 0)
 
-  const setRef = useCallback((el: HTMLDivElement | null) => {
-    rowRef.current = el
-    perfMark('piui:measure-row')
-    measureElement(el)
-    perfMark('piui:measure-row:end')
-  }, [measureElement])
+    const setRef = useCallback(
+      (el: HTMLDivElement | null) => {
+        rowRef.current = el
+        perfMark('piui:measure-row')
+        measureElement(el)
+        perfMark('piui:measure-row:end')
+      },
+      [measureElement],
+    )
 
-  useLayoutEffect(() => {
-    // item 引用变化（打断/折叠/错误条出现/流式 chunk，A 步保证只有变化行变）
-    // 时强制按真实 DOM 高度重测。
-    //
-    // 不能只调 virtualizer.measureElement：virtual-core 的 measureElement 在
-    // 无 entry（ref 回调 / layout effect 路径）时直接返回 itemSizeCache 缓存
-    // 值，根本不读 DOM——delta 恒为 0，resizeItem 永不 notify，行残留旧
-    // 位置与相邻行重叠（内容变化但 RO 未及时触发的窗口期，或 RO
-    // 通知被丢时）。这里读 offsetHeight + resizeItem，让后续行位置按最新
-    // 高度重算；高度没变时 resizeItem 内部 delta===0 幂等跳过。
-    const el = rowRef.current
-    if (!el) return
-    const height = el.offsetHeight
-    if (height > 0) resizeItem(virtualItem.index, height)
-  }, [virtualItem.index, item.key, rowYClass, item, resizeItem])
+    useLayoutEffect(() => {
+      // item 引用变化（打断/折叠/错误条出现/流式 chunk，A 步保证只有变化行变）
+      // 时强制按真实 DOM 高度重测。
+      //
+      // 不能只调 virtualizer.measureElement：virtual-core 的 measureElement 在
+      // 无 entry（ref 回调 / layout effect 路径）时直接返回 itemSizeCache 缓存
+      // 值，根本不读 DOM——delta 恒为 0，resizeItem 永不 notify，行残留旧
+      // 位置与相邻行重叠（内容变化但 RO 未及时触发的窗口期，或 RO
+      // 通知被丢时）。这里读 offsetHeight + resizeItem，让后续行位置按最新
+      // 高度重算；高度没变时 resizeItem 内部 delta===0 幂等跳过。
+      const el = rowRef.current
+      if (!el) return
+      const height = el.offsetHeight
+      if (height > 0) resizeItem(virtualItem.index, height)
+    }, [virtualItem.index, item.key, rowYClass, item, resizeItem])
 
-  return (
-    <div
-      ref={setRef}
-      data-timeline-key={item.key}
-      data-index={virtualItem.index}
-      style={{ position: 'absolute', left: 0, width: '100%' }}
-    >
-      <div className={`w-full ${maxWidthClass} mx-auto ${paddingClass} ${rowYClass} transition-[max-width] duration-300 ease-in-out`}>
-        {item.kind === 'message' ? (
-          <MessageBody
-            item={item.item}
-            registerMessage={registerMessage}
-            onUndo={onUndo}
-            onFork={onFork}
-            canUndo={canUndo}
-            forkMessageId={forkMap.get(item.item.entryId)}
-            turnDuration={turnDurationMap.get(item.item.entryId)}
-            isTurnLatestAssistant={
-              item.item.kind === 'assistant_message'
-                ? turnLatestAssistantIds.has(item.item.entryId)
-                : undefined
-            }
-            processContentScope={item.processContentScope ?? 'all'}
-            onEntryGrowComplete={onEntryGrowComplete}
-          />
-        ) : (
-          <div className="flex justify-start">
-            <div className="message-renderer-shell min-w-0 group w-full flex flex-col gap-2">
-              <ProcessCollapseBlock
-                stateKey={`turn-process:${item.userMessageId ?? item.key}`}
-                startedAt={item.startedAt}
-                durationMs={item.durationMs}
-                isActive={item.isActive}
-              >
-                {item.children.map(child => (
+    return (
+      <div
+        ref={setRef}
+        data-timeline-key={item.key}
+        data-index={virtualItem.index}
+        style={{ position: 'absolute', left: 0, width: '100%' }}
+      >
+        <div
+          className={`w-full ${maxWidthClass} mx-auto ${paddingClass} ${rowYClass} transition-[max-width] duration-300 ease-in-out`}
+        >
+          {item.kind === 'message' ? (
+            <MessageBody
+              item={item.item}
+              registerMessage={registerMessage}
+              onUndo={onUndo}
+              onFork={onFork}
+              canUndo={canUndo}
+              forkMessageId={forkMap.get(item.item.entryId)}
+              turnDuration={turnDurationMap.get(item.item.entryId)}
+              isTurnLatestAssistant={
+                item.item.kind === 'assistant_message' ? turnLatestAssistantIds.has(item.item.entryId) : undefined
+              }
+              processContentScope={item.processContentScope ?? 'all'}
+              onEntryGrowComplete={onEntryGrowComplete}
+            />
+          ) : (
+            <div className="flex justify-start">
+              <div className="message-renderer-shell min-w-0 group w-full flex flex-col gap-2">
+                <ProcessCollapseBlock
+                  stateKey={`turn-process:${item.userMessageId ?? item.key}`}
+                  startedAt={item.startedAt}
+                  durationMs={item.durationMs}
+                  isActive={item.isActive}
+                >
+                  {item.children.map(child => (
+                    <MessageBody
+                      key={`${child.item.entryId}:${child.processContentScope}`}
+                      item={child.item}
+                      registerMessage={registerMessage}
+                      onUndo={onUndo}
+                      onFork={onFork}
+                      canUndo={canUndo}
+                      forkMessageId={forkMap.get(child.item.entryId)}
+                      turnDuration={turnDurationMap.get(child.item.entryId)}
+                      isTurnLatestAssistant={turnLatestAssistantIds.has(child.item.entryId)}
+                      processContentScope={child.processContentScope}
+                    />
+                  ))}
+                </ProcessCollapseBlock>
+                {/* shell 的 gap-2 只服务 process 壳 ↔ final 文本，子消息间距由 processBody 管 */}
+                {item.finalItem && (
                   <MessageBody
-                    key={`${child.item.entryId}:${child.processContentScope}`}
-                    item={child.item}
+                    item={item.finalItem}
                     registerMessage={registerMessage}
                     onUndo={onUndo}
                     onFork={onFork}
                     canUndo={canUndo}
-                    forkMessageId={forkMap.get(child.item.entryId)}
-                    turnDuration={turnDurationMap.get(child.item.entryId)}
-                    isTurnLatestAssistant={turnLatestAssistantIds.has(child.item.entryId)}
-                    processContentScope={child.processContentScope}
+                    forkMessageId={forkMap.get(item.finalItem.entryId)}
+                    turnDuration={turnDurationMap.get(item.finalItem.entryId)}
+                    isTurnLatestAssistant
+                    processContentScope="final"
                   />
-                ))}
-              </ProcessCollapseBlock>
-              {/* shell 的 gap-2 只服务 process 壳 ↔ final 文本，子消息间距由 processBody 管 */}
-              {item.finalItem && (
-                <MessageBody
-                  item={item.finalItem}
-                  registerMessage={registerMessage}
-                  onUndo={onUndo}
-                  onFork={onFork}
-                  canUndo={canUndo}
-                  forkMessageId={forkMap.get(item.finalItem.entryId)}
-                  turnDuration={turnDurationMap.get(item.finalItem.entryId)}
-                  isTurnLatestAssistant
-                  processContentScope="final"
-                />
-              )}
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
-  )
-}, (prev, next) =>
-  prev.virtualItem.index === next.virtualItem.index &&
-  prev.virtualItem.start === next.virtualItem.start &&
-  prev.virtualItem.size === next.virtualItem.size &&
-  prev.item === next.item &&
-  prev.maxWidthClass === next.maxWidthClass &&
-  prev.paddingClass === next.paddingClass &&
-  prev.rowYClass === next.rowYClass &&
-  prev.registerMessage === next.registerMessage &&
-  prev.onUndo === next.onUndo &&
-  prev.onFork === next.onFork &&
-  prev.canUndo === next.canUndo &&
-  prev.forkMap === next.forkMap &&
-  prev.turnDurationMap === next.turnDurationMap &&
-  prev.turnLatestAssistantIds === next.turnLatestAssistantIds &&
-  prev.measureElement === next.measureElement &&
-  prev.resizeItem === next.resizeItem &&
-  prev.onEntryGrowComplete === next.onEntryGrowComplete
+    )
+  },
+  (prev, next) =>
+    prev.virtualItem.index === next.virtualItem.index &&
+    prev.virtualItem.start === next.virtualItem.start &&
+    prev.virtualItem.size === next.virtualItem.size &&
+    prev.item === next.item &&
+    prev.maxWidthClass === next.maxWidthClass &&
+    prev.paddingClass === next.paddingClass &&
+    prev.rowYClass === next.rowYClass &&
+    prev.registerMessage === next.registerMessage &&
+    prev.onUndo === next.onUndo &&
+    prev.onFork === next.onFork &&
+    prev.canUndo === next.canUndo &&
+    prev.forkMap === next.forkMap &&
+    prev.turnDurationMap === next.turnDurationMap &&
+    prev.turnLatestAssistantIds === next.turnLatestAssistantIds &&
+    prev.measureElement === next.measureElement &&
+    prev.resizeItem === next.resizeItem &&
+    prev.onEntryGrowComplete === next.onEntryGrowComplete,
 )
 
 // ─── 会话缓存（LRU 16） ───────────────────────────────────────
@@ -449,15 +451,32 @@ export const ChatArea = memo(
   forwardRef<ChatAreaHandle, ChatAreaProps>(
     (
       {
-        items, queuedSteering = [], queuedFollowUps = [],
-        onQueueBackToInput, onQueueMoveMode, onQueueClear,
-        forkTargetIdMap: forkTargetIdMapProp, turnDurationMap: turnDurationMapProp,
+        items,
+        queuedSteering = [],
+        queuedFollowUps = [],
+        onQueueBackToInput,
+        onQueueMoveMode,
+        onQueueClear,
+        forkTargetIdMap: forkTargetIdMapProp,
+        turnDurationMap: turnDurationMapProp,
         turnLatestAssistantIds: turnLatestAssistantIdsProp,
-        sessionId, isStreaming = false, isCompacting = false,
-        loadState = 'idle', loadError, connectionError, onOpenSettings,
-        hasMoreHistory = false, onLoadMore, onUndo, onFork, canUndo,
-        registerMessage, retryStatus = null, bottomPadding = 0,
-        onVisibleMessageIdsChange, onAtBottomChange,
+        sessionId,
+        isStreaming = false,
+        isCompacting = false,
+        loadState = 'idle',
+        loadError,
+        connectionError,
+        onOpenSettings,
+        hasMoreHistory = false,
+        onLoadMore,
+        onUndo,
+        onFork,
+        canUndo,
+        registerMessage,
+        retryStatus = null,
+        bottomPadding = 0,
+        onVisibleMessageIdsChange,
+        onAtBottomChange,
       },
       ref,
     ) => {
@@ -476,8 +495,8 @@ export const ChatArea = memo(
       const visibleItems = useMemo(() => entries.map(e => e.item), [entries])
       const forkMapRef = useRef<Map<string, string | undefined> | null>(null)
       const forkMap = useMemo(() => {
-        const next = forkTargetIdMapProp
-          ?? new Map(entries.map(e => [e.item.entryId, getVisibleTimelineForkTargetId(e)]))
+        const next =
+          forkTargetIdMapProp ?? new Map(entries.map(e => [e.item.entryId, getVisibleTimelineForkTargetId(e)]))
         const prev = forkMapRef.current
         if (prev && sameMap(prev, next)) return prev
         forkMapRef.current = next
@@ -539,7 +558,14 @@ export const ChatArea = memo(
         return reused
         // emptyShellGate.version：额外延迟到期后强制重算，挂上 Working 壳
         // eslint-disable-next-line react-hooks/exhaustive-deps
-      }, [processCollapseEnabled, visibleItems, turnDurationMap, isStreaming, emptyShellGate.version, emptyShellGate.isReady])
+      }, [
+        processCollapseEnabled,
+        visibleItems,
+        turnDurationMap,
+        isStreaming,
+        emptyShellGate.version,
+        emptyShellGate.isReady,
+      ])
 
       const messageIdToTimelineIndex = useMemo(() => {
         const map = new Map<string, number>()
@@ -565,13 +591,20 @@ export const ChatArea = memo(
       // ── Refs（避免闭包过期） ──
       const scrollRef = useRef<HTMLDivElement | null>(null)
       const contentRef = useRef<HTMLDivElement | null>(null)
-      const sessionIdRef = useRef(sessionId); sessionIdRef.current = sessionId
-      const onLoadMoreRef = useRef(onLoadMore); onLoadMoreRef.current = onLoadMore
-      const onVisibleIdsRef = useRef(onVisibleMessageIdsChange); onVisibleIdsRef.current = onVisibleMessageIdsChange
-      const onAtBottomRef = useRef(onAtBottomChange); onAtBottomRef.current = onAtBottomChange
-      const hasMoreRef = useRef(hasMoreHistory); hasMoreRef.current = hasMoreHistory
-      const loadStateRef = useRef(loadState); loadStateRef.current = loadState
-      const thresholdRef = useRef(atBottomThreshold); thresholdRef.current = atBottomThreshold
+      const sessionIdRef = useRef(sessionId)
+      sessionIdRef.current = sessionId
+      const onLoadMoreRef = useRef(onLoadMore)
+      onLoadMoreRef.current = onLoadMore
+      const onVisibleIdsRef = useRef(onVisibleMessageIdsChange)
+      onVisibleIdsRef.current = onVisibleMessageIdsChange
+      const onAtBottomRef = useRef(onAtBottomChange)
+      onAtBottomRef.current = onAtBottomChange
+      const hasMoreRef = useRef(hasMoreHistory)
+      hasMoreRef.current = hasMoreHistory
+      const loadStateRef = useRef(loadState)
+      loadStateRef.current = loadState
+      const thresholdRef = useRef(atBottomThreshold)
+      thresholdRef.current = atBottomThreshold
 
       const [isLoadingMore, setIsLoadingMore] = useState(false)
       const loadingMoreRef = useRef(false)
@@ -626,9 +659,7 @@ export const ChatArea = memo(
       const cacheKey = sessionId ? sessionCacheKey(sessionId, processCollapseEnabled) : null
       const initialCacheRef = useRef(cacheKey ? sessionCache.get(cacheKey)?.measurements : undefined)
       const coldBottomMount = !initialCacheRef.current?.length
-      const [renderOverscan, setRenderOverscan] = useState(
-        initialCacheRef.current?.length || coldBottomMount ? 6 : 15,
-      )
+      const [renderOverscan, setRenderOverscan] = useState(initialCacheRef.current?.length || coldBottomMount ? 6 : 15)
       const resizePinnedRef = useRef<number[]>([])
       const resizePinFrame = useRef<number | undefined>(undefined)
       const resizeAnchorScheduled = useRef(false)
@@ -655,8 +686,8 @@ export const ChatArea = memo(
         getScrollElement: () => scrollRef.current,
         initialOffset: estimatedBottomOffset,
         initialMeasurementsCache: initialCacheRef.current,
-        estimateSize: (index) => estimateTimelineItemSize(timeline[index]),
-        getItemKey: (i) => timeline[i]?.key ?? `removed:${i}`,
+        estimateSize: index => estimateTimelineItemSize(timeline[index]),
+        getItemKey: i => timeline[i]?.key ?? `removed:${i}`,
         // 输入框占位放在消息区外（retry/error 之后），避免重试提示被压到输入框下面
         paddingEnd: 0,
         scrollEndThreshold: 80,
@@ -673,7 +704,7 @@ export const ChatArea = memo(
         // 避免 translate3d 把每一行提升为独立合成层。WebView2 在行高动态
         // 变化时可能不刷新旧纹理，DOM 几何正确但画面仍会重叠或残留。
         directDomUpdatesMode: 'position',
-        rangeExtractor: (range) => {
+        rangeExtractor: range => {
           const indexes = defaultRangeExtractor({ ...range, overscan: renderOverscan })
           return mergeVirtualRangeIndexes(indexes, resizePinnedRef.current, hotPinnedRef.current)
         },
@@ -729,12 +760,7 @@ export const ChatArea = memo(
           } else {
             origResize(index, size)
           }
-          if (
-            root
-            && shouldAnchorBottom()
-            && !resizeAnchorScheduled.current
-            && vInternals.isAtEnd?.(80)
-          ) {
+          if (root && shouldAnchorBottom() && !resizeAnchorScheduled.current && vInternals.isAtEnd?.(80)) {
             resizeAnchorScheduled.current = true
             queueMicrotask(() => {
               resizeAnchorScheduled.current = false
@@ -768,7 +794,10 @@ export const ChatArea = memo(
       const clearPrepend = useCallback(() => {
         prependLoading.current = false
         prependAnchor.current = undefined
-        if (prependFrame.current !== undefined) { cancelAnimationFrame(prependFrame.current); prependFrame.current = undefined }
+        if (prependFrame.current !== undefined) {
+          cancelAnimationFrame(prependFrame.current)
+          prependFrame.current = undefined
+        }
       }, [])
 
       const updatePrependAnchor = useCallback(() => {
@@ -788,16 +817,22 @@ export const ChatArea = memo(
         const root = scrollRef.current
         if (!root || !prependAnchor.current) return
         if (prependFrame.current !== undefined) cancelAnimationFrame(prependFrame.current)
-        let frames = 0, stable = 0
+        let frames = 0,
+          stable = 0
         const apply = () => {
           prependFrame.current = undefined
           const a = prependAnchor.current
           if (!a) return
           const el = root.querySelector<HTMLElement>(`[data-timeline-key="${CSS.escape(a.key)}"]`)
           const delta = el ? el.getBoundingClientRect().top - root.getBoundingClientRect().top - a.offset : undefined
-          if (delta !== undefined && Math.abs(delta) > 0.5) { root.scrollTop += delta; stable = 0 }
-          else stable++
-          if (++frames >= 180 || stable >= 30) { if (!prependLoading.current) prependAnchor.current = undefined; return }
+          if (delta !== undefined && Math.abs(delta) > 0.5) {
+            root.scrollTop += delta
+            stable = 0
+          } else stable++
+          if (++frames >= 180 || stable >= 30) {
+            if (!prependLoading.current) prependAnchor.current = undefined
+            return
+          }
           prependFrame.current = requestAnimationFrame(apply)
         }
         prependFrame.current = requestAnimationFrame(apply)
@@ -808,14 +843,18 @@ export const ChatArea = memo(
         updatePrependAnchor()
       }, [updatePrependAnchor])
 
-      const restorePrepend = useCallback((done: boolean) => {
-        if (done) prependLoading.current = false
-        applyPrependAnchor()
-      }, [applyPrependAnchor])
+      const restorePrepend = useCallback(
+        (done: boolean) => {
+          if (done) prependLoading.current = false
+          applyPrependAnchor()
+        },
+        [applyPrependAnchor],
+      )
 
       const loadMore = useCallback(() => {
         capturePrepend()
-        setIsLoadingMore(true); loadingMoreRef.current = true
+        setIsLoadingMore(true)
+        loadingMoreRef.current = true
         const startedAt = performance.now()
         Promise.resolve()
           .then(() => onLoadMoreRef.current?.())
@@ -827,7 +866,8 @@ export const ChatArea = memo(
             const elapsed = performance.now() - startedAt
             const delay = Math.max(0, MIN_LOADING_MS - elapsed)
             window.setTimeout(() => {
-              setIsLoadingMore(false); loadingMoreRef.current = false
+              setIsLoadingMore(false)
+              loadingMoreRef.current = false
             }, delay)
           })
       }, [capturePrepend, restorePrepend])
@@ -848,18 +888,27 @@ export const ChatArea = memo(
       }, [loadMore, userScrolledRef])
 
       // ── Ref 回调 ──
-      const setScrollRoot = useCallback((el: HTMLDivElement | null) => {
-        scrollRef.current = el
-        autoSetScrollRef(el)
-        if (el) { computeScrollState(); fill() }
-      }, [autoSetScrollRef, computeScrollState, fill])
+      const setScrollRoot = useCallback(
+        (el: HTMLDivElement | null) => {
+          scrollRef.current = el
+          autoSetScrollRef(el)
+          if (el) {
+            computeScrollState()
+            fill()
+          }
+        },
+        [autoSetScrollRef, computeScrollState, fill],
+      )
 
-      const setVirtualContent = useCallback((el: HTMLDivElement | null) => {
-        contentRef.current = el
-        autoSetContentRef(el)
-        virtualizer.containerRef(el)
-        if (el && scrollRef.current) computeScrollState()
-      }, [autoSetContentRef, virtualizer, computeScrollState])
+      const setVirtualContent = useCallback(
+        (el: HTMLDivElement | null) => {
+          contentRef.current = el
+          autoSetContentRef(el)
+          virtualizer.containerRef(el)
+          if (el && scrollRef.current) computeScrollState()
+        },
+        [autoSetContentRef, virtualizer, computeScrollState],
+      )
 
       const pinToBottom = useCallback(() => {
         // 必须滚到整页底（含 retry/error + 输入框 spacer），不能只 scrollToEnd 虚拟消息区
@@ -875,10 +924,10 @@ export const ChatArea = memo(
         if (prependLoading.current) updatePrependAnchor()
         computeScrollState()
         if (
-          userScrolledRef.current
-          && (scrollRef.current?.scrollTop ?? 0) < 200
-          && !loadingMoreRef.current
-          && hasMoreRef.current
+          userScrolledRef.current &&
+          (scrollRef.current?.scrollTop ?? 0) < 200 &&
+          !loadingMoreRef.current &&
+          hasMoreRef.current
         ) {
           void loadMore()
         }
@@ -886,10 +935,13 @@ export const ChatArea = memo(
         autoHandleScroll()
       }, [updatePrependAnchor, computeScrollState, autoHandleScroll, loadMore, userScrolledRef])
 
-      const onWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-        if (!prependLoading.current) clearPrepend()
-        autoHandleWheel(e.nativeEvent)
-      }, [autoHandleWheel, clearPrepend])
+      const onWheel = useCallback(
+        (e: React.WheelEvent<HTMLDivElement>) => {
+          if (!prependLoading.current) clearPrepend()
+          autoHandleWheel(e.nativeEvent)
+        },
+        [autoHandleWheel, clearPrepend],
+      )
 
       const onTouchStart = useCallback(() => {
         if (!prependLoading.current) clearPrepend()
@@ -923,10 +975,13 @@ export const ChatArea = memo(
       // rows 变化且应贴底时再确认一次（append / 首批消息）
       // prepend 由 anchorTo + prepend 锚点处理，这里在用户已离底时不跟
       const timelineStructureKey = useMemo(
-        () => timeline.map(item => {
-          if (item.kind === 'message') return `message:${item.key}`
-          return `shell:${item.key}:${item.isActive ? 'active' : 'settled'}:${item.children.length}:${item.finalItem?.entryId ?? ''}`
-        }).join('\u0000'),
+        () =>
+          timeline
+            .map(item => {
+              if (item.kind === 'message') return `message:${item.key}`
+              return `shell:${item.key}:${item.isActive ? 'active' : 'settled'}:${item.children.length}:${item.finalItem?.entryId ?? ''}`
+            })
+            .join('\u0000'),
         [timeline],
       )
       useLayoutEffect(() => {
@@ -1060,45 +1115,57 @@ export const ChatArea = memo(
       }, [updateVisibleSection, timeline])
 
       // ── 命令式接口 ──
-      useImperativeHandle(ref, () => ({
-        scrollToBottom: () => {
-          autoForceScroll()
-          pinToBottom()
-        },
-        scrollToBottomIfAtBottom: () => {
-          // userScrolled 守卫：用户上滚后 userScrolled=true，此函数由 onScrollRequest
-          //（每个 SSE chunk）调用。autoForceScroll() 的 force=true 会清掉 userScrolled，
-          // 导致 resizeItem 的 anchorTo toggle 失效 → wasAtEnd 恢复拉回。
-          // 不在此处清 userScrolled——用户主动下滚回底时 handleWheel 会清。
-          // 正常贴底跟随（userScrolled=false 时）不受影响。
-          if (userScrolledRef.current) return
-          if (!prevState.current.bottom) return
-          autoForceScroll()
-          pinToBottom()
-        },
-        scrollToLastMessage: () => {
-          if (timeline.length === 0) return
-          autoMarkAuto(scrollRef.current)
-          virtualizer.scrollToIndex(timeline.length - 1, { align: 'end' })
-        },
-        scrollToMessageIndex: (index: number) => {
-          // index 仍按 visibleItems 语义；过程折叠时映射到 timeline 行
-          if (index < 0 || index >= visibleItems.length) return
-          const messageId = visibleItems[index]?.entryId
-          const timelineIndex = messageId != null
-            ? (messageIdToTimelineIndex.get(messageId) ?? index)
-            : index
-          if (timelineIndex < 0 || timelineIndex >= timeline.length) return
-          autoPause()
-          virtualizer.scrollToIndex(timelineIndex, { align: 'center' })
-        },
-        scrollToMessageId: (messageId: string) => {
-          const timelineIndex = messageIdToTimelineIndex.get(messageId)
-          if (timelineIndex == null) return
-          autoPause()
-          virtualizer.scrollToIndex(timelineIndex, { align: 'center' })
-        },
-      }), [autoForceScroll, autoPause, autoMarkAuto, pinToBottom, userScrolledRef, virtualizer, timeline, visibleItems, messageIdToTimelineIndex])
+      useImperativeHandle(
+        ref,
+        () => ({
+          scrollToBottom: () => {
+            autoForceScroll()
+            pinToBottom()
+          },
+          scrollToBottomIfAtBottom: () => {
+            // userScrolled 守卫：用户上滚后 userScrolled=true，此函数由 onScrollRequest
+            //（每个 SSE chunk）调用。autoForceScroll() 的 force=true 会清掉 userScrolled，
+            // 导致 resizeItem 的 anchorTo toggle 失效 → wasAtEnd 恢复拉回。
+            // 不在此处清 userScrolled——用户主动下滚回底时 handleWheel 会清。
+            // 正常贴底跟随（userScrolled=false 时）不受影响。
+            if (userScrolledRef.current) return
+            if (!prevState.current.bottom) return
+            autoForceScroll()
+            pinToBottom()
+          },
+          scrollToLastMessage: () => {
+            if (timeline.length === 0) return
+            autoMarkAuto(scrollRef.current)
+            virtualizer.scrollToIndex(timeline.length - 1, { align: 'end' })
+          },
+          scrollToMessageIndex: (index: number) => {
+            // index 仍按 visibleItems 语义；过程折叠时映射到 timeline 行
+            if (index < 0 || index >= visibleItems.length) return
+            const messageId = visibleItems[index]?.entryId
+            const timelineIndex = messageId != null ? (messageIdToTimelineIndex.get(messageId) ?? index) : index
+            if (timelineIndex < 0 || timelineIndex >= timeline.length) return
+            autoPause()
+            virtualizer.scrollToIndex(timelineIndex, { align: 'center' })
+          },
+          scrollToMessageId: (messageId: string) => {
+            const timelineIndex = messageIdToTimelineIndex.get(messageId)
+            if (timelineIndex == null) return
+            autoPause()
+            virtualizer.scrollToIndex(timelineIndex, { align: 'center' })
+          },
+        }),
+        [
+          autoForceScroll,
+          autoPause,
+          autoMarkAuto,
+          pinToBottom,
+          userScrolledRef,
+          virtualizer,
+          timeline,
+          visibleItems,
+          messageIdToTimelineIndex,
+        ],
+      )
 
       if (isPerfEnabled()) {
         perfRecordRender('ChatArea', performance.now() - renderStart)

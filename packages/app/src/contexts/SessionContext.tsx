@@ -51,7 +51,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const storageVersion = useSyncExternalStore(subscribePerServerStorageVersion, getStorageVersion)
   useEffect(() => {
     const subscriptions = serverIds.flatMap(id => {
-      const paths = new Set([...readServerWorkspaces(id), ...sessions.filter(session => sessionKeyToServerId(session.id) === id).map(session => session.directory)])
+      const paths = new Set([
+        ...readServerWorkspaces(id),
+        ...sessions.filter(session => sessionKeyToServerId(session.id) === id).map(session => session.directory),
+      ])
       const stream = getPiEventStream(id)
       return [...paths].map(path => ({ stream, path }))
     })
@@ -80,62 +83,71 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // 始终拉全局列表：activeSessionStore（活跃 tab）需要跨工作区解析任意活跃
   // session 的 id/directory，标题/目录展示也要全局；“按当前工作区过滤显示”
   // 是显示层的事（SidePanel 自己做），这里不感知目录。
-  const fetchSessions = useCallback(async (retryAttempt = 0) => {
-    if (fetchInFlightRef.current) {
-      // 上一次还没结束：合并到完成后补刷（尾合并）
-      fetchQueuedRef.current = true
-      return
-    }
-    fetchInFlightRef.current = true
-    const requestId = ++requestIdRef.current
-    setIsLoading(true)
-    try {
-      const results = await Promise.allSettled(serverIds.map(id => loadPiSessions(undefined, id)))
-      if (requestId !== requestIdRef.current) return
-      const mapped = results.flatMap((result, index) => result.status === 'fulfilled'
-        ? result.value.map(piSessionInfoToUiSession).filter((session): session is UiSession => session !== null)
-        : allSessionsRef.current.filter(session => sessionKeyToServerId(session.id) === serverIds[index]))
-      if (results.length > 0 && results.every(result => result.status === 'rejected')) {
-        throw (results[0] as PromiseRejectedResult).reason
+  const fetchSessions = useCallback(
+    async (retryAttempt = 0) => {
+      if (fetchInFlightRef.current) {
+        // 上一次还没结束：合并到完成后补刷（尾合并）
+        fetchQueuedRef.current = true
+        return
       }
-      const onDisk = new Set(mapped.map(session => session.id))
-      const now = Date.now()
-      for (const [id, since] of pendingRef.current) {
-        if (onDisk.has(id) || now - since > PENDING_TTL_MS) pendingRef.current.delete(id)
-      }
-      const pending = allSessionsRef.current.filter(session => pendingRef.current.has(session.id) && serverIds.includes(sessionKeyToServerId(session.id)))
-      const next = linkPiSessionForks([...pending, ...mapped])
-      if (requestId !== requestIdRef.current) return
-      allSessionsRef.current = next
-      activeSessionStore.syncPiSummaries(next.map(session => ({
-        id: session.id,
-        title: session.title,
-        directory: session.directory,
-      })))
-      setSessions(filterPiSessionList(next, searchRef.current))
-    } catch (error) {
-      if (requestId !== requestIdRef.current) return
-      if (retryAttempt < 3) {
-        if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
-        retryTimerRef.current = window.setTimeout(() => {
-          if (requestId !== requestIdRef.current) return
-          void fetchSessionsRef.current(retryAttempt + 1)
-        }, [500, 1500, 3000][retryAttempt])
-      }
-      // 最终失败保留已有列表：后端冷启动/抖动时不清空用户可见数据，
-      // 后续由 sessions-changed 事件或下一次操作触发刷新恢复。
-      sessionErrorHandler('fetch sessions', error)
-    } finally {
-      if (requestId === requestIdRef.current) {
-        fetchInFlightRef.current = false
-        setIsLoading(false)
-        if (fetchQueuedRef.current) {
-          fetchQueuedRef.current = false
-          void fetchSessionsRef.current()
+      fetchInFlightRef.current = true
+      const requestId = ++requestIdRef.current
+      setIsLoading(true)
+      try {
+        const results = await Promise.allSettled(serverIds.map(id => loadPiSessions(undefined, id)))
+        if (requestId !== requestIdRef.current) return
+        const mapped = results.flatMap((result, index) =>
+          result.status === 'fulfilled'
+            ? result.value.map(piSessionInfoToUiSession).filter((session): session is UiSession => session !== null)
+            : allSessionsRef.current.filter(session => sessionKeyToServerId(session.id) === serverIds[index]),
+        )
+        if (results.length > 0 && results.every(result => result.status === 'rejected')) {
+          throw (results[0] as PromiseRejectedResult).reason
+        }
+        const onDisk = new Set(mapped.map(session => session.id))
+        const now = Date.now()
+        for (const [id, since] of pendingRef.current) {
+          if (onDisk.has(id) || now - since > PENDING_TTL_MS) pendingRef.current.delete(id)
+        }
+        const pending = allSessionsRef.current.filter(
+          session => pendingRef.current.has(session.id) && serverIds.includes(sessionKeyToServerId(session.id)),
+        )
+        const next = linkPiSessionForks([...pending, ...mapped])
+        if (requestId !== requestIdRef.current) return
+        allSessionsRef.current = next
+        activeSessionStore.syncPiSummaries(
+          next.map(session => ({
+            id: session.id,
+            title: session.title,
+            directory: session.directory,
+          })),
+        )
+        setSessions(filterPiSessionList(next, searchRef.current))
+      } catch (error) {
+        if (requestId !== requestIdRef.current) return
+        if (retryAttempt < 3) {
+          if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+          retryTimerRef.current = window.setTimeout(() => {
+            if (requestId !== requestIdRef.current) return
+            void fetchSessionsRef.current(retryAttempt + 1)
+          }, [500, 1500, 3000][retryAttempt])
+        }
+        // 最终失败保留已有列表：后端冷启动/抖动时不清空用户可见数据，
+        // 后续由 sessions-changed 事件或下一次操作触发刷新恢复。
+        sessionErrorHandler('fetch sessions', error)
+      } finally {
+        if (requestId === requestIdRef.current) {
+          fetchInFlightRef.current = false
+          setIsLoading(false)
+          if (fetchQueuedRef.current) {
+            fetchQueuedRef.current = false
+            void fetchSessionsRef.current()
+          }
         }
       }
-    }
-  }, [serverIds])
+    },
+    [serverIds],
+  )
 
   // 事件驱动刷新：防抖合并（300ms 窗口内多事件只拉一次）
   const scheduleFetch = useCallback(() => {
@@ -190,53 +202,62 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }, 15_000)
   }, [])
 
-  const createSession = useCallback(async (title?: string) => {
-    // 全局（未选目录）时落到服务器默认工作区（桌面安装目录）
-    const serverId = serverStore.getActiveServerId()
-    const directory = currentDirectory?.trim() || (await resolveWorkspacePath(undefined, serverId)) || ''
-    if (!directory) throw new Error('Choose a project directory before creating a session')
-    const created = await createPiSession(directory, undefined, serverId)
-    const now = Date.now()
-    const session: UiSession = {
-      id: created.sessionId,
-      directory,
-      title: title?.trim() || i18n.t('chat:sidebar.newChat'),
-      createdAt: now,
-      updatedAt: now,
-    }
-    trackPiSession(created.sessionId, directory)
-    registerSession(session)
-    return session
-  }, [currentDirectory, registerSession])
+  const createSession = useCallback(
+    async (title?: string) => {
+      // 全局（未选目录）时落到服务器默认工作区（桌面安装目录）
+      const serverId = serverStore.getActiveServerId()
+      const directory = currentDirectory?.trim() || (await resolveWorkspacePath(undefined, serverId)) || ''
+      if (!directory) throw new Error('Choose a project directory before creating a session')
+      const created = await createPiSession(directory, undefined, serverId)
+      const now = Date.now()
+      const session: UiSession = {
+        id: created.sessionId,
+        directory,
+        title: title?.trim() || i18n.t('chat:sidebar.newChat'),
+        createdAt: now,
+        updatedAt: now,
+      }
+      trackPiSession(created.sessionId, directory)
+      registerSession(session)
+      return session
+    },
+    [currentDirectory, registerSession],
+  )
 
-  const deleteSession = useCallback(async (id: string) => {
-    const session = allSessionsRef.current.find(item => item.id === id)
-    if (!session?.path || !session.directory) throw new Error('Pi session file is unavailable')
-    await deletePiSession(session.directory, session.path, undefined, sessionKeyToServerId(id))
-    pinnedSessionsStore.unpin(id)
-    clearSessionRuntimeState(id)
-    paneLayoutStore.clearSession(id)
-    pendingRef.current.delete(id)
-    allSessionsRef.current = allSessionsRef.current.filter(item => item.id !== id)
-    setSessions(filterPiSessionList(allSessionsRef.current, search))
-    // 广播删除：其他列表消费者（useSessions 等独立实例）不共享本 context
-    // 的状态，需要事件触发重拉，否则删除后它们的列表一直显示旧数据。
-    window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
-  }, [search])
+  const deleteSession = useCallback(
+    async (id: string) => {
+      const session = allSessionsRef.current.find(item => item.id === id)
+      if (!session?.path || !session.directory) throw new Error('Pi session file is unavailable')
+      await deletePiSession(session.directory, session.path, undefined, sessionKeyToServerId(id))
+      pinnedSessionsStore.unpin(id)
+      clearSessionRuntimeState(id)
+      paneLayoutStore.clearSession(id)
+      pendingRef.current.delete(id)
+      allSessionsRef.current = allSessionsRef.current.filter(item => item.id !== id)
+      setSessions(filterPiSessionList(allSessionsRef.current, search))
+      // 广播删除：其他列表消费者（useSessions 等独立实例）不共享本 context
+      // 的状态，需要事件触发重拉，否则删除后它们的列表一直显示旧数据。
+      window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
+    },
+    [search],
+  )
 
-  const value = useMemo<SessionContextValue>(() => ({
-    sessions,
-    isLoading,
-    isLoadingMore: false,
-    hasMore: false,
-    search,
-    setSearch,
-    refresh,
-    loadMore,
-    createSession,
-    registerSession,
-    deleteSession,
-  }), [sessions, isLoading, search, refresh, loadMore, createSession, registerSession, deleteSession])
+  const value = useMemo<SessionContextValue>(
+    () => ({
+      sessions,
+      isLoading,
+      isLoadingMore: false,
+      hasMore: false,
+      search,
+      setSearch,
+      refresh,
+      loadMore,
+      createSession,
+      registerSession,
+      deleteSession,
+    }),
+    [sessions, isLoading, search, refresh, loadMore, createSession, registerSession, deleteSession],
+  )
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
 }

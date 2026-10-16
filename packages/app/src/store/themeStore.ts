@@ -366,7 +366,6 @@ class ThemeStore {
     const queueFollowupMessages =
       savedQueueFollowupMessages === null ? DEFAULT_QUEUE_FOLLOWUP_MESSAGES : savedQueueFollowupMessages === 'true'
 
-
     const savedExternalFileDropMode = storageGet(STORAGE_KEY_EXTERNAL_FILE_DROP_MODE)
     const externalFileDropMode: ExternalFileDropMode =
       savedExternalFileDropMode === 'mention' ? 'mention' : DEFAULT_EXTERNAL_FILE_DROP_MODE
@@ -395,9 +394,7 @@ class ThemeStore {
 
     const savedProcessCollapseEnabled = storageGet(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED)
     const processCollapseEnabled =
-      savedProcessCollapseEnabled === null
-        ? DEFAULT_PROCESS_COLLAPSE_ENABLED
-        : savedProcessCollapseEnabled === 'true'
+      savedProcessCollapseEnabled === null ? DEFAULT_PROCESS_COLLAPSE_ENABLED : savedProcessCollapseEnabled === 'true'
 
     const savedManualTerminalTitles = storageGet(STORAGE_KEY_MANUAL_TERMINAL_TITLES)
     const manualTerminalTitles = savedManualTerminalTitles === null ? false : savedManualTerminalTitles === 'true'
@@ -1089,9 +1086,7 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
         ? parsed.outlineCurrentHighlight
         : DEFAULT_OUTLINE_CURRENT_HIGHLIGHT,
     autoExpandExtensionsOnCommand:
-      typeof parsed?.autoExpandExtensionsOnCommand === 'boolean'
-        ? parsed.autoExpandExtensionsOnCommand
-        : true,
+      typeof parsed?.autoExpandExtensionsOnCommand === 'boolean' ? parsed.autoExpandExtensionsOnCommand : true,
     actionsOnLatestAssistantOnly:
       typeof parsed?.actionsOnLatestAssistantOnly === 'boolean'
         ? parsed.actionsOnLatestAssistantOnly
@@ -1153,10 +1148,7 @@ export function importThemeBackup(raw: unknown): void {
   storageSet(STORAGE_KEY_EXTERNAL_FILE_DROP_MODE, backup.externalFileDropMode)
   storageSet(STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT, String(backup.outlineCurrentHighlight))
   storageSet(STORAGE_KEY_AUTO_EXPAND_EXTENSIONS, String(backup.autoExpandExtensionsOnCommand))
-  storageSet(
-    STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY,
-    String(backup.actionsOnLatestAssistantOnly),
-  )
+  storageSet(STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY, String(backup.actionsOnLatestAssistantOnly))
   storageSet(STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK, String(backup.desktopCollapsedInputDock))
   storageSet(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED, String(backup.processCollapseEnabled))
   storageSet(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT, backup.codeBlockThemeLight)

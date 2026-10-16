@@ -22,7 +22,10 @@ export function requestGitWorkspaceCatalogRefresh() {
 }
 
 export function useGitWorkspaceCatalog(directories: string[]) {
-  const serverId = useSyncExternalStore(listener => serverStore.subscribe(listener), () => serverStore.getActiveServerId())
+  const serverId = useSyncExternalStore(
+    listener => serverStore.subscribe(listener),
+    () => serverStore.getActiveServerId(),
+  )
   const [catalog, setCatalog] = useState<GitWorkspaceCatalog>(new Map())
   const [isLoading, setIsLoading] = useState(false)
   const mountedRef = useRef(true)

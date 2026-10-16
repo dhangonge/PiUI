@@ -89,7 +89,11 @@ describe('piSessionStateStore pending dialog recovery', () => {
     extensionUiStore.requestOpened(dialogRequest())
     piSessionStateStore.setState('session-1', {
       pendingExtensionUiRequests: [],
-      extensionUiState: { patches: [{ kind: 'status', key: 'mode', text: 'Planning' }], editorText: '', toolsExpanded: false },
+      extensionUiState: {
+        patches: [{ kind: 'status', key: 'mode', text: 'Planning' }],
+        editorText: '',
+        toolsExpanded: false,
+      },
     } as unknown as JsonObject)
 
     const snapshot = extensionUiStore.getSnapshot().sessions['session-1']

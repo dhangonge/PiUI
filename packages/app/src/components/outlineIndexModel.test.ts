@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  buildOutlineSourceEntries,
-  findBiasedVisibleIndex,
-  resolveVisibleSectionIds,
-} from './outlineIndexModel'
+import { buildOutlineSourceEntries, findBiasedVisibleIndex, resolveVisibleSectionIds } from './outlineIndexModel'
 import type { PiUserMessageItem } from '../pi/domain/index.js'
 
 function user(entryId: string, renderKey?: string): PiUserMessageItem {

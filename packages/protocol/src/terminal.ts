@@ -1,8 +1,8 @@
-import type { Problem } from "./problem.js"
+import type { Problem } from './problem.js'
 
 export const TERMINAL_STREAM_PROTOCOL_VERSION = 1 as const
 
-export type TerminalStatus = "running" | "exited"
+export type TerminalStatus = 'running' | 'exited'
 
 export type TerminalShell = {
   path: string
@@ -36,20 +36,20 @@ export type TerminalUpdateParams = {
 }
 
 export type TerminalStreamClientFrame =
-  | { type: "input"; data: string }
-  | { type: "resize"; rows: number; cols: number }
-  | { type: "ping"; protocolVersion: typeof TERMINAL_STREAM_PROTOCOL_VERSION }
+  | { type: 'input'; data: string }
+  | { type: 'resize'; rows: number; cols: number }
+  | { type: 'ping'; protocolVersion: typeof TERMINAL_STREAM_PROTOCOL_VERSION }
 
 export type TerminalStreamServerFrame =
   | {
-      type: "hello"
+      type: 'hello'
       protocolVersion: typeof TERMINAL_STREAM_PROTOCOL_VERSION
       terminal: TerminalInfo
       cursor: number
     }
-  | { type: "output"; cursor: number; data: string }
-  | { type: "title"; title: string }
-  | { type: "ready"; cursor: number }
-  | { type: "exit"; cursor: number; exitCode: number | null }
-  | { type: "pong"; protocolVersion: typeof TERMINAL_STREAM_PROTOCOL_VERSION; t: number }
-  | { type: "problem"; problem: Problem }
+  | { type: 'output'; cursor: number; data: string }
+  | { type: 'title'; title: string }
+  | { type: 'ready'; cursor: number }
+  | { type: 'exit'; cursor: number; exitCode: number | null }
+  | { type: 'pong'; protocolVersion: typeof TERMINAL_STREAM_PROTOCOL_VERSION; t: number }
+  | { type: 'problem'; problem: Problem }

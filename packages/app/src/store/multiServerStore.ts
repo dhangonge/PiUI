@@ -58,7 +58,8 @@ class MultiServerStore {
     const next = this.buildSnapshot()
     if (JSON.stringify(next) === JSON.stringify(this.snapshot)) return
     if (next.serverIds.join('\0') === this.snapshot.serverIds.join('\0')) next.serverIds = this.snapshot.serverIds
-    if (next.subscribedServerIds.join('\0') === this.snapshot.subscribedServerIds.join('\0')) next.subscribedServerIds = this.snapshot.subscribedServerIds
+    if (next.subscribedServerIds.join('\0') === this.snapshot.subscribedServerIds.join('\0'))
+      next.subscribedServerIds = this.snapshot.subscribedServerIds
     this.snapshot = next
     this.settings = {
       enabled: next.enabled,

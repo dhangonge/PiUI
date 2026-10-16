@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto"
+import { randomUUID } from 'node:crypto'
 import {
   eventStreamKey,
   PROTOCOL_VERSION,
@@ -9,7 +9,7 @@ import {
   type EventResyncReason,
   type EventStreamRef,
   type JsonValue,
-} from "@piui/protocol"
+} from '@piui/protocol'
 
 type Listener = (event: EventEnvelope) => void
 const MAX_STREAMS = 4096
@@ -72,11 +72,11 @@ export class EventHub {
     cursor?: EventCursor,
   ): { events: EventEnvelope[]; resyncRequired: boolean; reason?: EventResyncReason } {
     const state = this.getOrCreate(stream)
-    if (!cursor) return { events: [], resyncRequired: true, reason: "missing_cursor" }
-    if (cursor.epoch !== state.epoch) return { events: [], resyncRequired: true, reason: "epoch_mismatch" }
-    if (cursor.sequence > state.sequence) return { events: [], resyncRequired: true, reason: "future_cursor" }
+    if (!cursor) return { events: [], resyncRequired: true, reason: 'missing_cursor' }
+    if (cursor.epoch !== state.epoch) return { events: [], resyncRequired: true, reason: 'epoch_mismatch' }
+    if (cursor.sequence > state.sequence) return { events: [], resyncRequired: true, reason: 'future_cursor' }
     const oldest = state.history[0]?.cursor.sequence ?? state.sequence + 1
-    if (cursor.sequence < oldest - 1) return { events: [], resyncRequired: true, reason: "history_expired" }
+    if (cursor.sequence < oldest - 1) return { events: [], resyncRequired: true, reason: 'history_expired' }
     return {
       events: state.history.filter(event => event.cursor.sequence > cursor.sequence),
       resyncRequired: false,
@@ -102,7 +102,7 @@ export class EventHub {
     }
     if (this.streams.size >= MAX_STREAMS) {
       const oldest = this.streams.keys().next().value
-      if (typeof oldest === "string") this.streams.delete(oldest)
+      if (typeof oldest === 'string') this.streams.delete(oldest)
     }
     const state: StreamState = { stream, epoch: randomUUID(), sequence: 0, history: [] }
     this.streams.set(key, state)

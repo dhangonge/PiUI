@@ -131,10 +131,7 @@ export function PaneHeader({
     (e: React.PointerEvent<HTMLDivElement>) => {
       const target = e.target as HTMLElement
       if (target.closest('button, input')) return
-      startInternalDrag(
-        e,
-        { kind: 'pane', paneId },
-      )
+      startInternalDrag(e, { kind: 'pane', paneId })
     },
     [paneId],
   )
@@ -145,8 +142,8 @@ export function PaneHeader({
       setIsDragOver(
         Boolean(
           active?.payload.kind === 'pane' &&
-            active.payload.paneId !== paneId &&
-            isPointInsideElement(active.current, headerRef.current),
+          active.payload.paneId !== paneId &&
+          isPointInsideElement(active.current, headerRef.current),
         ),
       )
     })
@@ -266,7 +263,7 @@ export function PaneHeader({
         </div>
 
         {isFocused && (
-        <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
             {showSidebarButton && onOpenSidebar && (
               <IconButton
                 size="sm"
@@ -320,7 +317,10 @@ export function PaneHeader({
         )}
       </div>
 
-      <div data-chat-header-shadow className="absolute top-full left-0 right-0 h-8 bg-gradient-to-b from-bg-100 to-transparent pointer-events-none z-10" />
+      <div
+        data-chat-header-shadow
+        className="absolute top-full left-0 right-0 h-8 bg-gradient-to-b from-bg-100 to-transparent pointer-events-none z-10"
+      />
     </div>
   )
 }
