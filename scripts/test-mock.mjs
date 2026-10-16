@@ -16,6 +16,8 @@ if (!npmCli) {
 // 阈值翻倍后只有真挂死才会触发；仍可用 PIUI_TEST_COMMAND_TIMEOUT_MS 覆盖。
 const COMMAND_TIMEOUT_MS = Number(process.env.PIUI_TEST_COMMAND_TIMEOUT_MS) || 600_000
 
+const withCoverage = process.argv.includes("--coverage") || process.env.PIUI_TEST_COVERAGE === "1"
+
 const commands = [
   ["run", "build", "-w", "@piui/protocol"],
   ["run", "build", "-w", "@piui/pi-worker"],
@@ -23,7 +25,10 @@ const commands = [
   ["run", "test", "-w", "@piui/protocol"],
   ["run", "test", "-w", "@piui/pi-worker"],
   ["run", "test", "-w", "@piui/server"],
-  ["run", "test:run", "-w", "@piui/app"],
+  // --coverage 只加在 app 上：Node 侧三包覆盖率的度量与门槛还没建立。
+  withCoverage
+    ? ["run", "test:run", "-w", "@piui/app", "--", "--coverage"]
+    : ["run", "test:run", "-w", "@piui/app"],
 ]
 
 for (const args of commands) {

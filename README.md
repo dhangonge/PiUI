@@ -202,17 +202,27 @@ session.preview
 npm run typecheck
 npm test
 npm run build
+npm run validate      # check:docs → conformance:sdk:check → typecheck → lint → test → build
+```
+
+app 覆盖率（阈值在 `packages/app/vitest.config.ts`，掉下门槛即失败）：
+
+```bash
+npm run test:coverage   # = npm test + app 的 --coverage，输出 text 表 + coverage/index.html
 ```
 
 真实双后端 + Chromium 移动视口冒烟（使用 mock worker，不调用 LLM，也不读取个人 Pi 配置）：
 
 ```bash
 npm run build
-node --import tsx scripts/smoke-android-ui.mjs
-node --import tsx scripts/smoke-timeline-order.mjs
+npm run smoke                 # 两个冒烟都跑：npm run smoke:timeline && npm run smoke:android-ui
+npm run smoke:android-ui      # = node --import tsx scripts/smoke-android-ui.mjs
+npm run smoke:timeline        # = node --import tsx scripts/smoke-timeline-order.mjs
 ```
 
-需要本机 Chromium；可通过 `CHROMIUM_BIN` 指定路径。测试结束会关闭其启动的服务、worker 和浏览器，截图路径打印在输出中。`smoke-timeline-order.mjs` 单独校验聊天时间线：系统条目与隐藏 hook 消息不得让助手脱离所在回合，流式回合的过程内容必须留在折叠壳内。
+需要本机 Chromium；可通过 `CHROMIUM_BIN` 指定路径，`CHROMIUM_EXTRA_ARGS` 追加启动参数（容器/CI 里通常需要 `--no-sandbox`）。测试结束会关闭其启动的服务、worker 和浏览器，截图路径打印在输出中。`smoke-timeline-order.mjs` 单独校验聊天时间线：系统条目与隐藏 hook 消息不得让助手脱离所在回合，流式过程内容必须留在折叠壳内。两个冒烟都需要先 `npm run build`（依赖 `packages/app/dist` 与三个 Node 包的 `dist`）。
+
+CI（`.github/workflows/ci.yml`）在 ubuntu + windows 上跑 `npm run validate`，ubuntu 那支额外带 `PIUI_TEST_COVERAGE=1` 收覆盖率、并在同一个 job 里接着跑两个冒烟；推送到 `main`、`v*` tag 和所有 PR 都触发。
 
 只运行 app 测试（低内存环境可附加 `-- --maxWorkers=1`）：
 

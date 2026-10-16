@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [dev, main]
+    branches: [main]
     tags: ["v*"]
   pull_request:
 
@@ -39,8 +39,37 @@ jobs:
 
       - run: npm ci
 
-      # 全量验证：typecheck + lint + 测试（默认 mock 驱动，不调用真实模型）+ 构建
-      - run: npm run validate
+      # 全量验证：typecheck + lint + 测试（默认 mock 驱动，不调用真实模型）+ 构建。
+      # Ubuntu 那支额外收集 app 覆盖率（阈值写在 packages/app/vitest.config.ts），
+      # 避免两支各跑一遍完整测试。
+      - name: Validate (with coverage)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          PIUI_TEST_COVERAGE: '1'
+        run: npm run validate
+
+      - name: Validate
+        if: matrix.os != 'ubuntu-latest'
+        run: npm run validate
+
+      # 冒烟依赖上面 validate 已构建的 dist（app/dist + 三包的 dist），
+      # 所以放在同一 job 里，不重复 build。
+      - name: Resolve Chromium
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          for bin in google-chrome google-chrome-stable chromium chromium-browser; do
+            if command -v "$bin" >/dev/null 2>&1; then
+              echo "CHROMIUM_BIN=$(command -v "$bin")" >> "$GITHUB_ENV"
+              echo "smoke browser: $bin"
+              exit 0
+            fi
+          done
+          echo "no Chromium/Google Chrome found on PATH" >&2
+          exit 1
+
+      - name: Smoke (timeline order + android UI)
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run smoke
 
   tauri-check:
     name: tauri check

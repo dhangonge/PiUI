@@ -169,9 +169,11 @@ async function startServer() {
 }
 
 async function openBrowser(origin, token) {
+  // CHROMIUM_EXTRA_ARGS 用于无特权/容器环境（CI 里通常要给 --no-sandbox）。
+  const extraArgs = (process.env.CHROMIUM_EXTRA_ARGS || '').split(/\s+/).filter(Boolean)
   browser = spawn(process.env.CHROMIUM_BIN || 'chromium', [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
-    '--remote-debugging-port=0', `--user-data-dir=${path.join(root, 'chromium')}`, 'about:blank',
+    '--remote-debugging-port=0', `--user-data-dir=${path.join(root, 'chromium')}`, ...extraArgs, 'about:blank',
   ], { stdio: ['ignore', 'ignore', 'pipe'] })
   const endpoint = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Chromium did not expose DevTools')), 20_000)

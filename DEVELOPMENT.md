@@ -107,7 +107,11 @@ Host 区也使用 registry/dispatch，不保留 workspace/files/git REST shortcu
 npm run validate        # check:docs → conformance:sdk:check → typecheck → lint → test → build
 npm run check:docs      # 文档里声明的版本基线/CHANGELOG/workspace 版本一致性
 npm run lint            # app（eslint）+ 根（protocol/pi-worker/server/scripts）
+npm run test:coverage   # 同 test，另收 app 覆盖率并按 packages/app/vitest.config.ts 的门槛判定
+npm run smoke           # 需先 build：两个 Chromium 冒烟（timeline 顺序 + 双后端移动 UI）
 ```
+
+CI：`.github/workflows/ci.yml` 在 ubuntu + windows 跑 `npm run validate`；ubuntu 那支带 `PIUI_TEST_COVERAGE=1`（避免两支重复跑一遍测试）+ Chromium 冒烟。触发条件是 push 到 `main`、`v*` tag、以及所有 PR。
 
 新增版本声明时写在可校验的位置：SDK 基线写成 ``Baseline: `@earendil-works/pi-coding-agent@x.y.z` ``（`docs/PI_SDK_API_MATRIX.md` 的模式），否则 `check:docs` 不管；本包版本号不要写进文档，只引用 `PI_PARITY_SDK_VERSION`。
 
