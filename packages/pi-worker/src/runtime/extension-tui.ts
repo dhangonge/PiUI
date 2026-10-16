@@ -49,6 +49,12 @@ export class VirtualTerminal implements Terminal {
     return Promise.resolve()
   }
 
+  /**
+   * OSC 7501 program status (pi-tui >= 1.1). The offscreen mirror has no real
+   * terminal to report to; the app renders its own working indicator.
+   */
+  setProgramStatus(): void {}
+
   write(data: string): void {
     this.buffer += data
     if (this.flushTimer !== undefined) return

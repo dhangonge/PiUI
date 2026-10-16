@@ -10,7 +10,7 @@ PiUI 是 Pi 原生 coding agent 的 Android 客户端。界面、session 浏览�
 
 - Node.js `>= 22.19.0`
 - npm
-- 默认使用 PiUI 固定的 Pi SDK `1.0.3`；外部 SDK 需单独通过兼容性验证
+- 默认使用 PiUI 固定的 Pi SDK `1.3.0`；外部 SDK 需单独通过兼容性验证
 - 对话需要配置 Pi 的 provider 凭据；测试和类型检查默认不会调用真实 LLM
 - 构建 APK 另需：JDK 17+、Android SDK（含 NDK `29.0.14206865`）、Rust 稳定版并带 `aarch64-linux-android` / `armv7-linux-androideabi` target
 
@@ -67,7 +67,7 @@ npm run pi-worker -- web --help
 
 ## ARM64 离线部署
 
-Linux ARM64 和 Android Termux ARM64 可使用自包含包，不需要在目标设备运行 npm install。包内含 Pi 1.0.3、PiUI server/worker/Web、Node、npm、rg/fd 和匹配平台的 PTY。
+Linux ARM64 和 Android Termux ARM64 可使用自包含包，不需要在目标设备运行 npm install。包内含 Pi 1.3.0、PiUI server/worker/Web、Node、npm、rg/fd 和匹配平台的 PTY。
 
 解压到新目录后运行 `sh deploy.sh`；默认仅监听本机。可信局域网多设备测试需显式使用 `sh deploy.sh --listen 0.0.0.0 --port 8787`。每台设备/每个 PIUI_HOME 分别生成配置、会话和 token；不打包个人配置，不修改系统服务或全局 Node。
 
@@ -304,7 +304,7 @@ git push origin dev
 
 ### 升级 Pi SDK
 
-当前发布基线固定为 `1.0.3`。升级前先用 `scripts/probe-pi-sdk.mjs` 对指定候选安装运行隔离契约测试，不直接追随全局 Pi 或 npm latest。
+当前发布基线固定为 `1.3.0`。升级前先用 `scripts/probe-pi-sdk.mjs` 对指定候选安装运行隔离契约测试，不直接追随全局 Pi 或 npm latest。
 
 同步脚本会更新依赖声明、`PI_PARITY_SDK_VERSION`、`BUNDLED_PI_SDK_VERSION`、测试断言和文档草稿；修改完成不等于验证通过。请显式指定候选版本，检查整个 SDK 家族均为精确版本，并审阅文档中的能力声明：
 

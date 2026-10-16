@@ -18,6 +18,9 @@ fs.mkdirSync(output) // Never overwrite an existing deployment or its data.
 fs.mkdirSync(cache, { recursive: true })
 const stage = fs.mkdtempSync(path.join(cache, 'assemble-'))
 const hash = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex')
+// Single source of truth for the bundled Pi SDK version; a literal here went stale once already.
+const sdkVersion = fs.readFileSync(path.join(repo, 'packages/protocol/src/version.ts'), 'utf8').match(/PI_PARITY_SDK_VERSION = "([^"]+)"/)?.[1]
+if (!sdkVersion) throw new Error('PI_PARITY_SDK_VERSION not found in packages/protocol/src/version.ts')
 function run(exe, args, options = {}) {
   const result = spawnSync(exe, args, { cwd: repo, stdio: 'inherit', ...options })
   if (result.error || result.status !== 0) throw new Error(`Command failed: ${exe} (status ${result.status})`)
@@ -138,7 +141,7 @@ try {
   }
   copy(path.join(templates, 'README.md'), path.join(output, 'README.md'))
   copy(path.join(templates, 'lock.json'), path.join(output, 'runtime-lock.json'))
-  fs.writeFileSync(path.join(output, 'manifest.json'), JSON.stringify({ target, sdkVersion: '1.0.3', revision: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(), sourceDirty: !!execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' }).trim(), packageLockSha256: hash(path.join(repo, 'package-lock.json')), packages: inventory }, null, 2) + '\n')
+  fs.writeFileSync(path.join(output, 'manifest.json'), JSON.stringify({ target, sdkVersion, revision: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(), sourceDirty: !!execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' }).trim(), packageLockSha256: hash(path.join(repo, 'package-lock.json')), packages: inventory }, null, 2) + '\n')
   // Include tracked sources for the modified GPL UI/server; no working-tree credentials.
   const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: repo })
   const list = path.join(stage, 'source-files')

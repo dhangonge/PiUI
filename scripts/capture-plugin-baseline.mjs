@@ -9,6 +9,11 @@ const agentDir = resolve(agentDirectory)
 const hash = data => createHash('sha256').update(data).digest('hex')
 const settings = JSON.parse(readFileSync(join(agentDir, 'settings.json'), 'utf8'))
 
+// The parity baseline lives in one place; copying it here went stale once already.
+const paritySource = readFileSync(new URL('../packages/protocol/src/version.ts', import.meta.url), 'utf8')
+const sdkCandidate = paritySource.match(/PI_PARITY_SDK_VERSION = "([^"]+)"/)?.[1]
+if (!sdkCandidate) throw new Error('PI_PARITY_SDK_VERSION not found in packages/protocol/src/version.ts')
+
 function treeDigest(directory) {
   const records = []
   function walk(relative = '') {
@@ -41,7 +46,7 @@ const extensions = readdirSync(join(agentDir, 'extensions'), { withFileTypes: tr
   .map(entry => ({ file: entry.name, sha256: hash(readFileSync(join(agentDir, 'extensions', entry.name))) }))
 const baseline = {
   formatVersion: 1,
-  sdkCandidate: '1.0.3',
+  sdkCandidate,
   purpose: 'Read-only inventory, not an activation manifest or proof of compatibility. Package tree hashes exclude nested dependencies.',
   packages,
   extensions,

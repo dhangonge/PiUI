@@ -35,11 +35,17 @@ try {
   const { loadPiSdk } = await import(pathToFileURL(path.join(app, 'packages/pi-worker/dist/sdk-host.js')).href)
   const { RealPiSession } = await import(pathToFileURL(path.join(app, 'packages/pi-worker/dist/runtime/real-session.js')).href)
   const loaded = await loadPiSdk()
-  assert.equal(loaded.version, '1.0.3')
+  // The bundle manifest records the SDK the package was built with; without it
+  // (running this check outside a bundle) the version is only reported.
+  let expectedSdkVersion
+  try {
+    expectedSdkVersion = JSON.parse(await fs.readFile(path.join(root, 'manifest.json'), 'utf8')).sdkVersion
+  } catch { /* not a packaged bundle */ }
+  if (expectedSdkVersion) assert.equal(loaded.version, expectedSdkVersion, 'bundled SDK does not match manifest.json')
   session = await RealPiSession.open(dir, undefined, { agentDir: path.join(dir, 'agent') })
   await session.initializeExtensions()
   assert.ok(session.getRegistry().tools.length > 0)
-  console.log('PASS: Pi SDK 1.0.3 module/session/extension initialization (no model request)')
+  console.log(`PASS: Pi SDK ${loaded.version} module/session/extension initialization (no model request)`)
 } finally {
   await session?.dispose()
   await fs.rm(dir, { recursive: true, force: true })

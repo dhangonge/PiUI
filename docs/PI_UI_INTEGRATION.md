@@ -1,6 +1,6 @@
-# Pi 0.84.2 Native Parity Matrix
+# Pi 1.3.0 Native Parity Matrix
 
-本文是 PiUI 能力状态的权威清单，基线固定为 `@earendil-works/pi-coding-agent@0.84.2`
+本文是 PiUI 能力状态的权威清单，基线固定为 `@earendil-works/pi-coding-agent@1.3.0`
 
 支持等级：
 
@@ -99,11 +99,30 @@
 | workspace access | 完整 | R12：升级 conformance |
 | WebSocket replay/resync | 完整 | R12：完整故障注入矩阵 |
 
+## SDK 升级记录
+
+### 1.0.3 → 1.3.0
+
+驱动原因：用户桌面 Pi 升到 1.3.0 后，`pi` 同时把 11 个 npm 插件中的 9 个升到新版本，原插件基线（`sdkCandidate: 1.0.3`）失效；1.1–1.3 还包含中转网关重试（`Unable to forward upstream stream`、`The service is temporarily unavailable`、`The upstream provider returned an error`）、OpenAI 兼容流式的 reasoning 顺序、压缩时省略 thinking 等修复。
+
+代码改动只有一处：pi-tui 1.1 给 `Terminal` 加了 `setProgramStatus()`（OSC 7501），离屏镜像 `VirtualTerminal` 需要一个空实现（`packages/pi-worker/src/runtime/extension-tui.ts`）。其余为版本常量、锁文件和文档。
+
+无需改动的兼容性事实：
+
+- 公开导出只有新增；移除的仅是未发布的 `./client`、`./experimental/plugin` 入口与 `pi-client`/`pi-protocol`/`pi-server` 包，PiUI 从未引用。
+- `SessionEntry` 联合类型与 1.0.3 完全一致，pi-ai 消息/内容类型只新增可选字段，会话文件双向兼容。
+- `readBuiltinThemes` 依赖的深路径 `loadThemeFromPath`/`getThemeByName` 仍存在；内置 dark/system 与用户自定义主题均可加载。
+- 1.2.0 的两处破坏性变更未触及 PiUI：`before_agent_start` 事件联合（无人监听）与忙时 `sendUserMessage` 需 `deliverAs`（composer 路径始终显式传入）。
+
+验证：typecheck 0 错误、lint 干净、protocol 15 / pi-worker 76 / server 126(+2 skip) / app 138 文件 781 项通过、`conformance:sdk` 通过、构建通过、两个浏览器冒烟（时间线顺序、412×915 双服务器）通过、刷新后的插件基线探针 11/11 通过。未验证：插件深层行为、真机与真实模型调用。
+
+顺带修掉同一类陈旧字面量：`scripts/capture-plugin-baseline.mjs`、`scripts/build-offline.mjs`、`scripts/offline/runtime-check.mjs` 里的 SDK 版本改为从 `PI_PARITY_SDK_VERSION` / 包内 `manifest.json` 派生。
+
 ## Completion Gate
 
 每个能力完成时必须同时满足：
 
-1. Pi 0.81.1 来源 API 和语义已记录
+1. Pi 1.3.0 来源 API 和语义已记录（见上方《SDK 升级记录》）
 2. Protocol 使用判别联合，不以 `unknown` 掩盖已知数据
 3. worker 保持 session 单写并处理 replacement generation
 4. server 返回明确 capability、错误和 command 状态
