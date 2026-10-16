@@ -286,19 +286,6 @@ async function closeRuntime(sessionId: string | undefined): Promise<void> {
   await current.dispose()
 }
 
-const ctx: CommandContext = {
-  get runtime() {
-    return undefined
-  },
-  driver,
-  catalog,
-  auth: providerAuth,
-  packages: catalog,
-  requireRuntime(): SessionRuntime {
-    throw Object.assign(new Error("Pi runtime is not open"), { code: "RUNTIME_NOT_OPEN" })
-  },
-}
-
 async function execute(command: { type: string; params?: JsonObject; sessionId?: string }): Promise<JsonValue | undefined | void> {
   const params = command.params ?? {}
   if (command.type === "registry.describe") return describeRegistry()

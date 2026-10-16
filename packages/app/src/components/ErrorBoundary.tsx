@@ -12,17 +12,17 @@ interface ErrorBoundaryState {
 }
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { error: null }
+  override state: ErrorBoundaryState = { error: null }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { error }
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo) {
+  override componentDidCatch(error: Error, info: ErrorInfo) {
     globalErrorHandler('render error', error, false, info.componentStack)
   }
 
-  render() {
+  override render() {
     if (!this.state.error) return this.props.children
 
     return (

@@ -257,5 +257,6 @@ export type HostCommandParams = {
 
 // 编译期防漂移：参数映射表的键必须与声明表的命令名完全一致
 type Assert<Condition extends true> = Condition
-type _HostParamsCoverAllSpecs = Assert<HostCommandName extends keyof HostCommandParams ? true : false>
-type _HostParamsHaveNoExtras = Assert<Exclude<keyof HostCommandParams, HostCommandName> extends never ? true : false>
+// 这三个是编译期断言（零运行时代价），导出是为了让 noUnusedLocals 不去动它们。
+export type _HostParamsCoverAllSpecs = Assert<HostCommandName extends keyof HostCommandParams ? true : false>
+export type _HostParamsHaveNoExtras = Assert<Exclude<keyof HostCommandParams, HostCommandName> extends never ? true : false>

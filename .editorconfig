@@ -1,0 +1,21 @@
+# https://editorconfig.org
+# 与 packages/app/.prettierrc.json 保持一致（Node 侧包当前多为分号风格，
+# prettier 只覆盖 app；这里只统一没人反对的行尾、缩进和文件末尾）。
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.{kt,kts,java}]
+indent_size = 4
+
+[Makefile]
+indent_style = tab

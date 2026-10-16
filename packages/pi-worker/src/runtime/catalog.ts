@@ -27,9 +27,10 @@ export function settingsForWorkspace(cwd: string, agentDir?: string) {
   const required = hasTrustRequiringProjectResources(cwd)
   const decision = store.get(cwd)
   const defaultDecision = manager.getDefaultProjectTrust()
-  const trusted = !required
-    || decision === true
-    || (decision === null && defaultDecision === "always")
+  // 信任成立的条件：项目不需要信任，或用户/默认策略已明确信任。
+  // 注意 (decision ?? defaultDecision) === "always" 不等于这里的判断——
+  // 显式 false 优先级高于默认 "always"。
+  const trusted = !required || decision === true || (decision === null && defaultDecision === "always")
   return {
     manager,
     trust: {
@@ -38,7 +39,7 @@ export function settingsForWorkspace(cwd: string, agentDir?: string) {
       decision,
       inheritedFrom: store.getEntry(cwd)?.path,
       defaultDecision,
-      trusted: !required || (decision ?? defaultDecision === "always"),
+      trusted,
     },
   }
 }
@@ -204,7 +205,6 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
   async deleteSession(cwd: string, sessionFile: string): Promise<void> {
     const target = resolveUserPath(sessionFile)
     const root = path.resolve(configuredSessionDir(cwd, this.dir()))
-    const resolved = path.resolve(target)
     // Windows paths compare case-insensitively; a legal path differing only
     // in case must not be rejected (fails closed, but still a false 403).
     if (!existsSync(target)) return
@@ -256,7 +256,7 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
 
   async manage(
     cwd: string,
-    commandId: string,
+    _commandId: string,
     action: "install" | "remove" | "update",
     source: string | undefined,
     local = false,

@@ -661,7 +661,6 @@ export class SessionHost {
         this.touch(session.sessionId)
         continue
       }
-      const cwd = session.cwd
       await this.closeSession(session.sessionId).catch(() => undefined)
       // 单共享进程下无需补 warm：worker 常驻，下次 attach 只是进程内建
       // runtime（旧架构里回收后补预热是为了避免冷启动新进程）。

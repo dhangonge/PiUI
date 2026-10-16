@@ -181,6 +181,8 @@ export class ExtensionUiBridge {
   }
 
   private createContext(): ExtensionUIContext {
+    // Pi 以裸函数形式调用这些回调，这里必须捕获 bridge 实例。
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const bridge = this
     return {
       select(title, options, opts) {

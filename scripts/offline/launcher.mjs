@@ -95,7 +95,8 @@ try {
     const readyFile = `${pidFile}.${instance}.tmp`
     fs.writeFileSync(readyFile, JSON.stringify({ pid: process.pid, instance, host, port: Number(port) }), { flag: 'wx', mode: 0o600 })
     fs.renameSync(readyFile, pidFile)
-    process.on('exit', () => { try { clearOwnedRecord(instance) } catch {} })
+    // 退出钩子不能抛异常，清理失败就放弃（记录本身已是 best-effort）。
+    process.on('exit', () => { try { clearOwnedRecord(instance) } catch { /* ignore */ } })
     const { startPiUiServer } = await import(pathToFileURL(path.join(app, 'packages/server/dist/start.js')).href)
     await startPiUiServer({ host, port: Number(port), webRoot: path.join(app, 'web') })
   } else if (command === 'start' || command === 'run') {

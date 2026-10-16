@@ -89,7 +89,27 @@ Host 区也使用 registry/dispatch，不保留 workspace/files/git REST shortcu
 | `packages/server/src/pi/` | Pi 面分发：worker-client、supervisor、session-host、executor、lease |
 | `packages/server/src/host/` | host 面能力：workspace 注册/监听、files、file-search、git、auth/security/path-safety |
 | `packages/server/src/` | HTTP/WS/event-hub/shutdown/index 组装层 |
-| `packages/app` | OCUI 视觉壳（GPL)。**待适配新协议**，暂不参与根 build/typecheck |
+| `packages/app` | 客户端（React + Tauri）：`src/pi` 消费协议、`src/features/pi-chat` 渲染 Pi 原生数据；`src/features/chat` 是上游 OCUI 视觉壳（GPL） |
+
+## 工程规范
+
+| 文件 | 作用 |
+|---|---|
+| `tsconfig.base.json` | 四个包共享的 TS 基线（strict、noUnusedLocals/Parameters、noImplicitOverride…）。只放所有包都同意的选项；`module`/`moduleResolution`/`lib`/`jsx`/`erasableSyntaxOnly` 由各包自己定 |
+| `.editorconfig` | 行尾 LF、UTF-8、缩进 2 空格（Kotlin/Java 4 空格） |
+| `eslint.config.js`（根） | Node 侧包（protocol / pi-worker / server）+ `scripts/` 的 lint 基线 |
+| `packages/app/eslint.config.js` | app 自己的配置（React hooks / refresh 规则），继承同样的 warn 策略 |
+| `packages/app/.prettierrc.json` | prettier 目前只覆盖 app（Node 侧包是分号风格，单独迁移） |
+
+门禁入口：
+
+```bash
+npm run validate        # check:docs → conformance:sdk:check → typecheck → lint → test → build
+npm run check:docs      # 文档里声明的版本基线/CHANGELOG/workspace 版本一致性
+npm run lint            # app（eslint）+ 根（protocol/pi-worker/server/scripts）
+```
+
+新增版本声明时写在可校验的位置：SDK 基线写成 ``Baseline: `@earendil-works/pi-coding-agent@x.y.z` ``（`docs/PI_SDK_API_MATRIX.md` 的模式），否则 `check:docs` 不管；本包版本号不要写进文档，只引用 `PI_PARITY_SDK_VERSION`。
 
 ## 本地跑
 
@@ -122,6 +142,8 @@ curl -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
 - `PIUI_SDK_STRICT=1`: 外部 SDK 版本不匹配时拒绝启动
 - `PIUI_AUTH_TOKEN`: 覆盖本地 token（默认生成并持久化在数据目录）
 - `PIUI_SESSION_IDLE_TTL_MS`: 非活动 Pi session runtime 的回收时间，默认 120000（至少 30000）
+
+测试环境：`npm test` 自己会把 `NODE_ENV` 固定为 `test`（父进程带了 `NODE_ENV=production` 时，React 会加载 production 构建，测试会报 `React.act is not a function`）。单独跑 app 测试请用 `NODE_ENV=test npm run test:run -w @piui/app`。
 
 开发环境可用 `npm run install:test-extension` 恢复 PiUI 面板测试扩展到
 `~/.pi/agent/extensions/piui-panel-test.ts`。它只用于验证扩展状态、widget、命令和对话框桥接，不会自动装进正式产品。

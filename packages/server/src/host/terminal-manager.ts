@@ -601,7 +601,10 @@ function terminalSize(rows?: number, cols?: number): { rows: number; cols: numbe
 }
 
 export function extractTerminalTitle(data: string): string | undefined {
+  // OSC 0/2 标题序列：ESC ] 引导，BEL 或 ST 结束。控制字符是协议本身的一部分。
+  // eslint-disable-next-line no-control-regex
   const match = /\x1b\](?:0|2);([^\x07\x1b]*)(?:\x07|\x1b\\)/.exec(data)
+  // eslint-disable-next-line no-control-regex
   const title = match?.[1]?.replace(/[\u0000-\u001f\u007f]/g, "").trim()
   return title ? title.slice(0, 120) : undefined
 }

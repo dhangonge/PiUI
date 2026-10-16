@@ -310,7 +310,7 @@ export class MockCatalog implements CatalogProvider, PackagesGateway {
   }
 }
 
-interface MockEntry extends JsonObject {}
+type MockEntry = JsonObject
 
 export class MockPiSession implements SessionRuntime {
   private header: JsonObject | null
@@ -727,7 +727,7 @@ export class MockPiSession implements SessionRuntime {
     this.emitEvent({ type: "queue_update", steering: [...this.steeringQueue], followUp: [...this.followUpQueue] })
   }
 
-  async sendUserMessage(text: string, images?: ImageInput[], deliverAs?: "steer" | "followUp"): Promise<void> {
+  async sendUserMessage(text: string, _images?: ImageInput[], deliverAs?: "steer" | "followUp"): Promise<void> {
     if (deliverAs === "steer") return this.steer(text)
     if (deliverAs === "followUp") return this.followUp(text)
     return this.prompt(text)

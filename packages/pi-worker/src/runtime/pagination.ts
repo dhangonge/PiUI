@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto"
-import type { EventCursor, JsonObject, JsonValue } from "@piui/protocol"
+import type { JsonObject, JsonValue } from "@piui/protocol"
 import type { BranchCheckpoint, EntriesPage, LiveMessage, SessionHead } from "@piui/protocol"
 
 export type { BranchCheckpoint, EntriesPage, LiveMessage, SessionHead }

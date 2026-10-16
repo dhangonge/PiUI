@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process"
 
-const env = { ...process.env, PIUI_DRIVER: "mock" }
+// NODE_ENV 固定为 test：vitest 默认会设，但如果调用方环境里已有
+// NODE_ENV=production，React 会解析到 production 构建（没有 React.act），
+// 整套用例报错。这里显式覆盖，让本地和 CI 行为一致。
+const env = { ...process.env, PIUI_DRIVER: "mock", NODE_ENV: "test" }
 const npmCli = process.env.npm_execpath
 
 if (!npmCli) {

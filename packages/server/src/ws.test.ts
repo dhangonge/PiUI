@@ -9,7 +9,7 @@ import { WebSocket } from "ws"
 import { mkdtempSync, rmSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { EVENT_WS_SUBPROTOCOL, eventStreamKey, type EventEnvelope } from "@piui/protocol"
+import { EVENT_WS_SUBPROTOCOL, type EventEnvelope } from "@piui/protocol"
 import { createAppServer, type AppServer } from "./http.ts"
 import { attachEventWebSocket, closeEventWebSocket } from "./ws.ts"
 import type { WebSocketServer } from "ws"
@@ -149,7 +149,7 @@ describe("event websocket", () => {
     })
     assert.equal(jsonlExport.status, 202)
     assertAcceptedOrBeyond(jsonlExport.json.command)
-    await waitForCommand(ws, envelopes, "cmd-export-jsonl")
+    await waitForCommand(envelopes, "cmd-export-jsonl")
     assert.equal(existsSync(path.join(mockHome, "export.jsonl")), true)
     const htmlExport = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/exportHtml`, {
       id: "cmd-export-html",
@@ -157,7 +157,7 @@ describe("event websocket", () => {
     })
     assert.equal(htmlExport.status, 202)
     assertAcceptedOrBeyond(htmlExport.json.command)
-    await waitForCommand(ws, envelopes, "cmd-export-html")
+    await waitForCommand(envelopes, "cmd-export-html")
     assert.equal(existsSync(path.join(mockHome, "export.html")), true)
 
     const branch = await request(port, "POST", `/api/v1/pi/sessions/${encodeURIComponent(sessionId)}/commands/branch.get`)
@@ -388,7 +388,6 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 async function waitForCommand(
-  ws: WebSocket,
   envelopes: Array<{ channel: string; payload: unknown }>,
   commandId: string,
 ): Promise<void> {

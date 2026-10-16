@@ -1,5 +1,4 @@
 import { getPiWorkerEntryUrl, type WorkerEvent, type WorkerHello, type WorkerHostCall } from "@piui/pi-worker"
-import { resolve } from "node:path"
 import type { JsonObject, JsonValue } from "@piui/protocol"
 import {
   WorkerSession,

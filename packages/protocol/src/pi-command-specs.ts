@@ -276,11 +276,12 @@ export type PiParamsFor<K extends string> = K extends keyof PiCommandParams ? Pi
 // 编译期防漂移：参数映射表的键必须与声明表的命令名完全一致，
 // 加了命令忘了补类型（或反过来）会直接 typecheck 失败。
 type Assert<Condition extends true> = Condition
-type _PiParamsCoverAllSpecs = Assert<PiCommandName extends keyof PiCommandParams ? true : false>
-type _PiParamsHaveNoExtras = Assert<Exclude<keyof PiCommandParams, PiCommandName> extends never ? true : false>
+// 下面的防漂移断言是零运行时代价，导出是为了让 noUnusedLocals 不去动它们。
+export type _PiParamsCoverAllSpecs = Assert<PiCommandName extends keyof PiCommandParams ? true : false>
+export type _PiParamsHaveNoExtras = Assert<Exclude<keyof PiCommandParams, PiCommandName> extends never ? true : false>
 
 // 编译期防漂移：RUNTIME_TARGETS 的键必须是已声明的命令名（不能指向不存在的命令）。
-type _RuntimeTargetsNameKnownCommands = Assert<keyof typeof RUNTIME_TARGETS extends PiCommandName ? true : false>
+export type _RuntimeTargetsNameKnownCommands = Assert<keyof typeof RUNTIME_TARGETS extends PiCommandName ? true : false>
 
 // 运行时防漂移（worker 启动时再校验一次）：每条 session 作用域命令都必须有 runtime
 // target，且 target 只指向 session 命令（global 命令走 catalog/auth/packages）。

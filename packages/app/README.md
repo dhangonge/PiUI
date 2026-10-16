@@ -18,10 +18,10 @@ PiUI 客户端：React 19 + Vite 前端，通过 Tauri 打包成 Android APK（�
 
 ```bash
 npm run dev           # vite dev server（需要另开 npm run dev:server:pi）
-npm run typecheck     # tsc -b（tsconfig.app.json + tsconfig.node.json）
+npm run typecheck     # tsc -b（tsconfig.app.json + tsconfig.node.json，extends 根 tsconfig.base.json）
 npm run lint          # eslint
 npm run format        # prettier --write
-npm run test:run      # vitest run（jsdom）
+NODE_ENV=test npm run test:run   # vitest run（jsdom）；npm test（仓库根）会自动设好 NODE_ENV
 npm run test:pi       # 只跑 src/pi
 npm run build         # tsc -b && vite build
 npm run validate      # typecheck + lint + test:run + build
