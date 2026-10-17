@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SessionNavigationContext } from '../../../../contexts/SessionNavigationContext'
 import { childAgentStore } from '../../../../pi/childAgentStore'
+import { piSessionInfoStore } from '../../../../pi/piSessionInfoStore'
 import type { PiToolExecution } from '../../../../pi/domain/index.js'
 import { TaskHeader, TaskRenderer } from './TaskRenderer'
 
@@ -156,10 +157,71 @@ function renderAgent(execution: PiToolExecution) {
   )
 }
 
+function renderAgentWithNav(execution: PiToolExecution, currentSessionId: string) {
+  const navigateToSession = vi.fn()
+  render(
+    <SessionNavigationContext.Provider value={{ navigateToSession, currentSessionId, currentDirectory: '/work' }}>
+      <TaskRenderer execution={execution} partKey="p-agent" data={{}} />
+    </SessionNavigationContext.Provider>,
+  )
+  return navigateToSession
+}
+
 describe('TaskRenderer (pi Agent tool)', () => {
   beforeEach(() => {
     stopPiAgentMock.mockClear()
     abortPiOperationMock.mockClear()
+    childAgentStore.clearAll()
+    piSessionInfoStore.clear()
+  })
+
+  it('opens the live subagent transcript matched by the child session name', () => {
+    const agentId = 'a1b2c3d4-1111-2222-3333-444455556666'
+    childAgentStore.receive(
+      { phase: 'created', sessionId: 'child-1', sessionName: 'Explore#a1b2c3d4' },
+      'owner::parent-session',
+    )
+    const navigateToSession = renderAgentWithNav(
+      agentExecution({ input: { run_in_background: true }, details: { status: 'running', agentId } }),
+      'owner::parent-session',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'task.openSession' }))
+
+    expect(navigateToSession).toHaveBeenCalledWith('owner::child-1', '/work')
+  })
+
+  it('opens a persisted subagent session after the agent is gone', () => {
+    const agentId = 'deadbeef-1111-2222-3333-444455556666'
+    piSessionInfoStore.replaceForServer('owner', [
+      {
+        id: 'owner::child-2',
+        path: '/work/.pi/sessions/child-2.jsonl',
+        cwd: '/work',
+        name: 'Explore#deadbeef',
+        created: new Date(0),
+        modified: new Date(0),
+        messageCount: 1,
+        firstMessage: '',
+        allMessagesText: '',
+      } as never,
+    ])
+    const navigateToSession = renderAgentWithNav(
+      agentExecution({ input: { run_in_background: true }, details: { status: 'completed', agentId } }),
+      'owner::parent-session',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'task.openSession' }))
+
+    expect(navigateToSession).toHaveBeenCalledWith('owner::child-2', '/work')
+  })
+
+  it('hides the jump button when the subagent session was never persisted', () => {
+    renderAgent(
+      agentExecution({ input: { run_in_background: true }, details: { status: 'running', agentId: 'ffffffff' } }),
+    )
+
+    expect(screen.queryByRole('button', { name: 'task.openSession' })).not.toBeInTheDocument()
   })
 
   it('defaults the agent badge to general-purpose', () => {

@@ -14,6 +14,12 @@ import type {
 import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot, SessionActivityStatus } from '@piui/protocol'
 import { isJsonObject, requireJsonValue } from '@piui/protocol'
 import { getLoadedSdk } from '../sdk-host.js'
+import {
+  describeSubagentSession,
+  forgetSubagentSession,
+  installSubagentSessionPersistence,
+  setSubagentParentAnchor,
+} from './subagent-sessions.js'
 import { configuredSessionDir, normalizeCwd, resolveUserPath } from './catalog.js'
 import { ExtensionUiBridge } from './extension-ui-bridge.js'
 import { extensionActionError } from './extension-diagnostics.js'
@@ -387,6 +393,11 @@ export class RealPiSession implements SessionRuntime {
     verifySdkSessionContract(runtime)
 
     const result = new RealPiSession(runtime, options.hostActions)
+    // 子代理会话落盘桥：把插件的 `SessionManager.inMemory` 换成落盘会话，
+    // 让子代理转录成为真会话（左侧会话管理可见、点开可读）。安装失败时
+    // 插件行为与打补丁前一致。anchor 必须在 spawn 之前指向父会话。
+    installSubagentSessionPersistence()
+    result.anchorSubagentParent()
     result.bindChildSessionBus(childSessionBus)
     runtime.setBeforeSessionInvalidate(() => result.detachSessionSubscriptions())
     runtime.setRebindSession(async session => {
@@ -740,9 +751,35 @@ export class RealPiSession implements SessionRuntime {
     this.childSessionBusUnsubs = forwardChildSessionEvents(bus, event => {
       // parentSessionId 由插件从父会话管理器取；对账时以 worker 自己的
       // 会话 id 为准，避免多会话共用一个进程时串号。
-      const enriched: JsonObject = { ...event, owningSessionId: this.runtime.session.sessionManager.getSessionId() }
+      const sessionId = typeof event.sessionId === 'string' ? event.sessionId : ''
+      const persisted = sessionId ? describeSubagentSession(sessionId) : undefined
+      const enriched: JsonObject = {
+        ...event,
+        owningSessionId: this.runtime.session.sessionManager.getSessionId(),
+        ...(persisted ? { sessionFile: persisted.sessionFile } : {}),
+        ...(persisted?.sessionName ? { sessionName: persisted.sessionName } : {}),
+      }
+      if (event.phase === 'disposed' && sessionId) forgetSubagentSession(sessionId)
       for (const listener of this.childSessionListeners) listener(enriched)
     })
+  }
+
+  /**
+   * 把子代理落盘桥的父锚点指向当前会话：插件 spawn 子代理时 worker 拿不到
+   * 调用栈，只能按「当前正在推进的会话」认父。
+   */
+  anchorSubagentParent(): void {
+    const manager = this.runtime.session.sessionManager
+    try {
+      const sessionFile = manager.getSessionFile()
+      if (!sessionFile) {
+        setSubagentParentAnchor(undefined)
+        return
+      }
+      setSubagentParentAnchor({ cwd: manager.getCwd(), sessionFile, sessionDir: manager.getSessionDir() })
+    } catch {
+      setSubagentParentAnchor(undefined)
+    }
   }
 
   onResourcesChanged(listener: () => void): Unsubscribe {
@@ -1027,6 +1064,7 @@ export class RealPiSession implements SessionRuntime {
   ): Promise<void> {
     try {
       this.assertImageSupport(images)
+      this.anchorSubagentParent()
       await this.runtime.session.prompt(text, {
         images: images?.length ? images : undefined,
         expandPromptTemplates: options.expandPromptTemplates,
@@ -1043,6 +1081,7 @@ export class RealPiSession implements SessionRuntime {
       throw Object.assign(new Error('Cannot steer an idle Pi session'), { code: 'SESSION_CONFLICT' })
     }
     this.assertImageSupport(images)
+    this.anchorSubagentParent()
     await this.runtime.session.steer(text, images)
   }
 
@@ -1051,6 +1090,7 @@ export class RealPiSession implements SessionRuntime {
       throw Object.assign(new Error('Cannot queue a follow-up on an idle Pi session'), { code: 'SESSION_CONFLICT' })
     }
     this.assertImageSupport(images)
+    this.anchorSubagentParent()
     await this.runtime.session.followUp(text, images)
   }
 

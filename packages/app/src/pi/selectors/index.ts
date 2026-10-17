@@ -14,6 +14,7 @@ import type {
   PiUnknownItem,
 } from '../domain/index.js'
 import { piSessionInfoStore } from '../state/index.js'
+import { applySubagentNotices } from './subagentNotices.js'
 
 /**
  * Select Pi session rows from raw session info.
@@ -192,7 +193,9 @@ export function buildPiHistoryItems(branch: PiBranchPage): PiTimelineItem[] {
     }
   }
 
-  return items
+  // 后台 agent 的终态只出现在插件的 subagent-result 通知里：并进卡片，
+  // 否则卡片会一直停在 running（停止按钮不消失），下面还多一张重复结果卡。
+  return applySubagentNotices(items).items
 }
 
 /**

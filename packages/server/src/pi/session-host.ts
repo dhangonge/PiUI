@@ -640,6 +640,16 @@ export class SessionHost {
     }
     if (event.channel === 'subagent.child') {
       this.hub.publish({ kind: 'session', id: session.sessionId }, 'subagent.child', event.event)
+      // 子代理会话现在落盘了（pi-worker 的子代理落盘桥）：created 时它是
+      // 左侧会话管理里新出现的子项，让客户端重拉一次列表；disposed 时
+      // 文件已完整，也要重拉一次拿到最终标题/计数。
+      const phase = isJsonObject(event.event) ? event.event.phase : undefined
+      if (phase === 'created' || phase === 'disposed') {
+        this.hub.publish({ kind: 'server', id: 'server' }, 'sessions.updated', {
+          sessionId: session.sessionId,
+          subagentPhase: phase,
+        })
+      }
       return
     }
     if (event.channel === 'registry.updated') {

@@ -19,6 +19,10 @@ import { loadPiSdk } from '../sdk-host.ts'
 
 await loadPiSdk()
 
+// 子代理落盘桥会把 SessionManager.inMemory 换成落盘会话；本文件测的是通用
+// 会话语义（含真正的内存态会话），所以关掉桥。桥本身由 subagent-sessions.test.ts 覆盖。
+process.env.PIUI_SUBAGENT_SESSIONS = 'off'
+
 type AnyRecord = Record<string, any>
 
 function allEntries(session: RealPiSession): AnyRecord[] {

@@ -1,6 +1,7 @@
 import { memo, useState, useCallback, useEffect, type RefCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useChildAgentSessions } from '../../../../pi/childAgentStore'
+import { useSubagentSessionId } from '../../../../pi/subagentSessions'
 import { ContentBlock } from '../../../../components'
 import { ChevronRightIcon, ExternalLinkIcon, StopIcon } from '../../../../components/Icons'
 import { useDisclosureScrollLock } from '../../../../hooks'
@@ -121,12 +122,15 @@ export const TaskRenderer = memo(function TaskRenderer({ execution, partKey, onF
   const worktreePath = readString(input, 'worktree_path')
   const runInBackground = details?.runInBackground === true || input?.run_in_background === true
 
-  // 子 session ID —— 只信任 metadata.sessionId，它是后端为这个 tool call 精确设置的
+  // 子 session ID —— 优先 metadata.sessionId（后端为 tool call 精确设置，OCUI
+  // 的 task 走这条）；Pi 的 Agent 不提供，用 agentId 短 id 反查子会话
+  // （插件把子会话命名为 `<类型>#<短 id>`）。
   const { currentSessionId } = useSessionNavigation()
-  const targetSessionId = scopeChildSession(readString(details, 'sessionId'), currentSessionId)
   const agentId = readString(details, 'agentId')
-  // 子代理公告不带 agentId，卡片与子会话无法一一对应；只按父会话报总数，
-  // 让后台 agent 跑着的时候界面上有活着的证据。
+  const childSessionId = useSubagentSessionId(agentId)
+  const targetSessionId = scopeChildSession(readString(details, 'sessionId') ?? childSessionId, currentSessionId)
+  // 子代理公告不带 agentId；只按父会话报总数，让后台 agent 跑着的时候
+  // 界面上有活着的证据。
   const liveChildCount = useChildAgentSessions().length
   const parentSessionId = currentSessionId ? sessionKeyToSessionId(currentSessionId) || currentSessionId : undefined
 
