@@ -859,8 +859,9 @@ function resolveTurnDurationMs(
  * - 同一时刻只一个 Working，挂在最早仍 pending 的 user 回合
  * - 更晚空回合先只显示 user
  * - 后面回合 SSE live 一到，前面一律 Worked（不必等 completed / idle）
- * - 本轮 assistant 全 completed 且无 live → 永远 Worked，不因 session busy 重开
- *   （否则发送瞬间 streaming 先到、新 user 未入列，会把已 Worked 闪回 Working）
+ * - 本轮 assistant 全 completed 但会话仍 busy（多步 agent 的下一步还没到，Pi 的 isStreaming 也盖住子代理回合）→ 不收壳
+ *   （否则发送瞬间 streaming 先到、新 user 未入列，会把已 Worked 闪回 Working；
+ *    busy 摘掉或下一轮 user 接手后才收）
  *
  * isUserEntryReady：空壳等用户入场生长完成后再挂。
  */
@@ -940,9 +941,11 @@ export function buildProcessTimeline(
       // 空回合：idle 结束；或后面已有 assistant（被跳过）
       return !sessionIsStreaming || laterHasAssistant(index)
     }
-    // 全 completed 且无 live → 锁定 Worked。
-    // 不要再用 sessionIsStreaming 重开：发送时 busy 常早于新 user 入列，会闪一下。
-    // 工具循环间隙若下一助手还没到，会短暂 Worked；下一助手 live 后自然回到 Working。
+    // 全 completed 且无 live，但会话还 busy 且这是最后一个用户回合：
+    // 只是同一回合「上一步已收尾、下一步还没到」的间隙（多步 agent 的常态），
+    // 不能判成 Worked —— 否则壳会先收成「已处理」，等下一步内容到了再展开一次。
+    // 等 idle 把 busy 摘掉，或下一轮 user 接手（index 不再是最后一个）才收。
+    if (sessionIsStreaming && index === turns.length - 1) return false
     return assistants.every(m => !m.isStreaming)
   }
 
