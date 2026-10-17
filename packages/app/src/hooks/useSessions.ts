@@ -6,6 +6,7 @@ import { serverStore } from '../store/serverStore'
 import { getServerRevision } from '../utils/sessionKey'
 import { createPiSession, loadPiSessions, loadPiSessionsForCwd, deletePiSession } from '../pi/controllers/index.js'
 import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } from '../pi/nativeSessionListModel'
+import { groupSubagentSessions } from '../pi/subagentSessionGrouping'
 import { trackPiSession } from '../pi/piSessionIndex'
 import { resolveWorkspacePath } from '../pi/workspaces.js'
 
@@ -33,6 +34,8 @@ interface UseSessionsOptions {
   initialSearch?: string
   /** 只加载根会话 */
   rootsOnly?: boolean
+  /** 子代理会话从顶层抽样，挂到父会话下（侧栏用） */
+  groupSubagentSessions?: boolean
   /** 按目录过滤 */
   directory?: string
   /** 延迟启用，用于懒加载 */
@@ -61,10 +64,15 @@ interface UseSessionsResult {
   patchLocalSession: (sessionId: string, patch: Partial<UiSession>) => void
   /** 本地移除会话 */
   removeLocalSession: (sessionId: string) => void
+  /** 父会话 id -> 子代理会话（仅在开启 groupSubagentSessions 时有值） */
+  subagentChildrenByParentId: Map<string, UiSession[]>
 }
+
+const EMPTY_CHILDREN: Map<string, UiSession[]> = new Map()
 
 export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult {
   const { pageSize = 20, initialSearch = '', directory, enabled = true, serverId } = options
+  const shouldGroupSubagentSessions = options.groupSubagentSessions === true
 
   // 标准化 directory 路径 (移除末尾斜杠，统一正斜杠)
   const normalizedDirectory = normalizeToForwardSlash(directory) || undefined
@@ -73,6 +81,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   )
 
   const [sessions, setSessions] = useState<UiSession[]>([])
+  const [subagentChildrenByParentId, setSubagentChildrenByParentId] = useState<Map<string, UiSession[]>>(EMPTY_CHILDREN)
   const [isLoading, setIsLoading] = useState(enabled)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [error, setError] = useState<Error | null>(null)
@@ -153,7 +162,10 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
               all.filter(session => matchesDirectory(session)),
               searchTerm ?? '',
             )
-            const data = matching.slice(0, currentLimitRef.current)
+            // 子代理会话不占顶层名额（侧栏里收进父会话，避免最近的 5 条全被刷屏）
+            const grouped = shouldGroupSubagentSessions ? groupSubagentSessions(matching) : undefined
+            const visible = grouped ? grouped.roots : matching
+            const data = visible.slice(0, currentLimitRef.current)
 
             // 已被更新的请求覆盖：静默退出，不碰任何状态
             if (requestId !== requestIdRef.current) return
@@ -163,7 +175,8 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
             }
 
             setSessions(data)
-            setHasMore(matching.length > data.length)
+            setSubagentChildrenByParentId(grouped ? grouped.childrenByParentId : EMPTY_CHILDREN)
+            setHasMore(visible.length > data.length)
             setError(null)
             return
           } catch (e) {
@@ -191,7 +204,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
         }
       }
     },
-    [matchesDirectory, enabled, normalizedDirectory, serverId],
+    [matchesDirectory, enabled, normalizedDirectory, serverId, shouldGroupSubagentSessions],
   )
 
   useEffect(() => {
@@ -338,5 +351,6 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
     remove,
     patchLocalSession,
     removeLocalSession,
+    subagentChildrenByParentId,
   }
 }

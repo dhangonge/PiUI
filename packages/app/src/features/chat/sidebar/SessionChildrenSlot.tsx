@@ -7,11 +7,9 @@ import { flattenSessionHierarchy } from '../../../pi/sessionHierarchy'
 interface SessionChildrenSlotProps {
   parentSession: UiSession
   selectedSessionId: string | null
-  fetchAll?: boolean
   children?: UiSession[]
   childrenByParent?: Map<string, UiSession[]>
   onSelect: (session: UiSession) => void
-  onDeleteSelected?: () => void
   isEditMode?: boolean
   selectedSessionIds?: Set<string>
   onToggleSessionSelection?: (sessionId: string, options?: { shiftKey?: boolean }) => void

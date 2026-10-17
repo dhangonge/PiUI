@@ -21,9 +21,8 @@ import { getDirectoryName, isSameDirectory, normalizeToForwardSlash } from '../.
 import { useBusySessions } from '../../../store/activeSessionStore'
 import { useNotifications } from '../../../store/notificationStore'
 import { pinnedSessionsStore, type PinnedSessionEntry } from '../../../store/pinnedSessionsStore'
-import { SessionListItem } from '../../sessions'
 import { getSelectionRoundClass } from '../../sessions/selectionRound'
-import { SessionChildrenSlot } from './SessionChildrenSlot'
+import { SessionRowWithChildren } from './SessionRowWithChildren'
 
 const DIRECTORY_PAGE_SIZE = 5
 
@@ -47,7 +46,6 @@ interface FolderRecentListProps {
   onRenameSession: (session: UiSession, newTitle: string) => Promise<void>
   onDeleteSession: (session: UiSession) => Promise<void>
   onReorderProject: (draggedPath: string, targetPath: string) => void
-  expandedChildSessionIds?: Set<string>
   inlineChildSessions?: Map<string, UiSession[]>
   onSelectChildSession?: (session: UiSession) => void
   workspaceDirectoriesByProjectId?: Map<string, string[]>
@@ -422,7 +420,6 @@ export function FolderRecentList({
   onRenameSession,
   onDeleteSession,
   onReorderProject,
-  expandedChildSessionIds,
   inlineChildSessions,
   onSelectChildSession,
   workspaceDirectoriesByProjectId,
@@ -537,7 +534,6 @@ export function FolderRecentList({
                 onSelectSession={onSelectSession}
                 onRenameSession={onRenameSession}
                 onRequestDeleteSession={setPendingDelete}
-                expandedChildSessionIds={expandedChildSessionIds}
                 inlineChildSessions={inlineChildSessions}
                 onSelectChildSession={onSelectChildSession}
                 isEditMode={isEditMode}
@@ -577,7 +573,6 @@ export function FolderRecentList({
                   onSelectSession={onSelectSession}
                   onRenameSession={onRenameSession}
                   onRequestDeleteSession={setPendingDelete}
-                  expandedChildSessionIds={expandedChildSessionIds}
                   inlineChildSessions={inlineChildSessions}
                   onSelectChildSession={onSelectChildSession}
                   workspaceDirectories={workspaceDirectoriesByProjectId?.get(project.id)}
@@ -640,7 +635,6 @@ interface PinnedFolderSectionProps {
   onSelectSession: (session: UiSession) => void
   onRenameSession: (session: UiSession, newTitle: string) => Promise<void>
   onRequestDeleteSession: (pending: PendingDeleteSession) => void
-  expandedChildSessionIds?: Set<string>
   inlineChildSessions?: Map<string, UiSession[]>
   onSelectChildSession?: (session: UiSession) => void
   isEditMode?: boolean
@@ -656,7 +650,6 @@ function PinnedFolderSection({
   onSelectSession,
   onRenameSession,
   onRequestDeleteSession,
-  expandedChildSessionIds,
   inlineChildSessions,
   onSelectChildSession,
   isEditMode,
@@ -692,7 +685,7 @@ function PinnedFolderSection({
               isEditMode && index < sessions.length - 1 && (selectedSessionIds?.has(sessions[index + 1].id) ?? false)
             return (
               <div key={session.id}>
-                <SessionListItem
+                <SessionRowWithChildren
                   session={session}
                   isSelected={session.id === selectedSessionId}
                   onSelect={() => onSelectSession(session)}
@@ -708,20 +701,12 @@ function PinnedFolderSection({
                   onToggleCheck={
                     onToggleSessionSelection ? options => onToggleSessionSelection(session.id, options) : undefined
                   }
+                  childrenByParentId={inlineChildSessions}
+                  selectedSessionId={selectedSessionId}
+                  onSelectChildSession={onSelectChildSession}
+                  selectedSessionIds={selectedSessionIds}
+                  onToggleSessionSelection={onToggleSessionSelection}
                 />
-                {onSelectChildSession &&
-                  (expandedChildSessionIds?.has(session.id) || inlineChildSessions?.has(session.id)) && (
-                    <SessionChildrenSlot
-                      parentSession={session}
-                      selectedSessionId={selectedSessionId}
-                      fetchAll={expandedChildSessionIds?.has(session.id)}
-                      children={inlineChildSessions?.get(session.id)}
-                      onSelect={onSelectChildSession}
-                      isEditMode={isEditMode}
-                      selectedSessionIds={selectedSessionIds}
-                      onToggleSessionSelection={onToggleSessionSelection}
-                    />
-                  )}
               </div>
             )
           })}
@@ -775,7 +760,6 @@ interface FolderRecentSectionProps {
   onSelectSession: (session: UiSession) => void
   onRenameSession: (session: UiSession, newTitle: string) => Promise<void>
   onRequestDeleteSession: (pending: PendingDeleteSession) => void
-  expandedChildSessionIds?: Set<string>
   inlineChildSessions?: Map<string, UiSession[]>
   onSelectChildSession?: (session: UiSession) => void
   workspaceDirectories?: string[]
@@ -816,7 +800,6 @@ function FolderRecentSection({
   onSelectSession,
   onRenameSession,
   onRequestDeleteSession,
-  expandedChildSessionIds,
   inlineChildSessions,
   onSelectChildSession,
   workspaceDirectories = [],
@@ -863,11 +846,13 @@ function FolderRecentSection({
     refresh,
     patchLocalSession,
     removeLocalSession,
+    subagentChildrenByParentId,
   } = useSessions({
     serverId: useServerStore().activeServer?.id,
     directory: project.path,
     pageSize: DIRECTORY_PAGE_SIZE,
     enabled: hasActivated && !hasWorkspaceTree,
+    groupSubagentSessions: true,
   })
   const pinnedEntries = useSyncExternalStore(
     pinnedSessionsStore.subscribe,
@@ -1046,7 +1031,6 @@ function FolderRecentSection({
                   onSelectSession={onSelectSession}
                   onRenameSession={onRenameSession}
                   onRequestDeleteSession={onRequestDeleteSession}
-                  expandedChildSessionIds={expandedChildSessionIds}
                   inlineChildSessions={inlineChildSessions}
                   onSelectChildSession={onSelectChildSession}
                   isEditMode={isEditMode}
@@ -1086,7 +1070,7 @@ function FolderRecentSection({
                         : nextProjectChecked)
                     return (
                       <div key={session.id}>
-                        <SessionListItem
+                        <SessionRowWithChildren
                           session={session}
                           isSelected={session.id === selectedSessionId}
                           onSelect={() => onSelectSession(session)}
@@ -1104,20 +1088,12 @@ function FolderRecentSection({
                               ? options => onToggleSessionSelection(session.id, options)
                               : undefined
                           }
+                          childrenByParentId={subagentChildrenByParentId}
+                          selectedSessionId={selectedSessionId}
+                          onSelectChildSession={onSelectSession}
+                          selectedSessionIds={selectedSessionIds}
+                          onToggleSessionSelection={onToggleSessionSelection}
                         />
-                        {onSelectChildSession &&
-                          (expandedChildSessionIds?.has(session.id) || inlineChildSessions?.has(session.id)) && (
-                            <SessionChildrenSlot
-                              parentSession={session}
-                              selectedSessionId={selectedSessionId}
-                              fetchAll={expandedChildSessionIds?.has(session.id)}
-                              children={inlineChildSessions?.get(session.id)}
-                              onSelect={onSelectChildSession}
-                              isEditMode={isEditMode}
-                              selectedSessionIds={selectedSessionIds}
-                              onToggleSessionSelection={onToggleSessionSelection}
-                            />
-                          )}
                       </div>
                     )
                   })}
@@ -1168,7 +1144,6 @@ interface WorkspaceFolderListProps {
   onSelectSession: (session: UiSession) => void
   onRenameSession: (session: UiSession, newTitle: string) => Promise<void>
   onRequestDeleteSession: (pending: PendingDeleteSession) => void
-  expandedChildSessionIds?: Set<string>
   inlineChildSessions?: Map<string, UiSession[]>
   onSelectChildSession?: (session: UiSession) => void
   isEditMode?: boolean
@@ -1188,7 +1163,6 @@ function WorkspaceFolderList({
   onSelectSession,
   onRenameSession,
   onRequestDeleteSession,
-  expandedChildSessionIds,
   inlineChildSessions,
   onSelectChildSession,
   isEditMode = false,
@@ -1279,7 +1253,6 @@ function WorkspaceFolderList({
             onSelectSession={onSelectSession}
             onRenameSession={onRenameSession}
             onRequestDeleteSession={onRequestDeleteSession}
-            expandedChildSessionIds={expandedChildSessionIds}
             inlineChildSessions={inlineChildSessions}
             onSelectChildSession={onSelectChildSession}
             workspaceDirectories={[]}

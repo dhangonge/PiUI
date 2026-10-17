@@ -7,6 +7,7 @@ import { useMultiServerStore } from '../../../store/multiServerStore'
 import { serverStore } from '../../../store/serverStore'
 import { sessionKeyToServerId } from '../../../utils/sessionKey'
 import { getProjectGroupIdentity } from './projectGrouping'
+import { groupSubagentSessions } from '../../../pi/subagentSessionGrouping'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { ActiveSessionItem } from './ActiveSessionItem'
 import { NotificationItem } from './NotificationItem'
@@ -343,6 +344,11 @@ export function SidePanel({
     const rest = visibleSessions.filter(s => !pinnedSet.has(s.id))
     return [...pinned, ...rest]
   }, [pinnedEntries, visibleLookup, visibleSessions])
+  // 子代理会话从顶层摘出，挂到父行下（置顶的仍留顶层，避免分隔线位置错位）
+  const orderedSessionGroups = useMemo(() => {
+    const pinnedSet = new Set(pinnedEntries.map(entry => entry.sessionId))
+    return groupSubagentSessions(orderedSessions, pinnedSet)
+  }, [orderedSessions, pinnedEntries])
   const pinnedDividerAfterIds = useMemo(() => {
     const lastPinned = pinnedEntries
       .map(entry => visibleLookup.get(entry.sessionId))
@@ -1230,7 +1236,7 @@ export function SidePanel({
                 </div>
               ) : (
                 <SessionList
-                  sessions={orderedSessions}
+                  sessions={orderedSessionGroups.roots}
                   selectedId={selectedSessionId}
                   isLoading={isLoading}
                   isLoadingMore={isLoadingMore}
@@ -1252,6 +1258,8 @@ export function SidePanel({
                   isEditMode={isEditMode}
                   selectedSessionIds={selectedSessionIds}
                   onToggleSessionSelection={toggleSessionSelection}
+                  inlineChildSessions={orderedSessionGroups.childrenByParentId}
+                  onSelectChildSession={handleSelect}
                 />
               )}
             </div>

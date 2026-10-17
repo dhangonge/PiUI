@@ -12,7 +12,7 @@ import { readServerWorkspaces, reorderServerWorkspaces } from '../../../utils/se
 import { filterPiSessionList } from '../../../pi/nativeSessionListModel'
 import { getDirectoryName, uiErrorHandler } from '../../../utils'
 import { renamePiSession } from '../../../pi/controllers'
-import { SessionListItem } from '../../sessions/SessionList'
+import { SessionRowWithChildren } from './SessionRowWithChildren'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { FolderIcon, PlusIcon, SpinnerIcon, RetryIcon, ArrowUpIcon, ArrowDownIcon } from '../../../components/Icons'
 import type { UiSession } from '../../../types/session'
@@ -39,7 +39,12 @@ const ServerSection = memo(function ServerSection({ server, ...props }: Props & 
     patchLocalSession: updateSession,
     hasMore,
     loadMore,
-  } = useSessions({ serverId: server.id, pageSize: query ? Number.MAX_SAFE_INTEGER : 30 })
+    subagentChildrenByParentId,
+  } = useSessions({
+    serverId: server.id,
+    pageSize: query ? Number.MAX_SAFE_INTEGER : 30,
+    groupSubagentSessions: true,
+  })
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const storageVersion = useSyncExternalStore(subscribePerServerStorageVersion, getStorageVersion)
@@ -167,7 +172,7 @@ const ServerSection = memo(function ServerSection({ server, ...props }: Props & 
             </button>
           </summary>
           {items.map(session => (
-            <SessionListItem
+            <SessionRowWithChildren
               key={session.id}
               session={session}
               isSelected={props.selectedSessionId === session.id}
@@ -183,6 +188,9 @@ const ServerSection = memo(function ServerSection({ server, ...props }: Props & 
                   })
                   .catch(error => uiErrorHandler('rename session', error))
               }}
+              childrenByParentId={subagentChildrenByParentId}
+              selectedSessionId={props.selectedSessionId}
+              onSelectChildSession={props.onSelectSession}
             />
           ))}
         </details>
