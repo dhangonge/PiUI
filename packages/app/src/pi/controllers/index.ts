@@ -437,6 +437,18 @@ export async function waitForPiIdle(sessionId: string, signal?: AbortSignal): Pr
   await submitAndWait(() => transport.waitPiForIdle(sessionId, signal), signal)
 }
 
+/**
+ * Stop a background subagent by id (`StopAgent` extension tool).
+ *
+ * A foreground agent is stopped by aborting the turn that runs it; a
+ * background agent (`run_in_background`) keeps running after its tool call
+ * returned, so it has to be stopped through the plugin's own tool. The tool
+ * reports "already <status>" as a normal result, so only real failures reject.
+ */
+export async function stopPiAgent(sessionId: string, agentId: string, signal?: AbortSignal): Promise<void> {
+  await submitAndWait(() => transport.invokePiTool(sessionId, 'StopAgent', { agent_id: agentId }, signal), signal)
+}
+
 export async function sendPiCustomMessage(
   sessionId: string,
   params: Parameters<typeof transport.sendPiCustomMessage>[1],

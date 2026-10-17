@@ -83,7 +83,27 @@
     "stop": "Stop",
     "openSession": "打开会话",
     "waitingForResponse": "等待响应...",
-    "taskFailed": "任务失败"
+    "taskFailed": "任务失败",
+    "status": {
+      "queued": "排队中",
+      "running": "运行中",
+      "completed": "已完成",
+      "turnLimited": "已达轮次上限",
+      "aborted": "已中止",
+      "stopped": "已停止",
+      "error": "失败"
+    },
+    "stats": {
+      "turns": "轮次",
+      "tools": "工具",
+      "tokens": "tokens",
+      "context": "上下文",
+      "compactions": "压缩"
+    },
+    "outputFile": "日志",
+    "worktree": "工作树",
+    "backgroundHint": "后台 agent：完成后会收到通知。",
+    "stopFailed": "停止失败：{{message}}"
   },
   "system": {
     "retryAttempt": "重试第 {{attempt}} 次",

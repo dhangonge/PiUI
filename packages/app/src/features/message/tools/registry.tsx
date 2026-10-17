@@ -3,7 +3,7 @@ import type { ToolResultMessage } from '@earendil-works/pi-ai'
 import i18n from '../../../i18n'
 import type { PiToolExecution } from '../../../pi/domain/index.js'
 import type { ToolConfig, ToolRegistry, ExtractedToolData, DiagnosticInfo } from './types'
-import { BashRenderer, QuestionRenderer } from './renderers'
+import { BashRenderer, QuestionRenderer, TaskRenderer } from './renderers'
 import {
   FileReadIcon,
   FileWriteIcon,
@@ -13,6 +13,7 @@ import {
   BrainIcon,
   ChecklistIcon,
   QuestionIcon,
+  PlanIcon,
   TaskIcon,
   WrenchIcon,
 } from './icons'
@@ -382,6 +383,15 @@ export const toolRegistry: ToolRegistry = [
     icon: <TaskIcon />,
   },
 
+  // pi-subagents-lite 的 Agent 族工具。必须排在 includes('search'|
+  // 'question'|'think') 之类前面：StopAgent/MessageAgent/AgentStatus
+  // 都含 "agent"，但没有自己的卡片时才落到 DefaultRenderer。
+  {
+    match: exact('agent', 'stopagent', 'messageagent', 'agentstatus'),
+    icon: <TaskIcon />,
+    renderer: TaskRenderer,
+  },
+
   // Read file
   {
     match: includes('read', 'cat'),
@@ -413,6 +423,14 @@ export const toolRegistry: ToolRegistry = [
   {
     match: includes('web', 'fetch', 'http', 'browse', 'network', 'exa'),
     icon: <GlobeIcon />,
+  },
+
+  // Plan / Think / Reasoning
+  // plannotator 系列没有专用卡片，但它含 "plan"，会误命中这里拿 BrainIcon。
+  // 单独钉住，让它们落到 DefaultRenderer 的通用样式。
+  {
+    match: includes('plannotator'),
+    icon: <PlanIcon />,
   },
 
   // Think / Reasoning

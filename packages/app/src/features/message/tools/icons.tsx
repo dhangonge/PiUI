@@ -16,6 +16,7 @@ import {
   ListChecks,
   Loader,
   CircleHelp,
+  ClipboardList,
 } from 'lucide-react'
 
 interface IconProps {
@@ -41,5 +42,6 @@ export const BrainIcon = wrapTool(Brain)
 export const WrenchIcon = wrapTool(Wrench)
 export const ChecklistIcon = wrapTool(ListChecks)
 export const TaskIcon = wrapTool(Loader)
+export const PlanIcon = wrapTool(ClipboardList)
 
 export const QuestionIcon = wrapTool(CircleHelp)

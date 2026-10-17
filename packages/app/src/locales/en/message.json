@@ -107,7 +107,27 @@
     "stop": "Stop",
     "openSession": "Open session",
     "waitingForResponse": "Waiting for response...",
-    "taskFailed": "Task failed"
+    "taskFailed": "Task failed",
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "completed": "Completed",
+      "turnLimited": "Turn limit reached",
+      "aborted": "Aborted",
+      "stopped": "Stopped",
+      "error": "Failed"
+    },
+    "stats": {
+      "turns": "turns",
+      "tools": "tools",
+      "tokens": "tokens",
+      "context": "context",
+      "compactions": "compactions"
+    },
+    "outputFile": "Log",
+    "worktree": "Worktree",
+    "backgroundHint": "Background agent: a notification arrives when it finishes.",
+    "stopFailed": "Stop failed: {{message}}"
   },
   "system": {
     "retryAttempt": "Retry attempt {{attempt}}",

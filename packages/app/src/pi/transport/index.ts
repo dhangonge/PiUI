@@ -654,6 +654,20 @@ export function waitPiForIdle(sessionId: string, signal?: AbortSignal): Promise<
   return postPiSessionCommand(sessionId, 'waitForIdle', undefined, signal)
 }
 
+/**
+ * Invoke a registered extension tool by name (serialized: resolves with the
+ * accepted command record, the tool result lands later via waitHostCommand).
+ * Only tools the runtime reports in its registry can be reached this way.
+ */
+export function invokePiTool(
+  sessionId: string,
+  name: string,
+  args?: JsonObject,
+  signal?: AbortSignal,
+): Promise<CommandRecord> {
+  return postPiSessionCommand(sessionId, 'invokeTool', { name, arguments: args }, signal)
+}
+
 export type PiCustomMessageContent = Array<
   { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
 >
