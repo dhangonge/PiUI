@@ -158,6 +158,10 @@ export function useTheme() {
     themeStore.setRenderUserMarkdown(enabled)
   }, [])
 
+  const setRenderHtmlContent = useCallback((enabled: boolean) => {
+    themeStore.setRenderHtmlContent(enabled)
+  }, [])
+
   // ---- Step Finish Display ----
 
   const setStepFinishDisplay = useCallback((display: Partial<StepFinishDisplay>) => {
@@ -274,6 +278,8 @@ export function useTheme() {
     setCollapseUserMessages,
     renderUserMarkdown: state.renderUserMarkdown,
     setRenderUserMarkdown,
+    renderHtmlContent: state.renderHtmlContent,
+    setRenderHtmlContent,
 
     // step-finish 信息栏显示
     stepFinishDisplay: state.stepFinishDisplay,

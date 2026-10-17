@@ -46,6 +46,7 @@ export const SETTINGS_SEARCH_DEFINITIONS: SettingsSearchDefinition[] = [
     'chat.externalDropMentionMode',
     'chat.collapseLongMessages',
     'chat.renderUserMarkdown',
+    'chat.renderHtmlContent',
     'chat.outlineCurrentHighlight',
     'chat.actionsOnLatestAssistantOnly',
     'chat.desktopCollapsedInputDock',

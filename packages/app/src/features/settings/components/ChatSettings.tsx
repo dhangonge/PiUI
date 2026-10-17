@@ -34,6 +34,8 @@ export function ChatSettings() {
     setDesktopCollapsedInputDock,
     renderUserMarkdown,
     setRenderUserMarkdown,
+    renderHtmlContent,
+    setRenderHtmlContent,
   } = useTheme()
   const [collapseUserMessages, setCollapseUserMessages] = useState(themeStore.collapseUserMessages)
   const [stepFinishDisplay, setStepFinishDisplay] = useState(themeStore.stepFinishDisplay)
@@ -107,6 +109,14 @@ export function ChatSettings() {
           onClick={() => setRenderUserMarkdown(!renderUserMarkdown)}
         >
           <Toggle enabled={renderUserMarkdown} onChange={() => setRenderUserMarkdown(!renderUserMarkdown)} />
+        </SettingRow>
+
+        <SettingRow
+          label={t('chat.renderHtmlContent')}
+          description={t('chat.renderHtmlContentDesc')}
+          onClick={() => setRenderHtmlContent(!renderHtmlContent)}
+        >
+          <Toggle enabled={renderHtmlContent} onChange={() => setRenderHtmlContent(!renderHtmlContent)} />
         </SettingRow>
 
         <SettingRow

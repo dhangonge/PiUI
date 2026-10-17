@@ -1,4 +1,15 @@
-import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import morphdom from 'morphdom'
 import { useTranslation } from 'react-i18next'
 import { CodeBlock } from './CodeBlock'
@@ -19,6 +30,12 @@ import {
 } from './markdownStream'
 import { renderMarkdownToHtml, renderKatexHtml } from './markdownHtmlRenderer'
 import { getFootnoteId, scanTextSegments } from './markdownSegments'
+import { themeStore } from '../store/themeStore'
+
+/** 只订阅 renderHtmlContent 布尔值（useTheme 全量订阅会让每条消息的 markdown 跟着任何设置变动重渲染） */
+function useRenderHtmlContent(): boolean {
+  return useSyncExternalStore(themeStore.subscribe, () => themeStore.renderHtmlContent)
+}
 import type { MarkdownSegment } from './markdownSegments'
 import {
   buildHtmlSandboxThemeCss,
@@ -71,11 +88,11 @@ const PREFIXED_BLOCK_HTML_SOURCE_PATTERN =
 const ARTIFACT_HTML_SOURCE_PATTERN =
   /(?:<!doctype\s+html\b|<html\b|<style\b|<script\b|<canvas\b|\son[a-z]+\s*=|(?:href|src)\s*=\s*["']?\s*javascript:)/i
 
-function getCachedHtml(src: string, isReasoning: boolean): string {
-  const key = `${isReasoning ? 'r' : 'd'}:${src}`
+function getCachedHtml(src: string, isReasoning: boolean, renderHtml: boolean): string {
+  const key = `${isReasoning ? 'r' : 'd'}:${renderHtml ? 'h' : 'x'}:${src}`
   const cached = htmlCache.get(key)
   if (cached !== undefined) return cached
-  const html = renderMarkdownToHtml(src, isReasoning)
+  const html = renderMarkdownToHtml(src, isReasoning, renderHtml)
   if (htmlCache.size >= HTML_CACHE_MAX) {
     const firstKey = htmlCache.keys().next().value
     if (firstKey !== undefined) htmlCache.delete(firstKey)
@@ -1333,10 +1350,12 @@ const MarkdownDomBlock = memo(function MarkdownDomBlock({
   src,
   isReasoning,
   isLive,
+  renderHtml,
 }: {
   src: string
   isReasoning: boolean
   isLive?: boolean
+  renderHtml: boolean
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const appliedHtmlRef = useRef<string | null>(null)
@@ -1378,7 +1397,9 @@ const MarkdownDomBlock = memo(function MarkdownDomBlock({
     }
 
     // live 中间态不进 htmlCache（避免 64 槽被流式碎片挤爆）；稳定块才缓存
-    const html = isLive ? renderMarkdownToHtml(renderSrc, isReasoning) : getCachedHtml(renderSrc, isReasoning)
+    const html = isLive
+      ? renderMarkdownToHtml(renderSrc, isReasoning, renderHtml)
+      : getCachedHtml(renderSrc, isReasoning, renderHtml)
     if (appliedHtmlRef.current === html) {
       appliedSrcRef.current = renderSrc
       return
@@ -1386,7 +1407,7 @@ const MarkdownDomBlock = memo(function MarkdownDomBlock({
     appliedHtmlRef.current = html
     appliedSrcRef.current = renderSrc
     applyMarkdownHtml(root, html)
-  }, [renderSrc, isReasoning, isLive])
+  }, [renderSrc, isReasoning, isLive, renderHtml])
 
   const handleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (event.defaultPrevented) return
@@ -1440,7 +1461,7 @@ function MarkdownHtmlIsland({ src, isReasoning, isLive }: { src: string; isReaso
 
   return (
     <HtmlPreviewSurface onViewSource={() => setShowSource(true)}>
-      <MarkdownDomBlock src={src} isReasoning={isReasoning} isLive={isLive} />
+      <MarkdownDomBlock src={src} isReasoning={isReasoning} isLive={isLive} renderHtml />
     </HtmlPreviewSurface>
   )
 }
@@ -1454,6 +1475,7 @@ const MarkdownStreamBlock = memo(function MarkdownStreamBlock({
   complete,
   isReasoning,
   isStreaming,
+  renderHtml,
 }: {
   src: string
   mode: 'full' | 'live' | 'code' | 'table'
@@ -1461,6 +1483,7 @@ const MarkdownStreamBlock = memo(function MarkdownStreamBlock({
   complete?: boolean
   isReasoning: boolean
   isStreaming: boolean
+  renderHtml: boolean
 }) {
   // 流式高亮/未完成态只对「未闭合 code」或 live 有意义；稳定 full 块 isStreaming 恒 false 以冻 memo
   const streamActive = isStreaming && (mode === 'live' || (mode === 'code' && !complete))
@@ -1483,7 +1506,7 @@ const MarkdownStreamBlock = memo(function MarkdownStreamBlock({
         </div>
       )
     }
-    if (isMarkupPreviewLanguage(language) && !isReasoning) {
+    if (renderHtml && isMarkupPreviewLanguage(language) && !isReasoning) {
       return (
         <div className="markdown-stream-block">
           <div className={MARKDOWN_BLOCK_CONTENT_CLASS}>
@@ -1520,7 +1543,7 @@ const MarkdownStreamBlock = memo(function MarkdownStreamBlock({
   const isHtmlArtifact =
     ARTIFACT_HTML_SOURCE_PATTERN.test(src) &&
     (BLOCK_HTML_SOURCE_PATTERN.test(htmlSourceStart) || PREFIXED_BLOCK_HTML_SOURCE_PATTERN.test(htmlSourceStart))
-  if (!isReasoning && (isHtmlDocument || isHtmlArtifact)) {
+  if (renderHtml && !isReasoning && (isHtmlDocument || isHtmlArtifact)) {
     return (
       <div className="markdown-stream-block">
         <div className={MARKDOWN_BLOCK_CONTENT_CLASS}>
@@ -1530,7 +1553,7 @@ const MarkdownStreamBlock = memo(function MarkdownStreamBlock({
     )
   }
 
-  if (!isReasoning && BLOCK_HTML_SOURCE_PATTERN.test(htmlSourceStart)) {
+  if (renderHtml && !isReasoning && BLOCK_HTML_SOURCE_PATTERN.test(htmlSourceStart)) {
     return (
       <div className="markdown-stream-block">
         <MarkdownHtmlIsland src={src} isReasoning={false} isLive={mode === 'live'} />
@@ -1538,9 +1561,26 @@ const MarkdownStreamBlock = memo(function MarkdownStreamBlock({
     )
   }
 
+  // 关闭 HTML 渲染：HTML 文档/artifact/island 一律按源码代码块展示
+  if (
+    !renderHtml &&
+    !isReasoning &&
+    (isHtmlDocument || isHtmlArtifact || BLOCK_HTML_SOURCE_PATTERN.test(htmlSourceStart))
+  ) {
+    return (
+      <div className="markdown-stream-block">
+        <div className={MARKDOWN_BLOCK_CONTENT_CLASS}>
+          <div className="my-4 first:mt-0 last:mb-0 w-full">
+            <CodeBlock code={src} language="html" wordwrap />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="markdown-stream-block">
-      <MarkdownDomBlock src={src} isReasoning={isReasoning} isLive={mode === 'live'} />
+      <MarkdownDomBlock src={src} isReasoning={isReasoning} isLive={mode === 'live'} renderHtml={renderHtml} />
     </div>
   )
 })
@@ -1555,6 +1595,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 }: MarkdownRendererProps) {
   const isReasoning = variant === 'reasoning'
   const projectionKey = useId()
+  // 「渲染 HTML 内容」开关（默认开）；关闭时 HTML 文档/artifact/island 一律按源码展示
+  const renderHtml = useRenderHtmlContent()
   // 流式直接渲染最新 content，不做 rAF 节流：旧实现会把一帧内的多次
   // token 更新合并成一次跳变，导致内容「突然蹦出来」而非逐 token 平滑
   // 流出（对齐 reference：直接渲染 + 增量解析保证性能，浏览器按帧自然显示）。
@@ -1585,6 +1627,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           language={block.language}
           complete={block.complete}
           isReasoning={isReasoning}
+          renderHtml={renderHtml}
           isStreaming={isStreaming && (block.mode === 'live' || (block.mode === 'code' && !block.complete))}
         />
       ))}

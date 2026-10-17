@@ -4,10 +4,12 @@ import DOMPurify from 'dompurify'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import { inferImageDimensions } from './imageDimensions'
-import { MATH_DELIMITERS, getFootnoteId, isEscapedAt, scanTextSegments } from './markdownSegments'
+import { MATH_DELIMITERS, getFootnoteId, isDollarMathBoundary, isEscapedAt, scanTextSegments } from './markdownSegments'
 import type { MarkdownSegment } from './markdownSegments'
 
 const LOCAL_FILE_LINK_PREFIX = '#piui-local-file:'
+
+const ESCAPE_MAP: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
 
 function escapeHtml(value: string): string {
   return value
@@ -16,6 +18,14 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
+}
+
+// 正文文本转义：`&` 只有不再是实体（&amp;、&#123;、&#x1F600;）时才转义，
+// 否则 `a &amp; b` 会被二次转义成 `a &amp;amp; b`（显示成字面的 &amp;）。
+const TEXT_ESCAPE_PATTERN = /[<>"']|&(?!(?:#\d{1,7}|#[Xx][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});)/g
+
+function escapeMarkdownText(value: string): string {
+  return value.replace(TEXT_ESCAPE_PATTERN, char => ESCAPE_MAP[char] as string)
 }
 
 function escapeAttribute(value: string): string {
@@ -124,16 +134,81 @@ const BLOCK_MATH_PATTERNS = MARKED_BLOCK_MATH_DELIMITERS.map(delimiter => ({
   pattern: new RegExp(`^${escapeRegex(delimiter.left)}([\\s\\S]*?)${escapeRegex(delimiter.right)}`),
 }))
 const INLINE_MATH_PATTERNS = MARKED_INLINE_MATH_DELIMITERS.map(delimiter => ({
+  left: delimiter.left,
   display: delimiter.display,
-  // `$` / `$$` 保持宽松（货币、简写也能渲染，与原 text 层行为一致）；
-  // `\(` / `\[` 需要明显的公式内容（避免转义括号被误判）。
+  // `\(` / `\[` 需要明显的公式内容（避免转义括号被误判）；
+  // `$` 由边界规则兜底（货币、简写不误判）。
   gate: delimiter.left.startsWith('\\'),
   pattern: new RegExp(
     `^${escapeRegex(delimiter.left)}${delimiter.left === '$' ? '(?!\\$)' : ''}(${delimiter.display ? '[\\s\\S]*?' : '[^\\n]*?'})${escapeRegex(delimiter.right)}`,
   ),
 }))
 
+// ─── CJK 强调闭合 ────────────────────────────────────────────────
+// CommonMark 的 delimiter run 规则要求闭合符是 right-flanking：闭合符前一个字符是标点时，
+// 它后面必须紧跟空白或标点，闭合才成立。中文里 `**重点：**正文`「闭合符在标点后、紧跟汉字」
+// 的写法因此不成立，整段退化成字面的 `**重点：**正文`（`**结论。**继续` 同理）。
+// 这里只在「默认规则必然失败」的形态下，把闭合符后那个汉字在 emStrong 的匹配副本里换成空格，
+// 让闭合成立；原 src 不动，所以渲染结果不会多出空格。
+const CJK_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u
+const PUNCTUATION_OR_SYMBOL = /[\p{P}\p{S}]/u
+const WHITESPACE = /\s/u
+
+type EmphasisRun = { char: string; length: number; start: number }
+
+function collectEmphasisRuns(src: string): EmphasisRun[] {
+  const runs: EmphasisRun[] = []
+  for (let index = 0; index < src.length; index += 1) {
+    const char = src[index]
+    if (char !== '*' && char !== '_') continue
+    let end = index
+    while (end < src.length && src[end] === char) end += 1
+    runs.push({ char, length: end - index, start: index })
+    index = end - 1
+  }
+  return runs
+}
+
+export function maskCjkEmphasisClose(src: string): string {
+  if (!src.includes('*') && !src.includes('_')) return src
+  const openers = new Map<string, number>()
+  const masked: number[] = []
+
+  for (const run of collectEmphasisRuns(src)) {
+    const prev = run.start > 0 ? (src[run.start - 1] as string) : ''
+    const next = src[run.start + run.length] ?? ''
+    const before = prev === '' || WHITESPACE.test(prev) || PUNCTUATION_OR_SYMBOL.test(prev)
+    const after = next === '' || WHITESPACE.test(next) || PUNCTUATION_OR_SYMBOL.test(next)
+    const leftFlanking = next !== '' && !WHITESPACE.test(next) && (!PUNCTUATION_OR_SYMBOL.test(next) || before)
+    const rightFlanking = prev !== '' && !WHITESPACE.test(prev) && (!PUNCTUATION_OR_SYMBOL.test(prev) || after)
+    const canOpen = run.char === '*' ? leftFlanking : leftFlanking && (!rightFlanking || before)
+    const canClose = run.char === '*' ? rightFlanking : rightFlanking && (!leftFlanking || after)
+    const key = `${run.char}${Math.min(run.length, 2)}`
+    const pending = openers.get(key) ?? 0
+
+    if (pending > 0 && PUNCTUATION_OR_SYMBOL.test(prev) && CJK_CHARACTER.test(next)) {
+      masked.push(run.start + run.length)
+      openers.set(key, pending - 1)
+      continue
+    }
+    if (canClose && pending > 0) {
+      openers.set(key, pending - 1)
+      continue
+    }
+    if (canOpen) openers.set(key, pending + 1)
+  }
+
+  if (!masked.length) return src
+  const chars = src.split('')
+  for (const index of masked) {
+    if (!CJK_CHARACTER.test(chars[index] ?? '')) continue
+    chars[index] = ' '
+  }
+  return chars.join('')
+}
+
 marked.use({
+  hooks: { emStrongMask: maskCjkEmphasisClose },
   tokenizer: {
     del(src: string) {
       const cap = /^~~(?=[^\s~])((?:\\[\s\S]|[^\\])*?(?:\\[\s\S]|[^\s~\\]))~~(?=[^~]|$)/.exec(src)
@@ -190,11 +265,13 @@ marked.use({
         return index
       },
       tokenizer(src: string) {
-        for (const { display, gate, pattern } of INLINE_MATH_PATTERNS) {
+        for (const { left, display, gate, pattern } of INLINE_MATH_PATTERNS) {
           const match = pattern.exec(src)
-          if (match?.[1] && (!gate || looksLikeMath(match[1]))) {
-            return { type: 'math', raw: match[0], text: match[1], display }
-          }
+          if (!match?.[1]) continue
+          if (gate && !looksLikeMath(match[1])) continue
+          // 单个 `$`：货币/简写不当作公式（`$5 到 $10`、`$100 和 $200`）
+          if (left === '$' && !isDollarMathBoundary(src, 0, match[0].length - 1)) continue
+          return { type: 'math', raw: match[0], text: match[1], display }
         }
         return undefined
       },
@@ -221,7 +298,7 @@ function renderSegmentsToHtml(segments: MarkdownSegment[], isReasoning: boolean)
     .map(segment => {
       switch (segment.type) {
         case 'text':
-          return escapeHtml(segment.text)
+          return escapeMarkdownText(segment.text)
         case 'math':
           return renderKatexHtml(segment.latex, segment.display)
         case 'mark': {
@@ -275,8 +352,16 @@ const MARKDOWN_ALERTS = {
   },
 } as const
 
-function createMarkdownHtmlRenderer(isReasoning: boolean) {
+function createMarkdownHtmlRenderer(isReasoning: boolean, renderHtml: boolean) {
   const renderer = new marked.Renderer()
+
+  // 关闭 HTML 渲染时：markdown 里的裸 HTML（块级+内联）一律转义成文本源码，
+  // 不再活渲染（artifact/island 在 MarkdownRenderer 块级已被分流成代码块）
+  if (!renderHtml) {
+    renderer.html = function ({ text }) {
+      return escapeHtml(text)
+    }
+  }
 
   renderer.heading = function ({ tokens, depth }) {
     const text = this.parser.parseInline(tokens)
@@ -391,15 +476,18 @@ function createMarkdownHtmlRenderer(isReasoning: boolean) {
     return `<${tag}${startAttr} class="${className}">${itemsHtml}</${tag}>`
   }
 
-  renderer.listitem = function ({ tokens, task, checked }) {
+  renderer.listitem = function ({ tokens }) {
     const className = isReasoning
       ? 'text-[length:var(--fs-sm)] text-text-400 pl-1 leading-5'
       : 'text-text-200 pl-1 leading-7'
-    const checkbox = task
-      ? `<input type="checkbox" ${checked ? 'checked' : ''} disabled class="mr-2 align-middle">`
-      : ''
     const content = tokens ? this.parser.parse(tokens) : ''
-    return `<li class="${className}">${checkbox}${content}</li>`
+    return `<li class="${className}">${content}</li>`
+  }
+
+  // 任务列表勾选框只在这里出一份：marked 会把 `- [x]` 的方括号切成独立的 checkbox token，
+  // 渲染器再自己加一个就会出现两个勾选框。统一由 checkbox 渲染。
+  renderer.checkbox = ({ checked }) => {
+    return `<input type="checkbox" ${checked ? 'checked' : ''} disabled class="mr-2 align-middle"> `
   }
 
   renderer.hr = () => {
@@ -412,22 +500,83 @@ function createMarkdownHtmlRenderer(isReasoning: boolean) {
   return renderer
 }
 
-function renderFootnoteDefinitionsHtml(src: string, isReasoning: boolean): string | null {
-  const lines = src.trim().split(/\n+/)
-  const items: string[] = []
-  const renderer = getRenderer(isReasoning)
+const FOOTNOTE_DEFINITION_PATTERN = /^ {0,3}\[\^([^\]\s]+)\]:[ \t]*(.*)$/
+const FENCE_OPENING_PATTERN = /^ {0,3}(`{3,}|~{3,})/
+
+export type FootnoteDefinition = { label: string; content: string }
+
+/**
+ * 把 GFM 脚注定义（`[^label]: 内容`）从正文里抽出来，交给正文末尾统一渲染。
+ * marked 不认脚注语法：不抽出来的话 `[^1]: 注释` 会被当成链接引用定义，
+ * 正文里的 `[^1]` 就渲染成一个 href 是脚注内容的链接（正文与定义挤在同一个块时）。
+ * 定义允许缩进续行（4 空格 / 制表符），代码围栏里的 `[^x]:` 不动。
+ */
+export function extractFootnoteDefinitions(src: string): { body: string; definitions: FootnoteDefinition[] } {
+  const lines = src.split('\n')
+  const definitions: FootnoteDefinition[] = []
+  const body: string[] = []
+  let fence: string | null = null
+  let current: { label: string; lines: string[] } | null = null
+
+  const flush = () => {
+    if (!current) return
+    definitions.push({ label: current.label, content: current.lines.join('\n').trim() })
+    current = null
+  }
 
   for (const line of lines) {
-    const match = /^\[\^([^\]]+)\]:\s+([\s\S]+)$/.exec(line.trim())
-    if (!match) return null
-    const [, label, content] = match
-    const id = getFootnoteId(label)
-    const body = marked.parseInline(content, { renderer }) as string
-    const className = isReasoning ? 'text-[length:var(--fs-sm)] text-text-400 leading-5' : 'text-text-300 leading-6'
-    items.push(
-      `<li id="fn-${escapeAttribute(id)}" class="${className}"><span class="font-medium text-text-400">${escapeHtml(label)}.</span> ${body} <a href="#fnref-${escapeAttribute(id)}" class="font-medium text-accent-main-100 underline underline-offset-2">back</a></li>`,
-    )
+    const fenceMatch = FENCE_OPENING_PATTERN.exec(line)
+    if (fenceMatch) {
+      const char = fenceMatch[1]![0]!
+      if (!fence) fence = char
+      else if (fence === char) fence = null
+      flush()
+      body.push(line)
+      continue
+    }
+
+    if (!fence) {
+      const definition = FOOTNOTE_DEFINITION_PATTERN.exec(line)
+      if (definition) {
+        flush()
+        current = { label: definition[1]!, lines: [definition[2] ?? ''] }
+        continue
+      }
+      if (current) {
+        if (/^(?: {4}|\t)/.test(line)) {
+          current.lines.push(line.replace(/^(?: {4}|\t)/, ''))
+          continue
+        }
+        if (/^[ \t]*$/.test(line)) {
+          current.lines.push('')
+          continue
+        }
+      }
+    }
+
+    flush()
+    body.push(line)
   }
+  flush()
+
+  if (definitions.length) {
+    while (body.length && !body[body.length - 1]!.trim()) body.pop()
+  }
+  return { body: body.join('\n'), definitions }
+}
+
+function renderFootnoteSectionHtml(
+  definitions: FootnoteDefinition[],
+  isReasoning: boolean,
+  renderHtml: boolean,
+): string {
+  const renderer = getRenderer(isReasoning, renderHtml)
+  const items = definitions.map(({ label, content }) => {
+    const id = getFootnoteId(label)
+    const markup = marked.parseInline(content, { renderer }) as string
+    const className = isReasoning ? 'text-[length:var(--fs-sm)] text-text-400 leading-5' : 'text-text-300 leading-6'
+    return `<li id="fn-${escapeAttribute(id)}" class="${className}"><span class="font-medium text-text-400">${escapeHtml(label)}.</span> ${markup} <a href="#fnref-${escapeAttribute(id)}" class="font-medium text-accent-main-100 underline underline-offset-2">back</a></li>`
+  })
 
   const listClass = isReasoning
     ? 'my-2 list-decimal list-inside space-y-1 border-t border-border-200/30 pt-2'
@@ -602,35 +751,38 @@ function sanitizeHtml(html: string): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let rendererCache: { default: any; reasoning: any } | null = null
+let rendererCache: Record<string, any> | null = null
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getRenderer(isReasoning: boolean): any {
+function getRenderer(isReasoning: boolean, renderHtml: boolean): any {
   if (!rendererCache) {
     rendererCache = {
-      default: createMarkdownHtmlRenderer(false),
-      reasoning: createMarkdownHtmlRenderer(true),
+      'default:html': createMarkdownHtmlRenderer(false, true),
+      'default:nohtml': createMarkdownHtmlRenderer(false, false),
+      'reasoning:html': createMarkdownHtmlRenderer(true, true),
+      'reasoning:nohtml': createMarkdownHtmlRenderer(true, false),
     }
   }
-  return isReasoning ? rendererCache.reasoning : rendererCache.default
+  return rendererCache[`${isReasoning ? 'reasoning' : 'default'}:${renderHtml ? 'html' : 'nohtml'}`]
 }
 
-export function renderMarkdownToHtml(src: string, isReasoning: boolean): string {
+export function renderMarkdownToHtml(src: string, isReasoning: boolean, renderHtml = true): string {
   const displayMath = getDisplayMathSource(src)
   if (displayMath != null) {
     const className = isReasoning ? 'my-2 overflow-x-auto text-text-400' : 'my-4 overflow-x-auto text-text-200'
     return `<div class="${className}">${renderKatexHtml(displayMath, true)}</div>`
   }
 
-  const footnotes = renderFootnoteDefinitionsHtml(src, isReasoning)
-  if (footnotes != null) return sanitizeHtml(footnotes)
-
-  const renderer = getRenderer(isReasoning)
-  const html = marked.parse(src, { renderer, async: false }) as string
-  return sanitizeHtml(html)
+  const renderer = getRenderer(isReasoning, renderHtml)
+  const { body, definitions } = extractFootnoteDefinitions(src)
+  if (!definitions.length) {
+    return sanitizeHtml(marked.parse(src, { renderer, async: false }) as string)
+  }
+  const bodyHtml = body.trim() ? (marked.parse(body, { renderer, async: false }) as string) : ''
+  return sanitizeHtml(`${bodyHtml}${renderFootnoteSectionHtml(definitions, isReasoning, renderHtml)}`)
 }
 
-export function renderMarkdownInlineToHtml(src: string, isReasoning: boolean): string {
-  const renderer = getRenderer(isReasoning)
+export function renderMarkdownInlineToHtml(src: string, isReasoning: boolean, renderHtml = true): string {
+  const renderer = getRenderer(isReasoning, renderHtml)
   const html = marked.parseInline(src, { renderer }) as string
   return sanitizeHtml(html)
 }

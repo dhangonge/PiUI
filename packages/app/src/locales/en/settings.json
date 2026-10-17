@@ -122,6 +122,8 @@
     "collapseLongMessagesDesc": "Auto-collapse lengthy user messages",
     "renderUserMarkdown": "Render User Markdown",
     "renderUserMarkdownDesc": "Render sent user messages as Markdown when enabled; keep plain text when disabled",
+    "renderHtmlContent": "Render HTML Content",
+    "renderHtmlContentDesc": "Render HTML in AI output as live preview; show HTML as source code when disabled",
     "outlineCurrentHighlight": "Highlight Current Position",
     "outlineCurrentHighlightDesc": "Mark the user prompt that owns the current viewport in the right-side history rail",
     "actionsOnLatestAssistantOnly": "Actions on latest reply only",

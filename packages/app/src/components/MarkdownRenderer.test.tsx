@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { clearMermaidRenderCache } from './mermaidRenderCache'
+import { themeStore } from '../store/themeStore'
 
 const mermaidMocks = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -1518,5 +1519,53 @@ $$`
 
     expect(screen.getByText('bad [blocked]')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'bad' })).not.toBeInTheDocument()
+  })
+})
+
+describe('MarkdownRenderer HTML 渲染开关', () => {
+  beforeEach(() => {
+    themeStore.setRenderHtmlContent(false)
+  })
+  afterEach(() => {
+    themeStore.setRenderHtmlContent(true)
+  })
+
+  it('关闭后完整 HTML 文档按源码代码块展示，不起沙箱预览', () => {
+    render(<MarkdownRenderer content={'<!doctype html>\n<html><body><h1>Document</h1></body></html>'} />)
+
+    expect(screen.queryByTitle('HTML preview')).not.toBeInTheDocument()
+    expect(screen.getByTestId('code-block')).toHaveTextContent('html:<!doctype html>')
+  })
+
+  it('关闭后块级 HTML 不再渲染成活内容，直接展示源码', () => {
+    const { container } = render(<MarkdownRenderer content={'<div><strong>Rendered HTML</strong></div>'} />)
+
+    expect(screen.queryByText('Rendered HTML')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'View HTML source' })).not.toBeInTheDocument()
+    expect(container.querySelector('strong')).toBeNull()
+    expect(screen.getByTestId('code-block')).toHaveTextContent('html:<div><strong>Rendered HTML</strong></div>')
+  })
+
+  it('关闭后 html 代码块不再给预览，只按普通代码块展示', () => {
+    render(<MarkdownRenderer content={'```html\n<button>Run</button>\n```'} />)
+
+    expect(screen.queryByTitle('HTML preview')).not.toBeInTheDocument()
+    expect(screen.getByTestId('code-block')).toHaveTextContent('html:<button>Run</button>')
+  })
+
+  it('关闭后正文里混的内联 HTML 转义成文本源码', () => {
+    const { container } = render(
+      <MarkdownRenderer content={'Before <span style="color:red">inline HTML</span> after.'} />,
+    )
+
+    expect(container.querySelector('span[style]')).toBeNull()
+    expect(container.textContent).toContain('<span style="color:red">inline HTML</span>')
+  })
+
+  it('重新开启后恢复活渲染', () => {
+    themeStore.setRenderHtmlContent(true)
+    render(<MarkdownRenderer content={'<div><strong>Rendered HTML</strong></div>'} />)
+
+    expect(screen.getByText('Rendered HTML').tagName).toBe('STRONG')
   })
 })

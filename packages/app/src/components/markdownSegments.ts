@@ -70,6 +70,22 @@ export function getFootnoteId(label: string): string {
   return normalized || 'note'
 }
 
+/**
+ * 单个 `$` 行内数学的边界判定，避免把货币金额当成公式（`$5 到 $10`、`$100 和 $200`）：
+ *   - 开 `$` 之后不能是空白（`$ 5$` 不是公式）
+ *   - 闭 `$` 之前不能是空白（`$5 到 $` 不是公式）
+ *   - 闭 `$` 之后不能紧跟数字（`$100$200` 是金额连写）
+ * `$$`（display）不做这层限制，允许 `$$ x $$` 写法。
+ */
+export function isDollarMathBoundary(text: string, open: number, close: number): boolean {
+  const afterOpen = text[open + 1]
+  if (afterOpen === undefined || /\s/.test(afterOpen)) return false
+  const beforeClose = text[close - 1]
+  if (beforeClose === undefined || /\s/.test(beforeClose)) return false
+  if (isAsciiDigitAt(text, close + 1)) return false
+  return true
+}
+
 /** 尝试在 cursor 处匹配 $...$ / $$...$$ 数学 span（不匹配返回 null） */
 function tryMatchMath(text: string, cursor: number): { type: 'math'; latex: string; display: boolean } | null {
   if (text[cursor] !== '$' || isEscapedAt(text, cursor)) return null
@@ -81,6 +97,7 @@ function tryMatchMath(text: string, cursor: number): { type: 'math'; latex: stri
   const latex = text.slice(start, close)
   // 行内 $ 不允许跨行；$$ 允许（display）
   if (!display && (!latex || latex.includes('\n'))) return null
+  if (!display && !isDollarMathBoundary(text, cursor, close)) return null
   return { type: 'math', latex, display }
 }
 
