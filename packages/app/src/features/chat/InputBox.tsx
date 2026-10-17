@@ -1819,11 +1819,11 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
                           </div>
 
                           {attachmentsOverflowing && showAttachmentLeftFade && (
-                            <div className="pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-bg-000/50 to-transparent" />
+                            <div className="pointer-events-none absolute inset-y-0 left-0 w-8 bg-bg-000/50 [-webkit-mask-image:linear-gradient(to_right,black,transparent)] [mask-image:linear-gradient(to_right,black,transparent)]" />
                           )}
 
                           {attachmentsOverflowing && showAttachmentRightFade && (
-                            <div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-bg-000/50 to-transparent" />
+                            <div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-bg-000/50 [-webkit-mask-image:linear-gradient(to_left,black,transparent)] [mask-image:linear-gradient(to_left,black,transparent)]" />
                           )}
                         </div>
                       </div>

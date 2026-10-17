@@ -456,7 +456,7 @@ const CollapsibleUserText = memo(function CollapsibleUserText({
         </div>
         {/* 底部渐变遮罩 */}
         {showCollapse && isCollapsed && (
-          <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-bg-300 to-transparent pointer-events-none" />
+          <div className="absolute bottom-0 left-0 right-0 h-12 bg-bg-300 pointer-events-none [-webkit-mask-image:linear-gradient(to_top,black,transparent)] [mask-image:linear-gradient(to_top,black,transparent)]" />
         )}
       </div>
       {showCollapse && (

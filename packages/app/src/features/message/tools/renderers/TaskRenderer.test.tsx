@@ -78,7 +78,11 @@ describe('TaskHeader', () => {
   it('also opens the child session from the agent badge', () => {
     const { navigateToSession, onToggle } = renderHeader()
 
-    fireEvent.click(screen.getByRole('button', { name: 'explore' }))
+    const badge = screen.getByRole('button', { name: 'explore' })
+    // 移动端 32px 最小点击区域会把这枚内联徽标撑高，data-compact 是 index.css 的逃生口
+    expect(badge).toHaveAttribute('data-compact')
+
+    fireEvent.click(badge)
 
     expect(navigateToSession).toHaveBeenCalledWith('child-session', 'E:\\workspace')
     expect(onToggle).not.toHaveBeenCalled()

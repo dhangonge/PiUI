@@ -360,6 +360,7 @@ export const TaskHeader = memo(function TaskHeader({
       {sessionId ? (
         <button
           type="button"
+          data-compact=""
           onClick={handleOpenSession}
           className={`${agentBadgeClass} border-none transition-opacity hover:opacity-80`}
           title={t('task.openSession')}

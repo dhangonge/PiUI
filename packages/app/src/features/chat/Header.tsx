@@ -8,8 +8,10 @@ import {
   SplitHorizontalIcon,
   MaximizeIcon,
   MinimizeIcon,
+  PencilIcon,
+  CopyIcon,
 } from '../../components/Icons'
-import { IconButton } from '../../components/ui'
+import { DropdownMenu, IconButton, MenuItem } from '../../components/ui'
 import { ModelSelector, type ModelSelectorHandle } from './ModelSelector'
 import { usePiCapabilities } from '../../pi/capabilities'
 import { useLayoutStore, layoutStore } from '../../store/layoutStore'
@@ -17,7 +19,8 @@ import { useSessionContext } from '../../contexts/useSessionContext'
 import { renamePiSession, loadPiSessions } from '../../pi/controllers/index.js'
 import { usePiSessionTitle } from '../../pi/hooks/index.js'
 import { uiErrorHandler } from '../../utils'
-import { sessionKeyToServerId } from '../../utils/sessionKey'
+import { copyTextToClipboard } from '../../utils/clipboard'
+import { sessionKeyToServerId, sessionKeyToSessionId } from '../../utils/sessionKey'
 import { useChatViewport } from './chatViewport'
 import type { Model, Api } from '@earendil-works/pi-ai'
 
@@ -49,9 +52,12 @@ interface SessionTitleControlProps {
   handleRename: () => void
   handleStartEdit: () => void
   canRename: boolean
-  onShare?: () => void
+  onRename: () => void
+  onCopyId: () => void
   clickToRenameTitle: string
-  shareTitle: string
+  moreActionsTitle: string
+  renameTitle: string
+  copyIdTitle: string
 }
 
 function SessionTitleControl({
@@ -65,10 +71,44 @@ function SessionTitleControl({
   handleRename,
   handleStartEdit,
   canRename,
-  onShare,
+  onRename,
+  onCopyId,
   clickToRenameTitle,
-  shareTitle,
+  moreActionsTitle,
+  renameTitle,
+  copyIdTitle,
 }: SessionTitleControlProps) {
+  // 标题右侧的 chevron 是「会话操作」入口：重命名 / 复制会话 ID 都收进这个菜单，
+  // 不再单独占按钮（OCUI f4a7d7c4 同款；它的导出/移动到别处 Pi 没有对应数据源）。
+  const [menuOpen, setMenuOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      setMenuOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setMenuOpen(false)
+      triggerRef.current?.focus()
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menuOpen])
+
+  const pick = (action: () => void) => {
+    setMenuOpen(false)
+    action()
+  }
+
   const inputClass = compact
     ? 'px-2 py-1.5 text-[length:var(--fs-base)] font-medium text-text-100 bg-transparent border-none outline-none w-[160px] h-full'
     : 'px-3 py-1.5 text-[length:var(--fs-base)] font-medium text-text-100 bg-transparent border-none outline-none w-[200px] lg:w-[300px] h-full text-center'
@@ -78,7 +118,7 @@ function SessionTitleControl({
   const dividerClass = compact
     ? 'w-[1.5px] h-3 bg-border-200/50 mx-0.5 shrink-0'
     : 'w-[1.5px] h-3 bg-border-200/50 mx-0.5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(any-pointer:coarse)]:opacity-100 transition-opacity'
-  const shareButtonClass = compact
+  const menuButtonClass = compact
     ? 'p-1 text-text-400 hover:text-text-100 transition-colors rounded-md hover:bg-bg-300/50 shrink-0'
     : 'p-1 text-text-400 hover:text-text-100 transition-colors rounded-md hover:bg-bg-300/50 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(any-pointer:coarse)]:opacity-100 shrink-0'
 
@@ -107,18 +147,39 @@ function SessionTitleControl({
         <span className={buttonClass.replace('cursor-text', 'cursor-default')}>{sessionTitle}</span>
       )}
 
-      {!isEditingTitle && onShare && (
+      {!isEditingTitle && (
         <>
-          <div className={dividerClass} />
+          <div className={`${dividerClass} ${menuOpen ? 'opacity-100' : ''}`} />
           <button
+            ref={triggerRef}
             type="button"
-            className={shareButtonClass}
-            title={shareTitle}
-            aria-label={shareTitle}
-            onClick={onShare}
+            className={`${menuButtonClass} ${menuOpen ? 'opacity-100' : ''}`}
+            title={moreActionsTitle}
+            aria-label={moreActionsTitle}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen(v => !v)}
           >
             <ChevronDownIcon size={12} />
           </button>
+          <DropdownMenu
+            triggerRef={triggerRef}
+            isOpen={menuOpen}
+            position="bottom"
+            align="left"
+            minWidth="208px"
+            mobileFullWidth
+          >
+            <div ref={menuRef} role="menu" aria-label={moreActionsTitle} className="p-1">
+              <MenuItem
+                label={renameTitle}
+                icon={<PencilIcon size={14} />}
+                disabled={!canRename}
+                onClick={() => pick(onRename)}
+              />
+              <MenuItem label={copyIdTitle} icon={<CopyIcon size={14} />} onClick={() => pick(onCopyId)} />
+            </div>
+          </DropdownMenu>
         </>
       )}
     </div>
@@ -204,6 +265,15 @@ export function Header({
     }
   }
 
+  const handleCopySessionId = async () => {
+    if (!sessionId) return
+    try {
+      await copyTextToClipboard(sessionKeyToSessionId(sessionId))
+    } catch (e) {
+      uiErrorHandler('copy session id', e)
+    }
+  }
+
   const titleControl = (
     <SessionTitleControl
       compact={isCompact}
@@ -216,8 +286,12 @@ export function Header({
       handleRename={handleRename}
       handleStartEdit={handleStartEdit}
       canRename={capabilities.sessionRename}
+      onRename={handleStartEdit}
+      onCopyId={() => void handleCopySessionId()}
       clickToRenameTitle={t('header.clickToRename')}
-      shareTitle={t('header.shareSession')}
+      moreActionsTitle={t('header.moreActions')}
+      renameTitle={t('header.renameSession')}
+      copyIdTitle={t('header.copySessionId')}
     />
   )
 
@@ -297,7 +371,7 @@ export function Header({
 
       <div
         data-chat-header-shadow
-        className="absolute top-full left-0 right-0 h-8 bg-gradient-to-b from-bg-100 to-transparent pointer-events-none z-10"
+        className="absolute top-full left-0 right-0 h-8 bg-bg-100 pointer-events-none z-10 [-webkit-mask-image:linear-gradient(to_bottom,black,transparent)] [mask-image:linear-gradient(to_bottom,black,transparent)]"
       />
     </div>
   )
