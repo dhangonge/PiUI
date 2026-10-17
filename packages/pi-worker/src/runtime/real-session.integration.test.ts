@@ -199,6 +199,83 @@ export default function (pi) {
     }
   })
 
+  it('forwards the subagent-integration child-session announcements from pi.events', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-child-bus-'))
+    const agentDir = path.join(root, 'agent')
+    const extensions = path.join(agentDir, 'extensions')
+    mkdirSync(extensions, { recursive: true })
+    // 频道名与 payload 是 subagent-integration 约定，pi-subagents-lite 就是
+    // 用这两个值发公告的；这里用最小 fixture 复现同样的调用。
+    writeFileSync(
+      path.join(extensions, 'announce.js'),
+      `
+export default function (pi) {
+  pi.registerTool({ name: "announce", description: "fixture", parameters: { type: "object", properties: {} },
+    execute: async () => {
+      for (const channel of ["subagents:child:session-created", "subagents:child:bound", "subagents:child:disposed"]) {
+        pi.events.emit(channel, { sessionId: "child-1", parentSessionId: "parent-1" })
+      }
+      return { content: [{ type: "text", text: "announced" }], details: {} }
+    } })
+}
+`,
+    )
+    let session: RealPiSession | undefined
+    try {
+      session = await RealPiSession.open(root, undefined, { agentDir })
+      await session.initializeExtensions()
+      const events: AnyRecord[] = []
+      const off = session.onChildSession(event => events.push(event as AnyRecord))
+      await session.invokeTool('announce')
+      off()
+
+      assert.deepEqual(
+        events.map(event => event.phase),
+        ['created', 'bound', 'disposed'],
+      )
+      assert.equal(events[0]?.sessionId, 'child-1')
+      assert.equal(events[0]?.parentSessionId, 'parent-1')
+      // owningSessionId 由 worker 自己盖章，用来对账多会话共进程的情况
+      assert.equal(events[0]?.owningSessionId, session.getSessionId())
+    } finally {
+      await session?.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('drops announcements when the tool emits on a channel nobody listens to', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-child-bus-mute-'))
+    const agentDir = path.join(root, 'agent')
+    const extensions = path.join(agentDir, 'extensions')
+    mkdirSync(extensions, { recursive: true })
+    writeFileSync(
+      path.join(extensions, 'announce.js'),
+      `
+export default function (pi) {
+  pi.registerTool({ name: "announce", description: "fixture", parameters: { type: "object", properties: {} },
+    execute: async () => {
+      pi.events.emit("subagents:child:session-created", { parentSessionId: "parent-1" })
+      return { content: [{ type: "text", text: "announced" }], details: {} }
+    } })
+}
+`,
+    )
+    let session: RealPiSession | undefined
+    try {
+      session = await RealPiSession.open(root, undefined, { agentDir })
+      await session.initializeExtensions()
+      const events: AnyRecord[] = []
+      session.onChildSession(event => events.push(event as AnyRecord))
+      await session.invokeTool('announce')
+
+      // 没有 sessionId 就定位不到子会话，不能上报
+      assert.deepEqual(events, [])
+    } finally {
+      await session?.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('uses the configured sessionDir for creation and discovery', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'piui-session-dir-'))
     const cwd = path.join(root, 'workspace')

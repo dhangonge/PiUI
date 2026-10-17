@@ -111,6 +111,7 @@ const PI_SDK_MODULE_CONTRACT = [
   { symbol: 'ProjectTrustStore', usedBy: 'catalog trust, real-session project trust' },
   { symbol: 'hasTrustRequiringProjectResources', usedBy: 'catalog settingsForWorkspace, real-session project trust' },
   { symbol: 'resolveModelScopeWithDiagnostics', usedBy: 'real-session setScopedModels' },
+  { symbol: 'createEventBus', usedBy: 'real-session subagent child-session bridge' },
 ] as const
 
 export function verifySdkModuleContract(sdk: PiSdk): string[] {

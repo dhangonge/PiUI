@@ -5,6 +5,7 @@ import path from 'node:path'
 import type {
   AgentSessionRuntime,
   CreateAgentSessionRuntimeFactory,
+  EventBus,
   LoadExtensionsResult,
   ModelRuntime,
   ProjectTrustContext,
@@ -227,8 +228,48 @@ export function verifySdkSessionContract(runtime: AgentSessionRuntime, version =
   verifiedSessionContractSdkVersion = version
 }
 
+/**
+ * 子代理会话公告的三个约定频道（顺序即生命周期），payload 由插件定义：
+ * `{ sessionId, parentSessionId? }`。改名或加字段都会破坏
+ * subagent-integration 约定。
+ */
+type ChildSessionPhase = 'created' | 'bound' | 'disposed'
+
+const CHILD_SESSION_CHANNELS = [
+  ['subagents:child:session-created', 'created'],
+  ['subagents:child:bound', 'bound'],
+  ['subagents:child:disposed', 'disposed'],
+] as const
+
+/**
+ * 把插件的子代理会话公告规整成宿主可用的事件。
+ *
+ * 约定不可改：频道名与字段由 subagent-integration 规定，payload 只有
+ * { sessionId, parentSessionId? }。没有 sessionId 的公告直接丢弃（无法定位）。
+ */
+export function toChildSessionEvent(payload: unknown, phase: ChildSessionPhase): JsonObject | undefined {
+  const record = isJsonObject(payload) ? payload : undefined
+  const sessionId = typeof record?.sessionId === 'string' ? record.sessionId : undefined
+  if (!sessionId) return undefined
+  return {
+    phase,
+    sessionId,
+    parentSessionId: typeof record?.parentSessionId === 'string' ? record.parentSessionId : null,
+  }
+}
+
+/** 订阅三个生命周期频道；返回全部退订函数 */
+export function forwardChildSessionEvents(bus: EventBus, emit: (event: JsonObject) => void): Array<() => void> {
+  return CHILD_SESSION_CHANNELS.map(([channel, phase]) =>
+    bus.on(channel, payload => {
+      const event = toChildSessionEvent(payload, phase)
+      if (event) emit(event)
+    }),
+  )
+}
+
 const createDefaultRuntime =
-  (modelRuntime?: ModelRuntime): CreateAgentSessionRuntimeFactory =>
+  (modelRuntime?: ModelRuntime, eventBus?: EventBus): CreateAgentSessionRuntimeFactory =>
   async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
     const { SettingsManager, createAgentSessionServices, createAgentSessionFromServices } = getLoadedSdk().sdk
     const globalSettings = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
@@ -240,6 +281,9 @@ const createDefaultRuntime =
       // 共享 ModelRuntime：同一进程内所有会话复用同一个模型/认证实例
       // （SDK 原生支持，见 createAgentSessionServices 的 modelRuntime 参数）。
       modelRuntime,
+      // 插件通过 pi.events 广播（子代理公告走这条总线）。显式传入可以让
+      // worker 自己也订阅，否则每个 resource loader 会各建一条私有总线。
+      ...(eventBus ? { resourceLoaderOptions: { eventBus } } : {}),
       resourceLoaderReloadOptions: {
         resolveProjectTrust: async ({ extensionsResult }) =>
           resolveProjectTrustFromExtensions(cwd, agentDir, extensionsResult, globalSettings.getDefaultProjectTrust()),
@@ -280,6 +324,8 @@ export class RealPiSession implements SessionRuntime {
   private readonly activityListeners = new Set<(status: SessionActivityStatus | null) => void>()
   private readonly headListeners = new Set<(head: SessionHead) => void>()
   private readonly resourceListeners = new Set<() => void>()
+  private readonly childSessionListeners = new Set<(event: JsonObject) => void>()
+  private childSessionBusUnsubs: Array<() => void> = []
   private nativeRevision = 1
   private nativeFingerprint = ''
   private eventEpoch = randomUUID()
@@ -326,8 +372,12 @@ export class RealPiSession implements SessionRuntime {
         code: 'SESSION_IDENTITY_MISMATCH',
       })
     }
+    // 子代理公告总线：插件从 pi.events 发 `subagents:child:*`，不传自有总线
+    // 时每个 resource loader 各建一条，worker 就收不到。外部注入的
+    // createRuntime（集成测试）自行负责总线，这里就不再订阅。
+    const childSessionBus = options.createRuntime ? undefined : getLoadedSdk().sdk.createEventBus()
     const runtime = await createAgentSessionRuntime(
-      options.createRuntime ?? createDefaultRuntime(options.modelRuntime),
+      options.createRuntime ?? createDefaultRuntime(options.modelRuntime, childSessionBus),
       {
         cwd: sessionManager.getCwd(),
         agentDir,
@@ -337,6 +387,7 @@ export class RealPiSession implements SessionRuntime {
     verifySdkSessionContract(runtime)
 
     const result = new RealPiSession(runtime, options.hostActions)
+    result.bindChildSessionBus(childSessionBus)
     runtime.setBeforeSessionInvalidate(() => result.detachSessionSubscriptions())
     runtime.setRebindSession(async session => {
       result.extensionUi.cancelAll('session_replaced')
@@ -667,6 +718,31 @@ export class RealPiSession implements SessionRuntime {
 
   onExtensionUi(listener: (event: JsonObject) => void): Unsubscribe {
     return this.extensionUi.onEvent(listener as never)
+  }
+
+  onChildSession(listener: (event: JsonObject) => void): Unsubscribe {
+    this.childSessionListeners.add(listener)
+    return () => this.childSessionListeners.delete(listener)
+  }
+
+  /**
+   * 订阅插件的子代理会话公告。
+   *
+   * 约定频道名由 @gotgenes/pi-permission-system 的 subagent-integration 文档
+   * 定义，不可改名、不可加字段：payload 只有 { sessionId, parentSessionId }。
+   * 子代理会话是 SessionManager.inMemory，转录不落盘也不在本进程可读，
+   * 所以这里只转发「有/没有」这件事，不假装能拿到消息。
+   */
+  private bindChildSessionBus(bus: EventBus | undefined): void {
+    for (const unsub of this.childSessionBusUnsubs) unsub()
+    this.childSessionBusUnsubs = []
+    if (!bus) return
+    this.childSessionBusUnsubs = forwardChildSessionEvents(bus, event => {
+      // parentSessionId 由插件从父会话管理器取；对账时以 worker 自己的
+      // 会话 id 为准，避免多会话共用一个进程时串号。
+      const enriched: JsonObject = { ...event, owningSessionId: this.runtime.session.sessionManager.getSessionId() }
+      for (const listener of this.childSessionListeners) listener(enriched)
+    })
   }
 
   onResourcesChanged(listener: () => void): Unsubscribe {
@@ -1304,6 +1380,9 @@ export class RealPiSession implements SessionRuntime {
   async dispose(): Promise<void> {
     this.extensionUi.cancelAll('runtime_disposed')
     this.detachSessionSubscriptions()
+    for (const unsub of this.childSessionBusUnsubs) unsub()
+    this.childSessionBusUnsubs = []
+    this.childSessionListeners.clear()
     this.piEventListeners.clear()
     this.headListeners.clear()
     this.resourceListeners.clear()

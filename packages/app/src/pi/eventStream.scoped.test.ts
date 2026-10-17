@@ -6,6 +6,7 @@ import { activeSessionStore } from '../store/activeSessionStore'
 import { getPiCommandStore } from './state/piCommandStore'
 import { extensionUiStore } from './extensionUiStore'
 import { liveToolOutputStore } from './liveToolOutput'
+import { childAgentStore } from './childAgentStore'
 import type { PiSocket } from './piSocket'
 
 const mocks = vi.hoisted(() => ({ open: vi.fn(), refresh: vi.fn(), load: vi.fn() }))
@@ -67,6 +68,7 @@ describe('parallel Pi event streams', () => {
   afterEach(() => {
     getPiEventStream(a).invalidate()
     getPiEventStream(b).invalidate()
+    childAgentStore.clearAll()
     serverStore.setActiveServer(LOCAL_SERVER_ID)
     serverStore.removeServer(a)
     serverStore.removeServer(b)
@@ -107,6 +109,15 @@ describe('parallel Pi event streams', () => {
     emit(sockets[0], 'sessions.activity', { sessions: {} }, 'server')
     expect(activeSessionStore.getSnapshot().statusMap[makeSessionKey(a, 'same')]?.type).not.toBe('busy')
     expect(activeSessionStore.getSnapshot().statusMap[makeSessionKey(b, 'same')]?.type).toBe('busy')
+  })
+
+  it('files subagent child-session announcements under their parent', () => {
+    connectBoth()
+    emit(sockets[0], 'subagent.child', { phase: 'created', sessionId: 'child', parentSessionId: 'same' })
+
+    expect(childAgentStore.count('same')).toBe(1)
+    emit(sockets[0], 'subagent.child', { phase: 'disposed', sessionId: 'child', parentSessionId: 'same' })
+    expect(childAgentStore.count('same')).toBe(0)
   })
 
   it('isolates extension requests and tool output with identical IDs', () => {

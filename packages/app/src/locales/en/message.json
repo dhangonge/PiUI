@@ -127,7 +127,10 @@
     "outputFile": "Log",
     "worktree": "Worktree",
     "backgroundHint": "Background agent: a notification arrives when it finishes.",
-    "stopFailed": "Stop failed: {{message}}"
+    "stopFailed": "Stop failed: {{message}}",
+    "childSessionsRunning_one": "{{count}} subagent session running",
+    "childSessionsRunning_other": "{{count}} subagent sessions running",
+    "childSessionLive": "Child session {{id}} is live"
   },
   "system": {
     "retryAttempt": "Retry attempt {{attempt}}",

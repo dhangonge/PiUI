@@ -17,6 +17,7 @@ import { useDisclosureScrollLock } from '../../../hooks'
 import { useNow } from '../../../hooks/useNow'
 import { chevronClass, MessageExpandPanel, useMessageExpandRender } from '../messageExpand'
 import { ToolGroup } from './ToolGroup'
+import { TaskRenderer } from '../tools/renderers/TaskRenderer'
 
 // ============================================
 // Pi system timeline item views
@@ -39,7 +40,12 @@ export const PiSystemItemView = memo(function PiSystemItemView({ item }: { item:
     case 'branch_summary':
       return <BranchSummaryItemView item={item} />
     case 'custom_message':
-      return item.display ? <CustomMessageItemView item={item} /> : null
+      if (!item.display) return null
+      return item.customType === 'subagent-result' ? (
+        <SubagentResultView item={item} />
+      ) : (
+        <CustomMessageItemView item={item} />
+      )
     case 'unknown':
       return <UnknownItemView item={item} />
     default:
@@ -164,15 +170,63 @@ function BranchSummaryItemView({ item }: { item: PiBranchSummaryItem }) {
 }
 
 function CustomMessageItemView({ item }: { item: PiCustomMessageItem }) {
-  const text =
-    typeof item.content === 'string'
-      ? item.content
-      : item.content
-          .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
-          .map(block => block.text)
-          .join('\n')
+  const text = customMessageText(item)
   if (!text.trim()) return null
   return <MarkdownRenderer content={text} />
+}
+
+function customMessageText(item: PiCustomMessageItem): string {
+  return typeof item.content === 'string'
+    ? item.content
+    : item.content
+        .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
+        .map(block => block.text)
+        .join('\n')
+}
+
+/**
+ * pi-subagents-lite 的 `subagent-result` 消息（后台子代理结束时的通知）。
+ *
+ * 插件的 content 是 `[Subagent "type" <shortId> <status>]\n\n<结果正文>`，
+ * details 是 buildAgentDetails(includeStats, includeStatus) —— 比前台工具
+ * 结果更全。这里把两者还原成一次工具执行，交给 TaskRenderer 复用状态与
+ * 统计行，并丢掉标题行（状态已由卡片头部表达）。
+ */
+function SubagentResultView({ item }: { item: PiCustomMessageItem }) {
+  const execution = subagentResultToExecution(item)
+  if (!execution) return <CustomMessageItemView item={item} />
+  return <TaskRenderer execution={execution} partKey={item.entryId} data={{}} />
+}
+
+const SUBAGENT_HEADER = /^\[Subagent [^\]]*\]\s*/
+
+export function subagentResultToExecution(item: PiCustomMessageItem): PiToolExecution | undefined {
+  const details = item.details
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return undefined
+  const record = details as Record<string, unknown>
+  const raw = customMessageText(item)
+  const body = raw.replace(SUBAGENT_HEADER, '').trim()
+  const args: Record<string, string | boolean> = { run_in_background: true }
+  if (typeof record.type === 'string') args.agent = record.type
+  if (typeof record.description === 'string') args.description = record.description
+  return {
+    call: {
+      type: 'toolCall',
+      id: item.entryId,
+      name: 'Agent',
+      arguments: args,
+    },
+    result: {
+      role: 'toolResult',
+      toolCallId: item.entryId,
+      toolName: 'Agent',
+      content: body ? [{ type: 'text', text: body }] : [],
+      isError: record.status === 'error',
+      timestamp: item.timestamp,
+      // details 来自 JSON 落盘条目，形态由插件决定；TaskRenderer 按 Record 读。
+      details: record as unknown as PiToolExecution['result'] extends { details?: infer D } ? D : never,
+    },
+  }
 }
 
 function UnknownItemView({ item }: { item: PiUnknownItem }) {

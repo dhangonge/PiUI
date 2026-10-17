@@ -17,6 +17,7 @@ function completeFakeSdk(): Record<string, unknown> {
     ProjectTrustStore: fn,
     hasTrustRequiringProjectResources: fn,
     resolveModelScopeWithDiagnostics: fn,
+    createEventBus: fn,
   }
 }
 

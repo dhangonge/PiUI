@@ -40,6 +40,7 @@ export type EventChannel =
   | 'session.head'
   | 'command.updated'
   | 'extension.ui'
+  | 'subagent.child'
   | 'provider.auth'
   | 'packages.progress'
   | 'registry.updated'

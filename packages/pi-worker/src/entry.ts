@@ -221,6 +221,19 @@ function subscribeRuntimeEvents(current: SessionRuntime): Array<() => void> {
       ),
     )
   }
+  if (current.onChildSession) {
+    unsubs.push(
+      current.onChildSession(event =>
+        send({
+          kind: 'event',
+          generation: workerGeneration,
+          sessionId: current.getSessionId(),
+          channel: 'subagent.child',
+          event,
+        }),
+      ),
+    )
+  }
   if (current.onResourcesChanged) {
     unsubs.push(
       current.onResourcesChanged(() =>

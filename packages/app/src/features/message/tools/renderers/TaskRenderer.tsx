@@ -1,5 +1,6 @@
 import { memo, useState, useCallback, useEffect, type RefCallback } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useChildAgentSessions } from '../../../../pi/childAgentStore'
 import { ContentBlock } from '../../../../components'
 import { ChevronRightIcon, ExternalLinkIcon, StopIcon } from '../../../../components/Icons'
 import { useDisclosureScrollLock } from '../../../../hooks'
@@ -35,14 +36,7 @@ import { MessageExpandPanel, useMessageExpandRender } from '../../messageExpand'
 // 但子代理仍在跑，真正的状态在 details.status 上。
 // ============================================
 
-type AgentUiStatus =
-  | 'queued'
-  | 'running'
-  | 'completed'
-  | 'turn_limited'
-  | 'aborted'
-  | 'stopped'
-  | 'error'
+type AgentUiStatus = 'queued' | 'running' | 'completed' | 'turn_limited' | 'aborted' | 'stopped' | 'error'
 
 const ACTIVE_STATUSES: readonly AgentUiStatus[] = ['queued', 'running']
 
@@ -131,6 +125,9 @@ export const TaskRenderer = memo(function TaskRenderer({ execution, partKey, onF
   const { currentSessionId } = useSessionNavigation()
   const targetSessionId = scopeChildSession(readString(details, 'sessionId'), currentSessionId)
   const agentId = readString(details, 'agentId')
+  // 子代理公告不带 agentId，卡片与子会话无法一一对应；只按父会话报总数，
+  // 让后台 agent 跑着的时候界面上有活着的证据。
+  const liveChildCount = useChildAgentSessions().length
   const parentSessionId = currentSessionId ? sessionKeyToSessionId(currentSessionId) || currentSessionId : undefined
 
   const resultOutput = execution.result
@@ -234,6 +231,12 @@ export const TaskRenderer = memo(function TaskRenderer({ execution, partKey, onF
 
               {runInBackground && (
                 <div className="text-[length:var(--fs-xs)] text-text-400">{t('task.backgroundHint')}</div>
+              )}
+
+              {liveChildCount > 0 && (
+                <div className="text-[length:var(--fs-xs)] text-text-500">
+                  {t('task.childSessionsRunning', { count: liveChildCount })}
+                </div>
               )}
 
               {stopError && (
@@ -472,9 +475,21 @@ interface SubSessionViewProps {
   isParentRunning: boolean
 }
 
-const SubSessionView = memo(function SubSessionView(_props: SubSessionViewProps) {
+const SubSessionView = memo(function SubSessionView({ sessionId, isParentRunning }: SubSessionViewProps) {
   const { t } = useTranslation('message')
-  // Pi 的子代理会话是内存态（SessionManager.inMemory）且只通过 pi.events
-  // 的 subagents:child:* 公告，worker 侧还没接这条通道 —— 等 S3 桥接。
+  // Pi 的子代理会话是内存态（SessionManager.inMemory）：转录既不落盘也不在
+  // 宿主可读范围内，只有 pi.events 的 subagents:child:* 公告能证明它存在。
+  // 所以这里只能报存活，不能渲染内容。
+  const bareId = sessionKeyToSessionId(sessionId)
+  const live = useChildAgentSessions().some(session => session.sessionId === bareId)
+  if (live) {
+    return (
+      <div className="text-[length:var(--fs-sm)] text-text-500 py-2">
+        {t('task.childSessionLive', { id: bareId.slice(0, 8) })}
+      </div>
+    )
+  }
+  // 跑完的 agent 没有子会话也不该再挂着「等待中」——内容在结果块里。
+  if (!isParentRunning) return null
   return <div className="text-[length:var(--fs-sm)] text-text-500 italic py-2">{t('task.waitingForResponse')}</div>
 })

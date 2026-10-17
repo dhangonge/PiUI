@@ -17,6 +17,11 @@ export interface SessionRuntime {
   onHead(listener: (head: JsonObject) => void): Unsubscribe
   onActivity?(listener: (status: SessionActivityStatus | null) => void): Unsubscribe
   onExtensionUi?(listener: (event: JsonObject) => void): Unsubscribe
+  /**
+   * 子代理会话的生命周期公告（pi.events 的 subagents:child:* 频道）。
+   * payload 只有 { sessionId, parentSessionId } —— 转录内容不在其中。
+   */
+  onChildSession?(listener: (event: JsonObject) => void): Unsubscribe
   onResourcesChanged?(listener: () => void): Unsubscribe
   onReplacement?(listener: (replacement: JsonObject) => void | Promise<void>): Unsubscribe
   onCrash?(listener: (error: Error) => void): Unsubscribe

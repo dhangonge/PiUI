@@ -30,6 +30,7 @@ import { extensionTuiStore } from './extensionTuiStore'
 import { commandFeedbackStore } from './commandFeedbackStore'
 import { notificationStore } from '../store/notificationStore'
 import { liveToolOutputStore, extractToolExecutionText } from './liveToolOutput'
+import { childAgentStore, type SubagentChildPayload } from './childAgentStore'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { serverStore } from '../store/serverStore'
 import { perfMark } from '../utils/perf'
@@ -231,6 +232,7 @@ export class PiEventStream {
       extensionUiStore.remove(id)
       extensionTuiStore.remove(id)
       liveToolOutputStore.clearSession(id)
+      childAgentStore.clearSession(id)
     }
   }
 
@@ -439,6 +441,11 @@ export class PiEventStream {
         break
       case 'extension.ui':
         if (sessionId) this.handleExtensionUiEvent(sessionId, envelope.payload as unknown as PiExtensionUiEvent)
+        break
+      case 'subagent.child':
+        if (sessionId) {
+          childAgentStore.receive(envelope.payload as unknown as SubagentChildPayload, sessionId)
+        }
         break
       case 'provider.auth':
         this.handleProviderAuthEvent(envelope.payload as unknown as ProviderAuthEvent)

@@ -1,6 +1,7 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SessionNavigationContext } from '../../../../contexts/SessionNavigationContext'
+import { childAgentStore } from '../../../../pi/childAgentStore'
 import type { PiToolExecution } from '../../../../pi/domain/index.js'
 import { TaskHeader, TaskRenderer } from './TaskRenderer'
 
@@ -15,7 +16,9 @@ vi.mock('../../../../pi/controllers/index.js', () => ({
 }))
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key) }),
+  useTranslation: () => ({
+    t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key),
+  }),
 }))
 
 // ContentBlock 需要全屏上下文；卡片本身的展开状态在单元测试里直接钉成展开，
@@ -137,7 +140,7 @@ function agentExecution(options: {
           content: [{ type: 'text', text: options.text ?? 'done' }],
           isError: options.isError ?? false,
           timestamp: 0,
-          details: options.details,
+          details: options.details as never,
         }
       : undefined,
   }
@@ -193,6 +196,36 @@ describe('TaskRenderer (pi Agent tool)', () => {
     expect(screen.getByText('task.backgroundHint')).toBeInTheDocument()
     // 结果区不能出现：后台 agent 还没结束
     expect(screen.queryByText('task.result')).not.toBeInTheDocument()
+  })
+
+  it('reports how many child agent sessions are alive under the parent', () => {
+    childAgentStore.receive(
+      { phase: 'created', sessionId: 'child-1', parentSessionId: 'parent-session' },
+      'parent-session',
+    )
+    childAgentStore.receive(
+      { phase: 'created', sessionId: 'child-2', parentSessionId: 'parent-session' },
+      'parent-session',
+    )
+
+    renderAgent(agentExecution({ input: { run_in_background: true }, details: { status: 'running', agentId: 'a1' } }))
+
+    // i18n mock 把参数拼在 key 后面，所以匹配前缀
+    expect(screen.getByText(/^task\.childSessionsRunning/)).toHaveTextContent('"count":2')
+    childAgentStore.clearAll()
+  })
+
+  it('shows a live child session instead of the waiting placeholder', () => {
+    childAgentStore.receive(
+      { phase: 'bound', sessionId: 'child-session-xyz', parentSessionId: 'parent-session' },
+      'parent-session',
+    )
+
+    renderAgent(agentExecution({ details: { status: 'running', sessionId: 'parent-session::child-session-xyz' } }))
+
+    expect(screen.getByText(/^task\.childSessionLive/)).toBeInTheDocument()
+    expect(screen.queryByText('task.waitingForResponse')).not.toBeInTheDocument()
+    childAgentStore.clearAll()
   })
 
   it('stops a background agent through StopAgent with its agent id', async () => {

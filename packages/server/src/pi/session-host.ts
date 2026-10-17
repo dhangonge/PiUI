@@ -638,6 +638,10 @@ export class SessionHost {
       this.hub.publish({ kind: 'session', id: session.sessionId }, 'extension.ui', event.event)
       return
     }
+    if (event.channel === 'subagent.child') {
+      this.hub.publish({ kind: 'session', id: session.sessionId }, 'subagent.child', event.event)
+      return
+    }
     if (event.channel === 'registry.updated') {
       this.hub.publish({ kind: 'session', id: session.sessionId }, 'registry.updated', event.event)
       return
