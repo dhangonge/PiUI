@@ -220,6 +220,44 @@ describe('TaskRenderer (pi Agent tool)', () => {
     expect(navigateToSession).toHaveBeenCalledWith('owner::child-2', '/work')
   })
 
+  it('opens a foreground agent session matched by its prompt', () => {
+    // 前置 agent 的工具结果 details 里没有 agentId（插件只在后台分支补），
+    // 只能靠「子会话名 <类型>#<短 id> + 首条用户消息 = prompt」对上。
+    piSessionInfoStore.replaceForServer('owner', [
+      {
+        id: 'owner::parent-session',
+        path: '/work/.pi/sessions/parent.jsonl',
+        cwd: '/work',
+        name: '更新',
+        created: new Date(0),
+        modified: new Date(0),
+        messageCount: 1,
+        firstMessage: 'hi',
+        allMessagesText: '',
+      },
+      {
+        id: 'owner::child-fg',
+        path: '/work/.pi/sessions/child-fg.jsonl',
+        cwd: '/work',
+        name: 'general-purpose#a037f104',
+        parentSessionPath: '/work/.pi/sessions/parent.jsonl',
+        created: new Date(0),
+        modified: new Date(0),
+        messageCount: 1,
+        firstMessage: 'Inspect the renderer',
+        allMessagesText: '',
+      },
+    ] as never)
+    const navigateToSession = renderAgentWithNav(
+      agentExecution({ details: { type: 'general-purpose', turnCount: 1 } }),
+      'owner::parent-session',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'task.openSession' }))
+
+    expect(navigateToSession).toHaveBeenCalledWith('owner::child-fg', '/work')
+  })
+
   it('hides the jump button when the subagent session was never persisted', () => {
     renderAgent(
       agentExecution({ input: { run_in_background: true }, details: { status: 'running', agentId: 'ffffffff' } }),

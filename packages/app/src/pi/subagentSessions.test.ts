@@ -6,7 +6,7 @@ import { findSubagentSessionId, sessionNameMatchesAgent, subagentNameSuffix } fr
 
 const AGENT_ID = 'a1b2c3d4-1111-2222-3333-444455556666'
 
-function sessionInfo(id: string, name: string | undefined): SessionInfo {
+function sessionInfo(id: string, name: string | undefined, extra: Partial<SessionInfo> = {}): SessionInfo {
   return {
     id,
     path: `/tmp/${id}.jsonl`,
@@ -17,6 +17,7 @@ function sessionInfo(id: string, name: string | undefined): SessionInfo {
     messageCount: 1,
     firstMessage: '',
     allMessagesText: '',
+    ...extra,
   } as SessionInfo
 }
 
@@ -72,5 +73,95 @@ describe('findSubagentSessionId', () => {
   it('returns nothing without an agent id or without a matching session', () => {
     expect(findSubagentSessionId(undefined)).toBeUndefined()
     expect(findSubagentSessionId('ffffffff-1111-2222-3333-444455556666')).toBeUndefined()
+  })
+})
+
+// 前置 agent：插件的工具结果 details 里没有 agentId（buildAgentDetails 只在后台
+// 分支补），只能靠「子会话名 <类型>#<短 id> + 首条用户消息 = Agent 卡片 prompt」认人。
+describe('findSubagentSessionId for foreground agents', () => {
+  const PROMPT = '统计模块规模\n\n只读操作，不要改文件。'
+  const parent = sessionInfo('server::parent', '更新', { path: '/work/parent.jsonl' })
+
+  it('links by session type prefix plus the identical first user message', () => {
+    piSessionInfoStore.replaceForServer('server', [
+      parent,
+      sessionInfo('server::child-fg', 'general-purpose#a037f104', {
+        firstMessage: '统计模块规模   只读操作，不要改文件。',
+        parentSessionPath: '/work/parent.jsonl',
+      }),
+    ])
+
+    expect(
+      findSubagentSessionId({
+        type: 'general-purpose',
+        prompt: PROMPT,
+        parentSessionId: 'server::parent',
+      }),
+    ).toBe('server::child-fg')
+  })
+
+  it('rejects a session of another type or another first message', () => {
+    piSessionInfoStore.replaceForServer('server', [
+      parent,
+      sessionInfo('server::other-type', 'Explore#a037f104', { firstMessage: PROMPT }),
+      sessionInfo('server::other-prompt', 'general-purpose#bbbbbbbb', { firstMessage: '别的任务' }),
+    ])
+
+    expect(
+      findSubagentSessionId({
+        type: 'general-purpose',
+        prompt: PROMPT,
+        parentSessionId: 'server::parent',
+      }),
+    ).toBeUndefined()
+  })
+
+  it('refuses to guess when the same prompt ran twice', () => {
+    piSessionInfoStore.replaceForServer('server', [
+      sessionInfo('server::dup-1', 'general-purpose#aaaaaaaa', { firstMessage: PROMPT }),
+      sessionInfo('server::dup-2', 'general-purpose#bbbbbbbb', { firstMessage: PROMPT }),
+    ])
+
+    expect(findSubagentSessionId({ type: 'general-purpose', prompt: PROMPT })).toBeUndefined()
+  })
+
+  it('uses the parent session file to pick between identical prompts', () => {
+    piSessionInfoStore.replaceForServer('server', [
+      parent,
+      sessionInfo('server::elsewhere', 'general-purpose#aaaaaaaa', {
+        firstMessage: PROMPT,
+        parentSessionPath: '/work/other.jsonl',
+      }),
+      sessionInfo('server::mine', 'general-purpose#bbbbbbbb', {
+        firstMessage: PROMPT,
+        parentSessionPath: '/work/parent.jsonl',
+      }),
+    ])
+
+    expect(
+      findSubagentSessionId({
+        type: 'general-purpose',
+        prompt: PROMPT,
+        parentSessionId: 'server::parent',
+      }),
+    ).toBe('server::mine')
+  })
+
+  it('falls back to the parent chain when the agent config name differs from the type', () => {
+    piSessionInfoStore.replaceForServer('server', [
+      parent,
+      sessionInfo('server::custom', 'builder#c0ffee00', {
+        firstMessage: PROMPT,
+        parentSessionPath: '/work/parent.jsonl',
+      }),
+    ])
+
+    expect(
+      findSubagentSessionId({
+        type: 'general-purpose',
+        prompt: PROMPT,
+        parentSessionId: 'server::parent',
+      }),
+    ).toBe('server::custom')
   })
 })

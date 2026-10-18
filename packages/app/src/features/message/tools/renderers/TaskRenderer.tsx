@@ -123,11 +123,16 @@ export const TaskRenderer = memo(function TaskRenderer({ execution, partKey, onF
   const runInBackground = details?.runInBackground === true || input?.run_in_background === true
 
   // 子 session ID —— 优先 metadata.sessionId（后端为 tool call 精确设置，OCUI
-  // 的 task 走这条）；Pi 的 Agent 不提供，用 agentId 短 id 反查子会话
-  // （插件把子会话命名为 `<类型>#<短 id>`）。
+  // 的 task 走这条）；Pi 后台 agent 有 agentId，前置 agent 只有 prompt，见
+  // pi/subagentSessions.ts 的三把钥匙。
   const { currentSessionId } = useSessionNavigation()
   const agentId = readString(details, 'agentId')
-  const childSessionId = useSubagentSessionId(agentId)
+  const childSessionId = useSubagentSessionId({
+    agentId,
+    type: readString(details, 'type') ?? agentType,
+    prompt: prompt || undefined,
+    parentSessionId: currentSessionId,
+  })
   const targetSessionId = scopeChildSession(readString(details, 'sessionId') ?? childSessionId, currentSessionId)
   // 子代理公告不带 agentId；只按父会话报总数，让后台 agent 跑着的时候
   // 界面上有活着的证据。
