@@ -457,6 +457,7 @@ export class RealPiSession implements SessionRuntime {
     this.sessionUnsub?.()
     this.sessionUnsub = this.runtime.session.subscribe(event => {
       const nativeEvent = toJsonObject(event)
+      stripDuplicatePartial(nativeEvent)
       this.trackShadowState(event)
       const meta = this.captureEvent(event, nativeEvent)
       for (const listener of this.piEventListeners) listener(nativeEvent, meta)
@@ -1428,6 +1429,17 @@ export class RealPiSession implements SessionRuntime {
     this.resourceListeners.clear()
     await this.runtime.dispose()
   }
+}
+
+/**
+ * message_update 帧里 `message` 和 `assistantMessageEvent.partial` 是同一份累积
+ * 消息的两个副本（客户端只读 `message`），出站前删掉副本，单帧字节量约减半。
+ * 只对 JSON 往返后的副本生效——原始 SDK 对象不能改。
+ */
+export function stripDuplicatePartial(nativeEvent: JsonObject): void {
+  if (nativeEvent.type !== 'message_update') return
+  const assistantEvent = nativeEvent.assistantMessageEvent
+  if (isJsonObject(assistantEvent)) delete assistantEvent.partial
 }
 
 function toJson(value: unknown): JsonValue | undefined {

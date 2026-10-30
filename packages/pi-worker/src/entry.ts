@@ -47,6 +47,7 @@ import type { JsonObject, JsonValue, PiRegistrySnapshot } from '@piui/protocol'
 import { isJsonObject, problemFromError, PROTOCOL_VERSION, validateParams } from '@piui/protocol'
 import { loadPiSdk, shouldRequireVerifiedSdk, defaultSdkResolution, getLoadedSdk, type LoadedSdk } from './sdk-host.js'
 import { RealPiSession, type ExtensionHostActions } from './runtime/real-session.js'
+import { createPiEventCoalescer } from './runtime/event-coalescer.js'
 import { MockPiSession, MockCatalog } from './runtime/mock-session.js'
 import { PiCatalog } from './runtime/catalog.js'
 import { ProviderAuthHost } from './runtime/provider-auth-host.js'
@@ -170,20 +171,29 @@ const hostActions: ExtensionHostActions = {
   },
 }
 
+/**
+ * 每个 runtime 的出站订阅器：关闭/替换时按 runtime 实例回收，key 不受
+ * sessionId 迁移影响。
+ */
+const runtimeUnsubs = new WeakMap<SessionRuntime, Array<() => void>>()
+
 function subscribeRuntimeEvents(current: SessionRuntime): Array<() => void> {
   const unsubs: Array<() => void> = []
-  unsubs.push(
-    current.onPiEvent((event, meta) =>
-      send({
-        kind: 'event',
-        generation: workerGeneration,
-        sessionId: current.getSessionId(),
-        channel: 'pi.event',
-        event,
-        meta,
-      }),
-    ),
+  // delta 间隔 10-20ms，逐帧转发等于把整条回复重发 N 次；message_update 合流
+  // 成 80ms 一帧，其他事件发前先 flush，顺序不变（见 event-coalescer.ts）。
+  const piEvents = createPiEventCoalescer(frame =>
+    send({
+      kind: 'event',
+      generation: workerGeneration,
+      sessionId: frame.sessionId,
+      channel: 'pi.event',
+      event: frame.event,
+      meta: frame.meta,
+    }),
   )
+  unsubs.push(current.onPiEvent((event, meta) => piEvents.push({ event, meta, sessionId: current.getSessionId() })))
+  // dispose 会先 flush 挂起帧再清定时器：关闭路径不能留下悬挂 timer
+  unsubs.push(() => piEvents.dispose())
   unsubs.push(
     current.onHead(head =>
       send({
@@ -313,6 +323,7 @@ async function openRuntime(params: JsonObject): Promise<JsonValue> {
       : await MockPiSession.open(cwd, sessionFile)
   const sessionId = opened.getSessionId()
   const unsubs = subscribeRuntimeEvents(opened)
+  runtimeUnsubs.set(opened, unsubs)
   runtimes.set(sessionId, opened)
   try {
     if (opened instanceof RealPiSession) await opened.initializeExtensions()
@@ -320,7 +331,7 @@ async function openRuntime(params: JsonObject): Promise<JsonValue> {
   } catch (error) {
     runtimes.delete(sessionId)
     registryDigests.delete(sessionId)
-    unsubs.forEach(unsub => unsub())
+    detachRuntimeEvents(opened)
     await opened.dispose()
     throw error
   }
@@ -338,7 +349,16 @@ async function closeRuntime(sessionId: string | undefined): Promise<void> {
   if (!current) return
   runtimes.delete(sessionId)
   registryDigests.delete(sessionId)
+  detachRuntimeEvents(current)
   await current.dispose()
+}
+
+/** 关掉 runtime 的所有出站订阅（含 flush 合流缓冲），可从关闭/退出路径重入 */
+function detachRuntimeEvents(current: SessionRuntime): void {
+  const unsubs = runtimeUnsubs.get(current)
+  if (!unsubs) return
+  runtimeUnsubs.delete(current)
+  for (const unsub of unsubs) unsub()
 }
 
 async function execute(command: {
@@ -470,6 +490,7 @@ async function cleanupWorker(): Promise<void> {
       if (!current) return
       runtimes.delete(sessionId)
       registryDigests.delete(sessionId)
+      detachRuntimeEvents(current)
       await Promise.race([
         current.dispose(),
         new Promise<void>(resolve => {

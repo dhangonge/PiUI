@@ -163,6 +163,20 @@ describe('PiEventStream resume/reconnect', () => {
     expect(sockets).toHaveLength(2)
   })
 
+  it('reconnects immediately on the native piui:foreground signal (WebView without visibilitychange)', () => {
+    const ws = connectAndOpen()
+    drop(ws)
+    expect(sockets).toHaveLength(1)
+
+    window.dispatchEvent(new Event('piui:foreground'))
+    expect(sockets).toHaveLength(2)
+    expect(mocks.open).toHaveBeenCalledTimes(2)
+
+    // 旧退避计时器已清掉，不会再开第三条
+    vi.advanceTimersByTime(5_000)
+    expect(sockets).toHaveLength(2)
+  })
+
   it('probes liveness with a ping when returning to the foreground on a live socket', () => {
     const ws = connectAndOpen()
     const before = sentMessages(ws).length
@@ -188,6 +202,7 @@ describe('PiEventStream resume/reconnect', () => {
   it('does not open a socket when nothing is subscribed', () => {
     document.dispatchEvent(new Event('visibilitychange'))
     window.dispatchEvent(new Event('online'))
+    window.dispatchEvent(new Event('piui:foreground'))
     expect(mocks.open).not.toHaveBeenCalled()
   })
 
@@ -198,6 +213,7 @@ describe('PiEventStream resume/reconnect', () => {
 
     document.dispatchEvent(new Event('visibilitychange'))
     window.dispatchEvent(new Event('online'))
+    window.dispatchEvent(new Event('piui:foreground'))
     expect(mocks.open).toHaveBeenCalledTimes(1)
   })
 })

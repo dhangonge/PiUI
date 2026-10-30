@@ -53,6 +53,12 @@ const RECONNECT_MAX_DELAY_MS = 30_000
 /** 距上次收到任意帧超过这个时长视为半死连接（等于连续两次 ping 没有回音） */
 const STALE_FRAME_MS = PING_INTERVAL_MS * 2
 const REFRESH_DEBOUNCE_MS = 150
+/**
+ * piui:sessions-changed 的合并窗口：一次 attach/detach/close 或窗口切换会连发
+ * 多条 sessions.updated，而每个监听方都要各拉一次 150KB 量级的列表。
+ * 窗口内只派发一次（trailing edge），但最后一次必须落地。
+ */
+const SESSIONS_CHANGED_THROTTLE_MS = 250
 
 type PiEventPayload = {
   event: AgentSessionEvent
@@ -103,6 +109,7 @@ export class PiEventStream {
     this.serverId = serverId
     this.onPageVisible = this.handlePageVisible.bind(this)
     this.onNetworkOnline = this.handleNetworkOnline.bind(this)
+    this.onNativeForeground = this.handleNativeForeground.bind(this)
     if (!serverId) queueMicrotask(() => this.ensureManagementWatch())
   }
 
@@ -140,6 +147,9 @@ export class PiEventStream {
   private resumeListenersAttached = false
   private readonly onPageVisible: () => void
   private readonly onNetworkOnline: () => void
+  /** 原生侧 onResume 兜底信号（部分 Android WebView 后台不派发 visibilitychange） */
+  private readonly onNativeForeground: () => void
+  private sessionsChangedTimer: ReturnType<typeof setTimeout> | null = null
   private branchRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private stateRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -277,6 +287,8 @@ export class PiEventStream {
   private closeSocket(): void {
     const ws = this.ws
     this.ws = null
+    // 拆连接前把挂起的列表刷新落地，避免最后一次 sessions.updated 被节流吞掉
+    this.flushSessionsChanged()
     this.clearPing()
     this.lastFrameAt = 0
     this.reconnectAttempts = 0
@@ -367,13 +379,17 @@ export class PiEventStream {
     this.resumeListenersAttached = true
     document.addEventListener('visibilitychange', this.onPageVisible)
     window.addEventListener('online', this.onNetworkOnline)
+    window.addEventListener('piui:foreground', this.onNativeForeground)
   }
 
   private detachResumeListeners(): void {
     if (!this.resumeListenersAttached) return
     this.resumeListenersAttached = false
     if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.onPageVisible)
-    if (typeof window !== 'undefined') window.removeEventListener('online', this.onNetworkOnline)
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', this.onNetworkOnline)
+      window.removeEventListener('piui:foreground', this.onNativeForeground)
+    }
   }
 
   private handlePageVisible(): void {
@@ -382,6 +398,11 @@ export class PiEventStream {
   }
 
   private handleNetworkOnline(): void {
+    this.resumeNow()
+  }
+
+  /** MainActivity.onResume 注入的兜底信号：走与 visibilitychange 完全相同的路径。 */
+  private handleNativeForeground(): void {
     this.resumeNow()
   }
 
@@ -596,7 +617,7 @@ export class PiEventStream {
         // 磁盘数据和 pane 绑定都不变，不做替换清理，只刷新会话列表。
         // 若按真实替换处理，paneLayoutStore.remapSession 会把所有绑定源
         // session 的 pane 全部切走（分屏互相串扰）。
-        window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
+        this.scheduleSessionsChanged()
         return
       }
       // Runtime replacement (fork/new/import): the worker now owns a
@@ -611,7 +632,25 @@ export class PiEventStream {
       window.dispatchEvent(new CustomEvent('piui:session-replaced', { detail: payload }))
     }
     // 事件驱动刷新：SessionContext/useSessions 订阅 piui:sessions-changed 会
-    // 各自重新拉列表（并更新 piSessionInfoStore），这里不需要再直接拉一次
+    // 各自重新拉列表（并更新 piSessionInfoStore），这里不需要再直接拉一次。
+    // 连发的多条（attach/detach/窗口切换）在窗口内合并成一次。
+    this.scheduleSessionsChanged()
+  }
+
+  /** trailing edge 合并：窗口内多次请求只派发一次，且最后一次一定派发。 */
+  private scheduleSessionsChanged(): void {
+    if (this.sessionsChangedTimer) return
+    this.sessionsChangedTimer = setTimeout(() => {
+      this.sessionsChangedTimer = null
+      window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
+    }, SESSIONS_CHANGED_THROTTLE_MS)
+  }
+
+  /** 清理路径（closeSocket/disconnectAll）：把挂起的派发立刻落地而不是丢弃。 */
+  private flushSessionsChanged(): void {
+    if (!this.sessionsChangedTimer) return
+    clearTimeout(this.sessionsChangedTimer)
+    this.sessionsChangedTimer = null
     window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
   }
 
