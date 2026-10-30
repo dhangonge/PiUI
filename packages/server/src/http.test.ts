@@ -6,6 +6,7 @@ import { after, describe, it } from 'node:test'
 process.env.PIUI_WORKER_HANDSHAKE_TIMEOUT_MS ??= '60000'
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -544,4 +545,94 @@ describe('http api', () => {
     assert.equal(post.status, 200)
     assert.equal(post.headers.etag, undefined)
   })
+
+  it('streams a 12MB file through the download endpoint', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-http-download-'))
+    const payload = randomBytes(12 * 1024 * 1024)
+    writeFileSync(path.join(root, 'big.bin'), payload)
+    const app = createAppServer({ authToken: 'test-token' })
+    const port = await listen(app)
+    cleanups.push(async () => {
+      await app.dispose()
+      rmSync(root, { recursive: true, force: true })
+    })
+
+    const url = downloadUrl(root, 'big.bin', 'test-token')
+    const started = Date.now()
+    const res = await rawRequest(port, 'GET', url)
+    const elapsedMs = Date.now() - started
+    assert.equal(res.status, 200)
+    assert.equal(Number(res.headers['content-length']), payload.length)
+    assert.equal(res.headers['content-encoding'], undefined)
+    assert.equal(res.body.length, payload.length)
+    // 抽样比对首/中/尾，避免把整个 12MB 都丢进断言
+    for (const offset of [0, payload.length / 2, payload.length - 4096]) {
+      assert.ok(res.body.subarray(offset, offset + 4096).equals(payload.subarray(offset, offset + 4096)), `${offset}`)
+    }
+    console.log(`[download] 12MiB ${res.body.length} bytes in ${elapsedMs}ms via ${res.headers['content-type']}`)
+  })
+
+  it('guards the download endpoint with token, disposition and path safety', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-http-download-'))
+    writeFileSync(path.join(root, '报告 2024.txt'), '你好 PiUI\n', 'utf8')
+    mkdirSync(path.join(root, 'folder'))
+    const app = createAppServer({ authToken: 'test-token' })
+    const port = await listen(app)
+    cleanups.push(async () => {
+      await app.dispose()
+      rmSync(root, { recursive: true, force: true })
+    })
+
+    // 没 token / 错 token 都拒
+    assert.equal((await rawRequest(port, 'GET', downloadUrl(root, '报告 2024.txt'))).status, 401)
+    assert.equal((await rawRequest(port, 'GET', downloadUrl(root, '报告 2024.txt', 'wrong'))).status, 401)
+
+    // header token 与 query token 都可
+    const viaHeader = await rawRequest(port, 'GET', downloadUrl(root, '报告 2024.txt'), {
+      authorization: 'Bearer test-token',
+    })
+    assert.equal(viaHeader.status, 200)
+    assert.equal(viaHeader.body.toString('utf8'), '你好 PiUI\n')
+    assert.equal(viaHeader.headers['content-type'], 'text/plain')
+    assert.equal(
+      viaHeader.headers['content-disposition'],
+      `attachment; filename*=UTF-8''${encodeURIComponent('报告 2024.txt')}`,
+    )
+    assert.match(String(viaHeader.headers['content-disposition']), /filename\*=UTF-8''%E6%8A%A5%E5%91%8A%202024\.txt/)
+    const viaQuery = await rawRequest(port, 'GET', downloadUrl(root, '报告 2024.txt', 'test-token'))
+    assert.equal(viaQuery.status, 200)
+
+    // 路径逃逸 / 目录 / 不存在 / 缺参数
+    const escape = await rawRequest(port, 'GET', downloadUrl(root, '../../etc/passwd', 'test-token'))
+    assert.equal(escape.status, 403)
+    assert.equal(JSON.parse(escape.body.toString('utf8')).code, 'PATH_OUTSIDE_WORKSPACE')
+    const directory = await rawRequest(port, 'GET', downloadUrl(root, 'folder', 'test-token'))
+    assert.equal(directory.status, 400)
+    assert.equal(JSON.parse(directory.body.toString('utf8')).code, 'INVALID_REQUEST')
+    const missing = await rawRequest(port, 'GET', downloadUrl(root, 'nope.txt', 'test-token'))
+    assert.equal(missing.status, 404)
+    assert.equal(JSON.parse(missing.body.toString('utf8')).code, 'NOT_FOUND')
+    const noWorkspace = await rawRequest(
+      port,
+      'GET',
+      `/api/v1/host/files/download?${new URLSearchParams({ path: 'a.txt', token: 'test-token' })}`,
+    )
+    assert.equal(noWorkspace.status, 400)
+
+    // 只登记 GET：POST 落到 405 而不是 404
+    const wrongMethod = await rawRequest(
+      port,
+      'POST',
+      downloadUrl(root, '报告 2024.txt', 'test-token'),
+      { authorization: 'Bearer test-token' },
+      {},
+    )
+    assert.equal(wrongMethod.status, 405)
+  })
 })
+
+function downloadUrl(workspacePath: string, relativePath: string, token?: string): string {
+  const params = new URLSearchParams({ workspacePath, path: relativePath })
+  if (token !== undefined) params.set('token', token)
+  return `/api/v1/host/files/download?${params}`
+}

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
 import { gzipSync } from 'node:zlib'
@@ -15,9 +16,15 @@ import {
 import { EventHub } from './event-hub.ts'
 import { RuntimeSupervisor } from './pi/supervisor.ts'
 import { SessionHost } from './pi/session-host.ts'
-import { WorkspaceStore } from './host/workspace-store.ts'
+import { WorkspaceStore, type WorkspaceRecord } from './host/workspace-store.ts'
 import { WorkspaceWatcher } from './host/workspace-watcher.ts'
-import { MAX_JSON_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } from './host/security.ts'
+import {
+  MAX_JSON_BODY_BYTES,
+  requestHasAllowedOrigin,
+  requestHasValidToken,
+  timingSafeTokenEquals,
+} from './host/security.ts'
+import { openFileForDownload, type DownloadTarget } from './host/files.ts'
 import { resolveAuthToken } from './host/auth-token.ts'
 import { reportClientErrors } from './host/client-log.ts'
 import { PathSafetyError } from './host/path-safety.ts'
@@ -29,6 +36,9 @@ const CORS_HEADERS: Record<string, string> = {
   'access-control-allow-methods': 'GET,POST,OPTIONS',
   'access-control-allow-headers': 'content-type,authorization,if-match',
 }
+
+/** 流式下载：唯一一条允许 query token 的路径（给 <a download> 用）。 */
+const DOWNLOAD_PATH = '/api/v1/host/files/download'
 
 /** 小于该阈值的 JSON 不压缩：gzip 头 + 缩小收益抵不过 CPU 与流控开销。 */
 const GZIP_MIN_BYTES = 1024
@@ -132,6 +142,66 @@ function sendJson(res: ServerResponse, status: number, body: unknown): boolean {
 function sendProblem(res: ServerResponse, status: number, error: unknown): boolean {
   const p = problemFromError(error)
   return sendJson(res, status, problem(isErrorCode(p.code) ? p.code : 'INTERNAL', p.message))
+}
+
+/**
+ * 下载路径的鉴权：header 或 query 任一有效。仅此一条路径调用，
+ * 其它端点仍然由上面的 requestHasValidToken 统一把守。
+ */
+function downloadHasValidToken(req: IncomingMessage, url: URL, token: string | null): boolean {
+  if (requestHasValidToken(req, token)) return true
+  if (token === null) return false
+  const fromQuery = url.searchParams.get('token')
+  return fromQuery !== null && timingSafeTokenEquals(fromQuery, token)
+}
+
+/** 与 host 命令同一套工作区语义：重启后内存注册表为空，真实目录足以重新登记。 */
+function downloadWorkspace(store: WorkspaceStore, rootPath: string): WorkspaceRecord {
+  if (store.isClosed(rootPath)) {
+    throw Object.assign(new Error('workspace not found'), { code: 'WORKSPACE_NOT_FOUND' })
+  }
+  const found = store.find(rootPath) ?? store.resolve(rootPath)
+  store.assertCurrent(found)
+  return found
+}
+
+/**
+ * 流式发送：整个文件不经过内存，也不走 sendJson（那条路径会 gzip、加 ETag、
+ * 并发 content-length）。客户端断开时必须销毁读流，否则 fd 泄漏。
+ */
+function streamDownload(res: ServerResponse, signal: AbortSignal, target: DownloadTarget): Promise<void> {
+  res.writeHead(200, {
+    'content-type': target.mimeType,
+    'content-length': target.size,
+    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(target.fileName)}`,
+    'cache-control': 'no-store',
+  })
+  return new Promise<void>(resolve => {
+    const stream = createReadStream(target.absolute)
+    let settled = false
+    const settle = () => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener('abort', onAbort)
+      res.removeListener('close', onClose)
+      resolve()
+    }
+    const onAbort = () => stream.destroy()
+    const onClose = () => {
+      // 提前断开时 res 不会 finish，只能按 closed 处理
+      if (!res.writableFinished) stream.destroy()
+      settle()
+    }
+    signal.addEventListener('abort', onAbort)
+    res.once('close', onClose)
+    res.once('finish', settle)
+    stream.once('error', () => {
+      // 头已经发出去了，换不了状态码：只能掐断连接，让客户端看到截断
+      res.destroy()
+      settle()
+    })
+    stream.pipe(res)
+  })
 }
 
 async function readBody(
@@ -317,6 +387,23 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         res.end()
         return
       }
+
+      // 文件下载：浏览器 <a download> / WebView 无法自定义请求头，所以只有这条
+      // 路径额外接受 ?token=（全局认证仍然只认 authorization，别在这里放松）。
+      if (method === 'GET' && p === DOWNLOAD_PATH) {
+        if (!downloadHasValidToken(req, url, authToken)) {
+          return sendProblem(
+            res,
+            401,
+            Object.assign(new Error('missing or invalid authorization token'), { code: 'UNAUTHORIZED' }),
+          )
+        }
+        const workspacePath = url.searchParams.get('workspacePath')
+        if (!workspacePath) throw invalidRequest('workspacePath is required')
+        const record = downloadWorkspace(store, workspacePath)
+        const target = await openFileForDownload(record, url.searchParams.get('path') ?? '')
+        return await streamDownload(res, scope.signal, target)
+      }
       if (!requestHasValidToken(req, authToken)) {
         return sendProblem(
           res,
@@ -467,6 +554,7 @@ function allowedMethodsForPath(pathname: string): string | undefined {
   if (
     pathname === '/api/v1/host/health' ||
     pathname === '/api/v1/host/share' ||
+    pathname === DOWNLOAD_PATH ||
     pathname === '/api/v1/host/registry' ||
     pathname === '/api/v1/pi/registry'
   )

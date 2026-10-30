@@ -43,7 +43,7 @@ import {
   formatMimeType,
   type PreviewCategory,
 } from '../utils/mimeUtils'
-import { downloadFileContent } from '../utils/downloadUtils'
+import { downloadFileContent, downloadWorkspaceFile } from '../utils/downloadUtils'
 import { createDirectory, createFile, deleteEntry, moveEntry, searchText, searchFiles } from '../pi/files'
 import type { FileReadResponse, WorkspaceTextSearchMatch } from '@piui/protocol'
 import { startInternalDrag } from '../lib/internalDragCore'
@@ -72,6 +72,20 @@ function getRevealInSystemExplorerLabel(t: (key: string) => string): string {
 async function revealPathInSystemExplorer(absolutePath: string) {
   const { revealItemInDir } = await import('@tauri-apps/plugin-opener')
   await revealItemInDir(absolutePath)
+}
+
+// files.read 超限时服务端回 413 + FILE_TOO_LARGE，previewError 只是错误字符串
+function isFileTooLargeError(error: string | null | undefined): boolean {
+  if (!error) return false
+  return error.includes('FILE_TOO_LARGE') || /\b413\b/.test(error)
+}
+
+// 下载接口要求工作区相对路径；预览里的 path 可能是绝对路径
+function toWorkspaceRelativePath(path: string, workspacePath?: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  const root = workspacePath?.replace(/\\/g, '/').replace(/\/+$/, '')
+  if (root && (normalized === root || normalized.startsWith(`${root}/`))) return normalized.slice(root.length + 1)
+  return normalized.replace(/^\/+/, '')
 }
 
 // 常量
@@ -1097,10 +1111,14 @@ function FilePreview({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [editEtag, setEditEtag] = useState<string | undefined>()
   const [saveConflict, setSaveConflict] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
 
   // 获取文件名
   const fileName = path?.split(/[/\\]/).pop() || 'Untitled'
   const language = path ? detectLanguage(path) : 'text'
+  // files.read 超限（413 / FILE_TOO_LARGE）：内容拿不到，但仍可直接下载
+  const fileTooLarge = !content && isFileTooLargeError(error)
 
   const beginEditing = useCallback(() => {
     if (!content || content.type !== 'text') return
@@ -1177,12 +1195,33 @@ function FilePreview({
     return () => window.removeEventListener('keydown', saveShortcut)
   }, [isEditing, saveEditing])
 
-  // 下载当前文件
-  const handleDownload = useCallback(() => {
-    if (content) {
-      downloadFileContent(content, fileName)
+  // 下载当前文件：优先走服务端流式下载（不受 files.read 的 2MB/8MB 限制），
+  // 失败且已有预览内容时回退到内存下载。
+  const handleDownload = useCallback(async () => {
+    if (!path) return
+    setDownloadError(null)
+    if (!directory) {
+      // 没有工作区路径就无从拼下载 URL，只能用预览内容
+      if (content) downloadFileContent(content, fileName)
+      return
     }
-  }, [content, fileName])
+    setIsDownloading(true)
+    try {
+      await downloadWorkspaceFile({
+        workspacePath: directory,
+        path: toWorkspaceRelativePath(path, directory),
+        fileName,
+      })
+    } catch (err) {
+      if (content) {
+        downloadFileContent(content, fileName)
+        return
+      }
+      setDownloadError(err instanceof Error ? err.message : t('fileExplorer.downloadFailed'))
+    } finally {
+      setIsDownloading(false)
+    }
+  }, [content, directory, fileName, path, t])
 
   const previewTabItems = useMemo<PreviewTabsBarItem[]>(
     () =>
@@ -1338,16 +1377,16 @@ function FilePreview({
 
   const fullscreenHeaderRight = useMemo(
     () =>
-      content ? (
+      content || fileTooLarge ? (
         <button
-          onClick={handleDownload}
+          onClick={() => void handleDownload()}
           className="p-1.5 text-text-400 hover:text-text-100 hover:bg-bg-200/60 rounded-lg transition-colors"
-          title={`${t('common:save')} ${fileName}`}
+          title={`${t('common:download')} ${fileName}`}
         >
           <DownloadIcon size={14} />
         </button>
       ) : null,
-    [content, fileName, handleDownload, t],
+    [content, fileTooLarge, fileName, handleDownload, t],
   )
 
   const fullscreenLayer = useMemo(
@@ -1383,9 +1422,9 @@ function FilePreview({
         onReorder={onReorderPreview}
         tabWidthClassName="w-auto max-w-none min-w-max"
         rightActions={
-          content ? (
+          content || fileTooLarge ? (
             <>
-              {content.type === 'text' &&
+              {content?.type === 'text' &&
                 (isEditing ? (
                   <>
                     <button
@@ -1422,9 +1461,10 @@ function FilePreview({
                 <MaximizeIcon size={12} />
               </button>
               <button
-                onClick={handleDownload}
-                className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors"
-                title={`${t('common:save')} ${fileName}`}
+                onClick={() => void handleDownload()}
+                disabled={isDownloading}
+                className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors disabled:opacity-50"
+                title={`${t('common:download')} ${fileName}`}
               >
                 <DownloadIcon size={12} />
               </button>
@@ -1440,10 +1480,19 @@ function FilePreview({
             {t('common:loading')}
           </div>
         ) : error ? (
-          <div className="flex flex-col items-center justify-center h-full text-danger-100 text-[length:var(--fs-sm)] gap-1 px-4">
-            <AlertCircleIcon size={16} />
-            <span className="text-center">{error}</span>
-          </div>
+          fileTooLarge ? (
+            <FileTooLargePlaceholder
+              fileName={fileName}
+              isDownloading={isDownloading}
+              downloadError={downloadError}
+              onDownload={handleDownload}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-danger-100 text-[length:var(--fs-sm)] gap-1 px-4">
+              <AlertCircleIcon size={16} />
+              <span className="text-center">{error}</span>
+            </div>
+          )
         ) : isEditing ? (
           <div className="min-h-full flex flex-col">
             {saveError && (
@@ -2002,6 +2051,52 @@ function BinaryPlaceholder({ mimeType, fileName, onDownload }: BinaryPlaceholder
           {t('common:download')}
         </button>
       )}
+    </div>
+  )
+}
+
+// ============================================
+// File Too Large - 超过 files.read 限制，无法预览但可直接下载
+// ============================================
+
+interface FileTooLargePlaceholderProps {
+  fileName: string
+  isDownloading: boolean
+  downloadError: string | null
+  onDownload: () => void | Promise<void>
+}
+
+function FileTooLargePlaceholder({ fileName, isDownloading, downloadError, onDownload }: FileTooLargePlaceholderProps) {
+  const { t } = useTranslation(['components', 'common'])
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)] gap-2 p-4">
+      <img
+        src={getMaterialIconUrl(fileName, 'file')}
+        alt=""
+        width={32}
+        height={32}
+        className="opacity-50"
+        onError={e => {
+          e.currentTarget.style.visibility = 'hidden'
+        }}
+      />
+      <span className="font-medium text-text-300">{fileName}</span>
+      <span>{t('fileExplorer.fileTooLarge')}</span>
+      <span className="text-text-500 text-[length:var(--fs-xxs)] text-center">
+        {t('fileExplorer.fileTooLargeHint')}
+      </span>
+      <button
+        onClick={() => void onDownload()}
+        disabled={isDownloading}
+        className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-bg-200 hover:bg-bg-300 text-text-200 rounded transition-colors text-[length:var(--fs-xs)] disabled:opacity-50"
+      >
+        <DownloadIcon size={12} />
+        {isDownloading ? t('common:loading') : t('fileExplorer.fileTooLargeDownload')}
+      </button>
+      {downloadError ? (
+        <span className="text-danger-100 text-[length:var(--fs-xxs)] text-center">{downloadError}</span>
+      ) : null}
     </div>
   )
 }

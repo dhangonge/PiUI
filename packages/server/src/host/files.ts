@@ -82,6 +82,38 @@ export async function readFileContent(ws: WorkspaceRecord, relativePath: string)
   }
 }
 
+export interface DownloadTarget {
+  absolute: string
+  size: number
+  mimeType: string
+  fileName: string
+}
+
+/**
+ * 下载只解析目标并 stat，不读内容：正文交给 createReadStream，所以不受
+ * 预览的大小上限约束（预览限制是为了一次性 base64 进 JSON）。
+ */
+export async function openFileForDownload(ws: WorkspaceRecord, relativePath: string): Promise<DownloadTarget> {
+  assertWorkspaceCurrent(ws)
+  const resolved = resolveWorkspacePath(ws.canonicalRoot, relativePath)
+  if (!resolved.exists) throw notFound('path does not exist')
+  if (resolved.restricted) throw new PathSafetyError('SYMLINK_ESCAPE', 'restricted path')
+  if (resolved.relative === '') throw new PathSafetyError('INVALID_REQUEST', 'not a file')
+  const opened = await stat(resolved.absolute)
+  if (!opened.isFile()) throw new PathSafetyError('INVALID_REQUEST', 'not a file')
+  // 打开到真正读取之间目标可能被换掉：读取前再解析一次，保持一致
+  const verified = resolveWorkspacePath(ws.canonicalRoot, relativePath)
+  if (verified.absolute !== resolved.absolute)
+    throw new PathSafetyError('SYMLINK_ESCAPE', 'file target changed during read')
+  return {
+    absolute: resolved.absolute,
+    size: opened.size,
+    // 未知扩展名按二进制下载而不是 text/plain
+    mimeType: mimeType(resolved.relative, true),
+    fileName: path.basename(resolved.absolute),
+  }
+}
+
 export async function writeFileContent(
   ws: WorkspaceRecord,
   relativePath: string,
@@ -395,6 +427,10 @@ function staleRevision(): Error {
 
 function conflict(message: string): Error {
   return Object.assign(new Error(message), { code: 'FILE_CONFLICT' as const })
+}
+
+function notFound(message: string): Error {
+  return Object.assign(new Error(message), { code: 'NOT_FOUND' as const })
 }
 
 function fileTooLarge(message: string): Error {

@@ -36,6 +36,11 @@
     "fs:default",
     "fs:allow-read-file",
     "fs:allow-write-file",
+    "fs:allow-open",
+    "fs:allow-write",
+    "fs:allow-create",
+    "fs:allow-truncate",
+    "fs:allow-seek",
     "opener:default"
   ]
 }
