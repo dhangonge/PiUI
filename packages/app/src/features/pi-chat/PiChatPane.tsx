@@ -48,7 +48,6 @@ import {
   setPiExtensionEditorState,
   setPiModel,
   setPiThinkingLevel,
-  clearPiQueue,
 } from '../../pi/controllers/index.js'
 import { invokePiCommand } from '../../pi/transport/index.js'
 import { layoutStore } from '../../store/layoutStore'
@@ -56,9 +55,11 @@ import { themeStore } from '../../store/themeStore'
 import { useSessionActiveEntry } from '../../store/activeSessionStore'
 import type { PiImageInput } from '../../pi/transport/index.js'
 import { attachmentToImage } from './attachmentToImage'
+import { usePiExtensionEditorBridge } from './hooks/usePiExtensionEditorBridge'
+import { usePiQueueControl } from './hooks/usePiQueueControl'
 import { piBranchStore } from '../../pi/state/index.js'
 import { captureRedoCheckpoints, commitRedoPlan, redoPlanStore, type RedoPlan } from '../../pi/redoPlanStore'
-import { extensionUiStore, getEditorTextSource } from '../../pi/extensionUiStore'
+import { extensionUiStore } from '../../pi/extensionUiStore'
 import { paneControllerStore } from '../../store/paneControllerStore'
 import { commandFeedbackStore, type CommandFeedbackStatus } from '../../pi/commandFeedbackStore'
 import { trackPiSession } from '../../pi/piSessionIndex'
@@ -276,7 +277,6 @@ export function PiChatPane({
   // 即使 piSessionStateStore 因无事件流而 stale（如 bash 等待期），
   // 输入框发送按钮也保持「停止」状态，避免按钮变暗。
   const sessionActive = Boolean(sessionEntry)
-  const sessionUnavailableRef = useRef(false)
   const [isRetryingSession, setIsRetryingSession] = useState(false)
   // 本 pane 当前会话的实际工作区（来自会话列表或全局当前目录），用于 @ 补全根目录。
   const inputRootPath = useMemo(() => {
@@ -293,9 +293,6 @@ export function PiChatPane({
   const sessionUnavailable = Boolean(sessionId && !branch && branchError && isSessionNotFoundError(branchError))
   const sessionLoadError = Boolean(sessionId && !branch && branchError && !sessionUnavailable)
   const sessionBusy = Boolean(sessionId && !branch && branchError && isSessionBusyError(branchError))
-  useEffect(() => {
-    sessionUnavailableRef.current = sessionUnavailable || sessionLoadError
-  })
 
   const retrySession = useCallback(async () => {
     if (!sessionId || isRetryingSession) return
@@ -319,6 +316,18 @@ export function PiChatPane({
     return () => piEventStream.disconnect(sessionId)
   }, [boundServerId, activeServer?.token, activeServer?.url, sessionId, sessionLoadError, sessionUnavailable])
 
+  // ============================================
+  // Extension editor bridge: extension set/paste -> composer; composer
+  // text -> extension editor state (debounced)
+  // ============================================
+  const inputBoxRef = useRef<InputBoxHandle>(null)
+  const { handleTextChange, setLastEditorText, cancelEditorSync, clearExtensionEditorState } =
+    usePiExtensionEditorBridge({
+      sessionId,
+      inputBoxRef,
+      sessionUnavailable: sessionUnavailable || sessionLoadError,
+    })
+
   // Fork 带来的待编辑文本：进入目标会话时取走，灌进输入框。
   // fork 的 replacement 事件比命令结果先到时，导航会先于 stash 发生，
   // 所以既要在 sessionId 变化时尝试，也要订阅 stash 通知补漏；
@@ -326,7 +335,6 @@ export function PiChatPane({
   const [forkSeedText, setForkSeedText] = useState<string | undefined>(undefined)
   const forkSeedAppliedForRef = useRef<string | null>(null)
   const forkSeedHomeAppliedRef = useRef(false)
-  const lastEditorTextRef = useRef<string | undefined>(undefined)
   // fork stash 是外部 store：取到一次性种子后同步进本地 state（订阅外部系统同步，
   // 一次性消费语义无法用“渲染期间调整 state”表达，这里保留 effect 同步）
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -351,14 +359,14 @@ export function PiChatPane({
       // 让扩展编辑器状态和种子一致：worker 端新会话的 editorText 是空，
       // 同步 effect 会把种子抹掉；同时推到 worker，刷新后也能恢复
       extensionUiStore.editorCommand(sid, { kind: 'set', text: seed })
-      lastEditorTextRef.current = seed
+      setLastEditorText(seed)
       void setPiExtensionEditorState(sid, seed).catch(() => undefined)
     }
     applySeed(sessionId)
     return subscribeForkSeed(sid => {
       if (sid === sessionId) applySeed(sid)
     })
-  }, [sessionId])
+  }, [sessionId, setLastEditorText])
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // 树导航的编辑器草稿（undo 语义：回到用户消息前，文本进输入框）。
@@ -378,83 +386,11 @@ export function PiChatPane({
   const queuedSteering = useMemo(() => queue?.steering ?? EMPTY_STRING_ARRAY, [queue?.steering])
   const queuedFollowUps = useMemo(() => queue?.followUp ?? EMPTY_STRING_ARRAY, [queue?.followUp])
 
-  // ── 队列消息操作（撤销回输入框 / 切换 steer↔followUp 模式）──
-  // SDK 无单条队列移除：用 clearQueue（返回清空快照）+ 按目标重放其余实现。
-  const handleQueueBackToInput = useCallback(
-    async (kind: 'steering' | 'followUp', index: number) => {
-      if (!sessionId) return
-      const source = (kind === 'steering' ? queue?.steering : queue?.followUp) ?? []
-      const text = source[index]
-      if (!text) return
-      const cleared = (await clearPiQueue(sessionId).catch(() => null)) as {
-        steering?: string[]
-        followUp?: string[]
-      } | null
-      if (!cleared) return
-      // 回填输入框
-      setSessionEditorDraft(sessionId, text)
-      // 其余按原模式重放（保持顺序），被撤销的那条不再入队
-      const restSteering = [...(cleared.steering ?? [])]
-      if (kind === 'steering') restSteering.splice(index, 1)
-      const restFollowUp = [...(cleared.followUp ?? [])]
-      if (kind === 'followUp') restFollowUp.splice(index, 1)
-      for (const t of restSteering) {
-        void sendPiUserMessage(sessionId, t, undefined, 'steer').catch(() => undefined)
-      }
-      for (const t of restFollowUp) {
-        void sendPiUserMessage(sessionId, t, undefined, 'followUp').catch(() => undefined)
-      }
-    },
-    [sessionId, queue],
-  )
-  const handleQueueMoveMode = useCallback(
-    async (kind: 'steering' | 'followUp', index: number) => {
-      if (!sessionId) return
-      const source = (kind === 'steering' ? queue?.steering : queue?.followUp) ?? []
-      const text = source[index]
-      if (!text) return
-      const cleared = (await clearPiQueue(sessionId).catch(() => null)) as {
-        steering?: string[]
-        followUp?: string[]
-      } | null
-      if (!cleared) return
-      // 该条以目标模式重放；其余保持原模式（排除该条）
-      void sendPiUserMessage(sessionId, text, undefined, kind === 'steering' ? 'followUp' : 'steer').catch(
-        () => undefined,
-      )
-      const restSteering = [...(cleared.steering ?? [])].filter(t => t !== text)
-      const restFollowUp = [...(cleared.followUp ?? [])].filter(t => t !== text)
-      for (const t of restSteering) {
-        void sendPiUserMessage(sessionId, t, undefined, 'steer').catch(() => undefined)
-      }
-      for (const t of restFollowUp) {
-        void sendPiUserMessage(sessionId, t, undefined, 'followUp').catch(() => undefined)
-      }
-    },
-    [sessionId, queue],
-  )
-  /** 直接清除队列中的一条（不回输入框） */
-  const handleQueueClear = useCallback(
-    async (kind: 'steering' | 'followUp', index: number) => {
-      if (!sessionId) return
-      const cleared = (await clearPiQueue(sessionId).catch(() => null)) as {
-        steering?: string[]
-        followUp?: string[]
-      } | null
-      if (!cleared) return
-      const restSteering = [...(cleared.steering ?? [])]
-      if (kind === 'steering') restSteering.splice(index, 1)
-      const restFollowUp = [...(cleared.followUp ?? [])]
-      if (kind === 'followUp') restFollowUp.splice(index, 1)
-      for (const t of restSteering) {
-        void sendPiUserMessage(sessionId, t, undefined, 'steer').catch(() => undefined)
-      }
-      for (const t of restFollowUp) {
-        void sendPiUserMessage(sessionId, t, undefined, 'followUp').catch(() => undefined)
-      }
-    },
-    [sessionId],
-  )
+  // ── 队列消息操作（撤销回输入框 / 切换 steer↔followUp 模式 / 删除）──
+  const { handleQueueBackToInput, handleQueueMoveMode, handleQueueClear } = usePiQueueControl({
+    sessionId,
+    queue,
+  })
 
   // Timeline items from this session's keyed branch; home (no session)
   // shows an empty flow — user types and sends to create one.
@@ -875,38 +811,6 @@ export function PiChatPane({
     return () => ro.disconnect()
   }, [])
 
-  // ============================================
-  // Extension editor bridge: extension set/paste -> composer; composer
-  // text -> extension editor state (debounced)
-  // ============================================
-  const inputBoxRef = useRef<InputBoxHandle>(null)
-  const extensionState = useSyncExternalStore(
-    extensionUiStore.subscribe,
-    () => (sessionId ? extensionUiStore.getSnapshot().sessions[sessionId]?.state : undefined),
-    () => undefined,
-  )
-  // 输入框的本地最新文本（onTextChange 每次变化都记录）。桥接层用它与
-  // worker 镜像比较，防止滞后的镜像把用户正在编辑的内容打回旧值。
-  const localComposerTextRef = useRef<string | undefined>(undefined)
-  const composerMountedRef = useRef(false)
-  useEffect(() => {
-    if (!extensionState || extensionState.editorText === lastEditorTextRef.current) return
-    const source = getEditorTextSource(sessionId)
-    // 镜像回填只服务于恢复场景（页面刷新/重连后输入框为空）。它来自
-    // state 刷新——本地 → worker 有 500ms 防抖同步窗口，镜像必然滞后：
-    // 只要用户在本挂载里输入/删除过内容（localComposerTextRef 已记录且
-    // 与镜像不同），就跳过回填，否则输入框会被反复打回旧文本。
-    // 扩展真实发出的 editor set/paste 事件（'extension'）不受此限。
-    const localText = localComposerTextRef.current
-    if (source === 'mirror' && localText !== undefined && localText !== extensionState.editorText) {
-      lastEditorTextRef.current = localText
-      return
-    }
-    lastEditorTextRef.current = extensionState.editorText
-    inputBoxRef.current?.setEditorText(extensionState.editorText)
-  }, [extensionState, sessionId])
-
-  const editorSyncTimerRef = useRef<number | null>(null)
   const refreshTimerRefs = useRef(new Set<number>())
   const scheduleDelayedRefresh = useCallback((sid: string) => {
     const timer = window.setTimeout(() => {
@@ -920,34 +824,13 @@ export function PiChatPane({
   useEffect(() => {
     const timerRefs = refreshTimerRefs.current
     return () => {
-      if (editorSyncTimerRef.current !== null) {
-        window.clearTimeout(editorSyncTimerRef.current)
-        editorSyncTimerRef.current = null
-      }
+      // 会话 / 服务器切换与卸载：取消挂起的输入同步防抖
+      cancelEditorSync()
       for (const timer of timerRefs) window.clearTimeout(timer)
       timerRefs.clear()
     }
-  }, [activeServer?.id, activeServer?.token, activeServer?.url, sessionId])
+  }, [activeServer?.id, activeServer?.token, activeServer?.url, sessionId, cancelEditorSync])
 
-  const handleTextChange = useCallback(
-    (text: string) => {
-      // 忽略 InputBox 挂载时的回显（首次渲染触发 onTextChange('')，不是
-      // 用户输入）；从真实输入开始记录本地最新文本，供镜像回填判断。
-      if (!composerMountedRef.current) {
-        composerMountedRef.current = true
-        if (text === '') return
-      }
-      localComposerTextRef.current = text
-      // 会话已不可用时别再往服务端同步编辑器状态（每敲一个字一个 404）
-      if (!sessionId || sessionUnavailableRef.current) return
-      if (editorSyncTimerRef.current !== null) window.clearTimeout(editorSyncTimerRef.current)
-      editorSyncTimerRef.current = window.setTimeout(() => {
-        editorSyncTimerRef.current = null
-        void setPiExtensionEditorState(sessionId, text).catch(() => undefined)
-      }, 500)
-    },
-    [sessionId],
-  )
   const handleSend = useCallback(
     async (text: string, attachments: Attachment[], options?: { delivery?: 'steer' | 'followUp' }) => {
       // Native image blocks from data-url attachments (pi only accepts
@@ -1003,11 +886,7 @@ export function PiChatPane({
       // 2. 清 worker 扩展编辑器状态（否则下一次 state 刷新经 extension
       //    bridge 的 setEditorText 把旧文本回填输入框——表现为发送后输入
       //    框不清空，快速输入+发送时必现）
-      if (editorSyncTimerRef.current !== null) {
-        window.clearTimeout(editorSyncTimerRef.current)
-        editorSyncTimerRef.current = null
-      }
-      void setPiExtensionEditorState(sid, '').catch(() => undefined)
+      clearExtensionEditorState(sid)
 
       // Fire and refresh: the prompt command stays open for the whole turn,
       // Fire and refresh: the prompt command stays open for the whole turn,
@@ -1025,7 +904,7 @@ export function PiChatPane({
       scheduleDelayedRefresh(sid)
       return true
     },
-    [sessionId, isStreaming, models, scheduleDelayedRefresh, boundServerId],
+    [sessionId, isStreaming, models, scheduleDelayedRefresh, boundServerId, clearExtensionEditorState],
   )
 
   // Slash command dispatch, mirroring pi TUI: frontend built-ins are handled
@@ -1107,11 +986,7 @@ export function PiChatPane({
       // 同步防抖并清空 worker 的扩展编辑器状态——否则 500ms 后旧文本被写回
       // worker，下一次 extensionUiStore 刷新经 editor bridge 回填输入框
       // （表现为发送 /permission 这类命令后输入框又被旧文本填回）。
-      if (editorSyncTimerRef.current !== null) {
-        window.clearTimeout(editorSyncTimerRef.current)
-        editorSyncTimerRef.current = null
-      }
-      void setPiExtensionEditorState(sid, '').catch(() => undefined)
+      clearExtensionEditorState(sid)
 
       if (command === 'compact') {
         // 启动即有反馈（SDK 无压缩进度流，只有 start/end 事件）——先记一条
@@ -1470,6 +1345,7 @@ export function PiChatPane({
       sessionId,
       state,
       boundServerId,
+      clearExtensionEditorState,
     ],
   )
 
