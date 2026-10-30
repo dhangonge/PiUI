@@ -1,4 +1,5 @@
 import { forwardRef } from 'react'
+import { PRESS_TRANSITION_CLASS } from '../../constants/animation'
 
 type IconButtonSize = 'sm' | 'md' | 'lg'
 type IconButtonVariant = 'ghost' | 'solid'
@@ -30,8 +31,8 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
         className={`
           inline-flex items-center justify-center
           rounded-lg
-          transition-all duration-150
-          active:scale-90
+          ${PRESS_TRANSITION_CLASS}
+          motion-safe:active:scale-90
           disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100
           ${sizeStyles[size]}
           ${variantStyles[variant]}
