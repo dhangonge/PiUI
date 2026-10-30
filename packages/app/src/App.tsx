@@ -241,6 +241,9 @@ function App() {
   const mobileProgrammaticTargetRef = useRef<MobilePagerPage | null>(null)
   const mobileScrollEndTimerRef = useRef<number | null>(null)
   const mobileRightUnmountTimerRef = useRef<number | null>(null)
+  const mobilePagerFrameRef = useRef<number | null>(null)
+  const mobilePagerMovingRef = useRef(false)
+  const mobilePagerVarsRef = useRef<{ rotateY: string; scale: string; offsetX: string; origin: string } | null>(null)
   const shouldRenderMobileRightPanelRef = useRef(false)
   const [shouldRenderMobileRightPanel, setShouldRenderMobileRightPanel] = useState(false)
 
@@ -321,7 +324,10 @@ function App() {
     if (rightPanelOpen) layoutStore.closeRightPanel()
   }, [ensureMobileRightPanelRendered, getNearestMobilePage, rightPanelOpen, setSidebarExpanded, sidebarExpanded])
 
-  const handleMobilePagerScroll = useCallback(() => {
+  // 把横滑进度写到 DOM。四个变量都是继承型：写一次就会让整棵对话子树样式失效、
+  // 玻璃层重新取背景快照，所以只在真的位移时写，并且值没变就不写。
+  // 静止态直接摘掉 --moving：对话面回到纯 2D，backdrop-filter 不再落在 3D 上下文里。
+  const applyMobilePagerProgress = useCallback(() => {
     const pager = mobilePagerRef.current
     if (!pager) return
 
@@ -331,15 +337,57 @@ function App() {
     const rawProgress =
       (scrollLeft - mobileChatScrollLeft) / (scrollLeft < mobileChatScrollLeft ? mobileLeftPanelWidth : mobilePageWidth)
     const progress = Math.max(-1, Math.min(1, rawProgress))
+    const moving = Math.abs(progress) > 0.001
+
+    if (moving !== mobilePagerMovingRef.current) {
+      mobilePagerMovingRef.current = moving
+      if (moving) pager.dataset.mobileChatMoving = ''
+      else delete pager.dataset.mobileChatMoving
+    }
+
+    if (!moving) {
+      mobilePagerVarsRef.current = null
+      return
+    }
+
     const absProgress = Math.abs(progress)
     const rightProgress = Math.max(0, progress)
-    const easedRightProgress = rightProgress * rightProgress
-    const originX = 50 - progress * 50
+    const next = {
+      rotateY: `${progress * 10}deg`,
+      scale: `${1 - absProgress * 0.06}`,
+      offsetX: `${rightProgress * rightProgress * -48}px`,
+      origin: `${50 - progress * 50}% 50%`,
+    }
+    const last = mobilePagerVarsRef.current
+    if (
+      last &&
+      last.rotateY === next.rotateY &&
+      last.scale === next.scale &&
+      last.offsetX === next.offsetX &&
+      last.origin === next.origin
+    ) {
+      return
+    }
+    mobilePagerVarsRef.current = next
+    pager.style.setProperty('--mobile-chat-rotate-y', next.rotateY)
+    pager.style.setProperty('--mobile-chat-scale', next.scale)
+    pager.style.setProperty('--mobile-chat-offset-x', next.offsetX)
+    pager.style.setProperty('--mobile-chat-transform-origin', next.origin)
+  }, [mobileChatScrollLeft, mobileLeftPanelWidth, mobilePageWidth])
 
-    pager.style.setProperty('--mobile-chat-rotate-y', `${progress * 10}deg`)
-    pager.style.setProperty('--mobile-chat-scale', `${1 - absProgress * 0.06}`)
-    pager.style.setProperty('--mobile-chat-offset-x', `${easedRightProgress * -48}px`)
-    pager.style.setProperty('--mobile-chat-transform-origin', `${originX}% 50%`)
+  const handleMobilePagerScroll = useCallback(() => {
+    const pager = mobilePagerRef.current
+    if (!pager) return
+
+    const scrollLeft = pager.scrollLeft
+
+    // 同帧多次 scroll 事件合并成一次写入
+    if (mobilePagerFrameRef.current === null) {
+      mobilePagerFrameRef.current = window.requestAnimationFrame(() => {
+        mobilePagerFrameRef.current = null
+        applyMobilePagerProgress()
+      })
+    }
 
     if (scrollLeft > mobileChatScrollLeft + 24) {
       ensureMobileRightPanelRendered()
@@ -360,13 +408,14 @@ function App() {
       }
 
       syncMobilePagerState()
+      // 滚动停下的最后一帧可能没触发 scroll 事件（吸附到整页时），这里补一次静止态结算
+      applyMobilePagerProgress()
     }, MOBILE_PAGER_SCROLL_END_MS)
   }, [
+    applyMobilePagerProgress,
     ensureMobileRightPanelRendered,
     getMobilePageScrollLeft,
     mobileChatScrollLeft,
-    mobileLeftPanelWidth,
-    mobilePageWidth,
     syncMobilePagerState,
   ])
 
@@ -387,7 +436,6 @@ function App() {
       syncMobilePagerState()
     }, MOBILE_PAGER_SCROLL_END_MS)
   }, [syncMobilePagerState])
-
   useLayoutEffect(() => {
     if (!isMobilePanelLayout) {
       mobilePagerInitializedRef.current = false
@@ -444,6 +492,8 @@ function App() {
     return () => {
       if (mobileScrollEndTimerRef.current !== null) window.clearTimeout(mobileScrollEndTimerRef.current)
       if (mobileRightUnmountTimerRef.current !== null) window.clearTimeout(mobileRightUnmountTimerRef.current)
+      if (mobilePagerFrameRef.current !== null) window.cancelAnimationFrame(mobilePagerFrameRef.current)
+      mobilePagerFrameRef.current = null
       mobileProgrammaticTargetRef.current = null
     }
   }, [])
@@ -938,17 +988,9 @@ function App() {
                   }}
                 >
                   <div
-                    className="absolute inset-y-0 -left-4 -right-4 z-10 flex flex-col overflow-hidden bg-bg-100 rounded-xl shadow-[0_0_24px_hsl(var(--always-black)/0.15)] [contain:layout_paint]"
+                    className="mobile-chat-surface absolute inset-y-0 -left-4 -right-4 z-10 flex flex-col overflow-hidden bg-bg-100 rounded-xl shadow-[0_0_24px_hsl(var(--always-black)/0.15)] [contain:layout_paint]"
                     aria-hidden={mobileActivePage !== 'chat'}
                     inert={mobileActivePage !== 'chat'}
-                    style={{
-                      transform:
-                        'translate3d(var(--mobile-chat-offset-x, 0px), 0, 0) rotateY(var(--mobile-chat-rotate-y, 0deg)) scale(var(--mobile-chat-scale, 1))',
-                      transformOrigin: 'var(--mobile-chat-transform-origin, 50% 50%)',
-                      transformStyle: 'preserve-3d',
-                      backfaceVisibility: 'hidden',
-                      willChange: 'transform',
-                    }}
                   >
                     <div
                       className={`flex-1 min-h-0 px-4 ${paneLayout.isSplit && !paneLayout.fullscreenPaneId ? 'py-2' : ''}`}

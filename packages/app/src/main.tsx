@@ -65,6 +65,11 @@ function configureNativeShell() {
   // 添加 CSS class 用于 safe-area 适配
   document.documentElement.classList.add('tauri-app')
 
+  // backdrop-filter 的合成层补丁只对桌面 WebView 有效（WebView2 / WebKitGTK）。
+  // Android WebView 自带正确的 backdrop-filter 合成，加 will-change 反而把每个
+  // 玻璃元素钉成独立 GPU 层，滚动时逐帧重取背景快照，缺帧就露出底色。
+  if (!isTauriMobile()) document.documentElement.classList.add('tauri-desktop')
+
   // 确保 viewport meta 包含 viewport-fit=cover（用于状态栏沉浸式）
   const viewportMeta = document.querySelector('meta[name="viewport"]')
   if (!viewportMeta) return

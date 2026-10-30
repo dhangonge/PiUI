@@ -106,6 +106,8 @@ const INPUT_FOOTER_FALLBACK_HEIGHT = 32
 const COMPOSER_MIN_HEIGHT = 144
 const COMPOSER_DESKTOP_MAX_HEIGHT = 420
 const COMPOSER_COMPACT_MAX_HEIGHT = 320
+// 收起/展开的 opacity 过渡时长（与 wrapper 的 duration-200 对齐，留 20ms 余量）
+const DOCK_FADE_MS = 220
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
@@ -402,6 +404,21 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       collapsedPermission,
       collapsedQuestion,
     })
+
+  // 收起/展开那一刻的 200ms 里，祖先 opacity < 1 会形成 backdrop root，
+  // 玻璃子级拿不到 backdrop-filter——背后的消息会变清晰透出，看起来像闪一下。
+  // 这段窗口把玻璃退成实色（视觉上是实心面板淡出/淡入），窗口过后复原。
+  const [dockFading, setDockFading] = useState(false)
+  const dockFadeSkippedRef = useRef(true)
+  useEffect(() => {
+    if (dockFadeSkippedRef.current) {
+      dockFadeSkippedRef.current = false
+      return
+    }
+    setDockFading(true)
+    const timer = window.setTimeout(() => setDockFading(false), DOCK_FADE_MS)
+    return () => window.clearTimeout(timer)
+  }, [isCollapsed])
 
   // 处理 revert 恢复
   useEffect(() => {
@@ -1640,6 +1657,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
           ref={contentWrapRef}
           onPointerDown={handleContainerPointerDown}
           data-composer-dock={isCollapsed ? 'collapsed' : 'expanded'}
+          data-composer-fading={dockFading ? '' : undefined}
           className={`relative flex flex-col gap-2 ${isCollapsed ? 'justify-end' : ''}`}
           style={
             isCollapsed && expandedHeight > 0

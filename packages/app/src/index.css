@@ -9,10 +9,13 @@
  * DOM 推成 GPU 层导致空闲功耗偏高。
  * 不用 transform：避免打断 InputBox todo-swap 等 transform 动画，
  * 也避免父层 transform 让子级 backdrop-blur 采样错位。
- * .tauri-app class 由 main.tsx 在 Tauri 环境下添加到 <html>。
+ * .tauri-app class 由 main.tsx 在 Tauri 环境下添加到 <html>，
+ * .tauri-desktop 只在桌面 Tauri 加：Android WebView 的
+ * backdrop-filter 本就正常，这个 hint 会让滚动中的玻璃层
+ * 逐帧重取背景纹理，缺帧时直接露出半透明底色。
  */
-.tauri-app[data-glass] :is(.glass, .glass-alt),
-.tauri-app [class*='backdrop-blur'] {
+.tauri-desktop[data-glass] :is(.glass, .glass-alt),
+.tauri-desktop [class*='backdrop-blur'] {
   will-change: backdrop-filter;
 }
 
@@ -31,6 +34,23 @@
 .mobile-chat-pager::-webkit-scrollbar-thumb,
 .mobile-chat-pager::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* 横滑面板的对话面：静止态必须是纯 2D。
+ * preserve-3d + transform 会让子级 .glass 的 backdrop-filter 在 3D 上下文中
+ * 采样不可靠（Android WebView 上缺帧就露出半透明底色，看起来像闪一下）。
+ * 只有真的在滑（data-mobile-chat-moving）时才挂回去。 */
+.mobile-chat-surface {
+  transform: none;
+}
+
+.mobile-chat-pager[data-mobile-chat-moving] .mobile-chat-surface {
+  transform: translate3d(var(--mobile-chat-offset-x, 0px), 0, 0) rotateY(var(--mobile-chat-rotate-y, 0deg))
+    scale(var(--mobile-chat-scale, 1));
+  transform-origin: var(--mobile-chat-transform-origin, 50% 50%);
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  will-change: transform;
 }
 
 /* 导航到消息时保留顶部空间，避免被对话标题栏遮挡。 */
@@ -1051,6 +1071,18 @@ body {
   backdrop-filter: blur(22px) saturate(200%);
 }
 
+/* 收起/展开的 200ms 里祖先 opacity < 1 会形成 backdrop root，玻璃拿不到模糊，
+ * 背后的消息会变清晰透出（看起来像闪一下）。这段窗口退成实色，
+ * 视觉上是「实心面板淡出/淡入」而不是「模糊突然消失」。
+ * data-composer-fading 由 InputBox 在收起态翻转后挂 220ms。 */
+[data-composer-fading] .glass {
+  background-color: hsl(var(--bg-000));
+}
+
+[data-composer-fading] .glass-alt {
+  background-color: hsl(var(--bg-100));
+}
+
 /* ============================================
  * Todo Swap Transition
  * ============================================ */
@@ -1086,7 +1118,8 @@ body {
   transition:
     opacity 180ms cubic-bezier(0.22, 1, 0.36, 1),
     transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform, opacity;
+  /* 不要常驻 will-change：这面板是 glass-alt，常驻合成层会让
+   * 祖先形成 backdrop root，开合时子级背景模糊会突变。 */
   pointer-events: none;
 }
 

@@ -16,6 +16,7 @@ import {
   seedMeasuredPageHeightsFromPreviousPages,
 } from './chatPageModel'
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
+import { FAR_FROM_BOTTOM_PX, NEAR_BOTTOM_PX, resolveAtBottom } from './virtual/atBottomHysteresis'
 import {
   buildVisibleTimelineEntries,
   getVisibleTimelineForkTargetId,
@@ -1244,5 +1245,34 @@ describe('computeAnchorRestoreScrollDelta', () => {
 
   it('returns a negative value when the anchor drifted upward', () => {
     expect(computeAnchorRestoreScrollDelta(180, 24)).toBe(-156)
+  })
+})
+
+describe('resolveAtBottom（输入区收起滞回）', () => {
+  // 底部附近来回蹭：dist 从 0 蹭到 20px 再回 0，信号不能翻转
+  it('keeps the previous state when the distance stays inside the hysteresis band', () => {
+    let atBottom = true
+    atBottom = resolveAtBottom(atBottom, 20, true)
+    expect(atBottom).toBe(true)
+    atBottom = resolveAtBottom(atBottom, 0, true)
+    expect(atBottom).toBe(true)
+  })
+
+  it('reports away from bottom only past the far threshold, and returns below the near threshold', () => {
+    const far = resolveAtBottom(true, FAR_FROM_BOTTOM_PX + 12, true)
+    expect(far).toBe(false)
+    expect(resolveAtBottom(far, 30, true)).toBe(false)
+    expect(resolveAtBottom(far, NEAR_BOTTOM_PX - 5, true)).toBe(true)
+  })
+
+  it('treats the bottom-following state as at bottom regardless of distance', () => {
+    // userScrolled=false：程序滚动 / 流式长高那一帧 dist 越线也不算离底
+    expect(resolveAtBottom(false, 500, false)).toBe(true)
+    expect(resolveAtBottom(true, 500, false)).toBe(true)
+  })
+
+  it('accepts custom thresholds', () => {
+    expect(resolveAtBottom(true, 20, true, { nearPx: 10, farPx: 16 })).toBe(false)
+    expect(resolveAtBottom(false, 20, true, { nearPx: 24, farPx: 48 })).toBe(true)
   })
 })

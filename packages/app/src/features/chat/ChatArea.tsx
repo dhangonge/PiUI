@@ -45,6 +45,7 @@ import {
 import { useTheme } from '../../hooks/useTheme'
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
 import { useAutoScroll } from './virtual/useAutoScroll'
+import { resolveAtBottom, type AtBottomThresholds } from './virtual/atBottomHysteresis'
 import { useEmptyWorkingShellGate } from './virtual/useEmptyWorkingShellGate'
 import { perfMark, perfRecordRender, isPerfEnabled } from '../../utils/perf'
 
@@ -609,6 +610,10 @@ export const ChatArea = memo(
       const [isLoadingMore, setIsLoadingMore] = useState(false)
       const loadingMoreRef = useRef(false)
 
+      // 贴底信号（给输入区 dock / 回底按钮）：带几何滞回，只在真正翻转时 setState
+      const [atBottomSignal, setAtBottomSignal] = useState(true)
+      const atBottomRef = useRef(true)
+
       // ── 自动滚动 ──
       // userScrolled 判定用小阈值（10px），和 UI 回底按钮的 60/150 阈值分开。
       // 否则上滚一点点仍在“底部区”里，userScrolled 会被立刻清掉，
@@ -631,9 +636,19 @@ export const ChatArea = memo(
 
       // ── 滚动状态（同步计算，不使用 rAF） ──
       // prevState.bottom 仍是几何贴底，给 scrollToBottomIfAtBottom 用。
-      // onAtBottomChange 给输入区 dock / 回底按钮：只反映 !userScrolled（用户意图），
-      // 不跟 dist——流式长高那一帧 dist 会越过阈值，会把 isCollapsed 抖翻。
+      // onAtBottomChange 给输入区 dock / 回底按钮：!userScrolled 的滞回版
+      //（远/近双阈值，见 virtual/atBottomHysteresis），不是每帧的 dist 越线。
       const prevState = useRef({ overflow: false, bottom: true, jump: false })
+      // 近阈值固定 10px（对齐 userScrolled），不能复用 thresholdRef：
+      // 那是 60/150 的滚动锚定阈值，比离底阈值 48 还大，会破坏滞回单调性。
+      const atBottomThresholdsRef = useRef<AtBottomThresholds>({})
+      // 唯一评估入口：滚动路径与 userScrolled 翻转路径共用同一个口径
+      const evaluateAtBottom = useCallback((distance: number, userScrolled: boolean) => {
+        const next = resolveAtBottom(atBottomRef.current, distance, userScrolled, atBottomThresholdsRef.current)
+        if (next === atBottomRef.current) return
+        atBottomRef.current = next
+        setAtBottomSignal(next)
+      }, [])
       const computeScrollState = useCallback(() => {
         const el = scrollRef.current
         if (!el) return
@@ -646,12 +661,30 @@ export const ChatArea = memo(
         if (p.overflow !== overflow || p.bottom !== bottom || p.jump !== jump) {
           prevState.current = { overflow, bottom, jump }
         }
-      }, [])
+        evaluateAtBottom(dist, userScrolledRef.current)
+      }, [evaluateAtBottom, userScrolledRef])
 
-      // 输入区折叠 / 回底按钮：只跟用户是否主动离底
+      // userScrolled 翻转（上滚离底 / 滚回底）时用当前几何立刻重算一次：
+      // 回底视为立刻在底部；上滚但 dist 仍在 48px 内维持原状。
       useEffect(() => {
-        onAtBottomRef.current?.(!auto.userScrolled)
-      }, [auto.userScrolled])
+        const el = scrollRef.current
+        const distance = el ? el.scrollHeight - el.clientHeight - el.scrollTop : 0
+        evaluateAtBottom(distance, auto.userScrolled)
+      }, [auto.userScrolled, evaluateAtBottom])
+
+      // 只在实际翻转时上报：避免每帧滚动都 setState 父级
+      useEffect(() => {
+        onAtBottomRef.current?.(atBottomSignal)
+      }, [atBottomSignal])
+
+      // 用户上滚后不再滚动时，流式长高会把 dist 推大但不产生 scroll 事件，
+      // 这里补一次几何评估；贴底跟随路径不读 scrollHeight，避免每帧布局抖动。
+      useEffect(() => {
+        if (!userScrolledRef.current) return
+        const el = scrollRef.current
+        if (!el) return
+        evaluateAtBottom(el.scrollHeight - el.clientHeight - el.scrollTop, true)
+      }, [timeline, evaluateAtBottom, userScrolledRef])
 
       // ── Virtualizer ──
       // parent key={sessionId} remount 后，这里只在 mount 时读一次 cache
