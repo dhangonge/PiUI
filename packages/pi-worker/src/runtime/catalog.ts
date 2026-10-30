@@ -9,6 +9,16 @@ import { getLoadedSdk } from '../sdk-host.js'
 import type { CatalogProvider } from '../runtime.js'
 import type { PackagesGateway } from '../command-table.js'
 import { entriesPageFromEntries, sessionHeadFromParts } from './pagination.js'
+import {
+  findSessionFileById,
+  isSessionListCacheEnabled,
+  listAllSessionInfos,
+  listSessionInfos,
+  readSessionHeader,
+  searchSnippet,
+  sessionMatchesSearch,
+  type SessionListInfo,
+} from './session-list-cache.js'
 
 /**
  * Windows callers hand us backslash paths, but pi encodes the cwd into the
@@ -77,6 +87,40 @@ export function resolveUserPath(input: string): string {
   return path.resolve(trimmed)
 }
 
+function samePath(a: string, b: string): boolean {
+  const left = process.platform === 'win32' ? path.resolve(a).toLowerCase() : path.resolve(a)
+  const right = process.platform === 'win32' ? path.resolve(b).toLowerCase() : path.resolve(b)
+  return left === right
+}
+
+/**
+ * Shape one list response. `allMessagesText` dominates the payload (93% of
+ * session.list) and only feeds the client's local search, so it is dropped
+ * unless the caller asked for a search — then only the matching snippet ships.
+ */
+function sessionListPayload(infos: SessionListInfo[], search?: string): JsonValue {
+  const query = search?.trim()
+  const selected = query ? infos.filter(info => sessionMatchesSearch(info, query)) : infos
+  return requireJsonValue(
+    selected.map(info => {
+      const snippet = query ? searchSnippet(info.allMessagesText, query) : undefined
+      return {
+        path: info.path,
+        id: info.id,
+        cwd: info.cwd,
+        name: info.name,
+        parentSessionPath: info.parentSessionPath,
+        created: info.created,
+        modified: info.modified,
+        messageCount: info.messageCount,
+        firstMessage: info.firstMessage,
+        ...(snippet ? { allMessagesText: snippet } : {}),
+      }
+    }),
+    'SESSION_LIST_NOT_JSON',
+  )
+}
+
 function packageManagerForWorkspace(cwd: string, agentDir?: string) {
   const { DefaultPackageManager, getAgentDir } = getLoadedSdk().sdk
   const { manager } = settingsForWorkspace(cwd, agentDir)
@@ -93,26 +137,42 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
     return this.agentDir
   }
 
-  async listSessions(cwd: string): Promise<JsonValue> {
+  async listSessions(cwd: string, search?: string): Promise<JsonValue> {
     const { SessionManager } = getLoadedSdk().sdk
     const normalized = normalizeCwd(cwd)
-    return requireJsonValue(
-      await SessionManager.list(normalized, configuredSessionDir(normalized, this.dir())),
-      'SESSION_LIST_NOT_JSON',
-    )
+    const dir = configuredSessionDir(normalized, this.dir())
+    if (isSessionListCacheEnabled()) {
+      const cached = await listSessionInfos(dir).catch(() => undefined)
+      if (cached) {
+        // A custom sessionDir holds sessions from several workspaces; the SDK
+        // filters them by cwd in that case too (`filterCwd` in SessionManager.list).
+        const filterCwd = path.resolve(dir) !== path.resolve(defaultSessionDir(normalized, this.dir()))
+        const resolved = path.resolve(normalized)
+        const infos = filterCwd ? cached.filter(info => samePath(info.cwd, resolved)) : cached
+        return sessionListPayload(infos, search)
+      }
+    }
+    const sessions = (await SessionManager.list(normalized, dir)) as unknown as SessionListInfo[]
+    return sessionListPayload(sessions, search)
   }
 
-  async listAllSessions(): Promise<JsonValue> {
+  async listAllSessions(search?: string): Promise<JsonValue> {
     const { SessionManager } = getLoadedSdk().sdk
     const configured = configuredSessionDir(process.cwd(), this.dir())
-    const defaultForProcessCwd = defaultSessionDir(process.cwd(), this.dir())
-    // With the default layout, the SDK's no-argument listAll scans every encoded
-    // workspace directory. A custom sessionDir must be passed explicitly.
-    const sessions =
-      path.resolve(configured) === path.resolve(defaultForProcessCwd)
-        ? await SessionManager.listAll()
-        : await SessionManager.listAll(configured)
-    return requireJsonValue(sessions, 'SESSION_LIST_NOT_JSON')
+    const defaultLayout = path.resolve(configured) === path.resolve(defaultSessionDir(process.cwd(), this.dir()))
+    if (isSessionListCacheEnabled()) {
+      // Default layout: <agentDir>/sessions/<encoded-cwd>/<file>.jsonl
+      // Custom sessionDir: a flat directory of session files.
+      const cached = (
+        defaultLayout ? listAllSessionInfos(path.dirname(configured)) : listSessionInfos(configured)
+      ).catch(() => undefined)
+      const infos = await cached
+      if (infos) return sessionListPayload(infos, search)
+    }
+    const sessions = (defaultLayout
+      ? await SessionManager.listAll()
+      : await SessionManager.listAll(configured)) as unknown as SessionListInfo[]
+    return sessionListPayload(sessions, search)
   }
 
   async createSession(cwd: string): Promise<JsonValue> {
@@ -209,16 +269,36 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
 
   async previewSessionById(
     sessionId: string,
-    params: { cursor?: string; limit?: number; maxBytes?: number } = {},
+    params: { cursor?: string; limit?: number; maxBytes?: number; cwd?: string; sessionFile?: string } = {},
   ): Promise<JsonValue> {
-    const sessions = await this.listAllSessions()
-    if (!Array.isArray(sessions))
-      throw Object.assign(new Error('session list is not an array'), { code: 'NATIVE_DATA_NOT_JSON' })
-    const match = sessions.find(item => isJsonObject(item) && item.id === sessionId)
-    if (!isJsonObject(match) || typeof match.path !== 'string' || typeof match.cwd !== 'string') {
-      throw Object.assign(new Error(`session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND' })
+    // Callers that already know where the session lives skip the lookup.
+    if (params.sessionFile) return this.previewSession(params.cwd ?? '', params.sessionFile, params)
+    const located = await this.locateSession(sessionId)
+    return this.previewSession(located.cwd, located.sessionFile, params)
+  }
+
+  /**
+   * Map a session id to its file + workspace without parsing every session
+   * (the old path went through listAllSessions and cost ~2.4s per lookup).
+   */
+  async locateSession(sessionId: string): Promise<{ sessionId: string; sessionFile: string; cwd: string }> {
+    const configured = configuredSessionDir(process.cwd(), this.dir())
+    const defaultLayout = path.resolve(configured) === path.resolve(defaultSessionDir(process.cwd(), this.dir()))
+    const root = defaultLayout ? path.dirname(configured) : configured
+    const sessionFile = await findSessionFileById(root, sessionId)
+    const header = sessionFile ? await readSessionHeader(sessionFile) : undefined
+    if (!sessionFile || !header) {
+      // Fall back to the full scan (custom layouts, renamed files).
+      const sessions = await this.listAllSessions()
+      const match = Array.isArray(sessions)
+        ? sessions.find(item => isJsonObject(item) && item.id === sessionId)
+        : undefined
+      if (!isJsonObject(match) || typeof match.path !== 'string' || typeof match.cwd !== 'string') {
+        throw Object.assign(new Error(`session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND' })
+      }
+      return { sessionId, sessionFile: match.path, cwd: match.cwd }
     }
-    return this.previewSession(match.cwd, match.path, params)
+    return { sessionId, sessionFile, cwd: header.cwd }
   }
 
   async deleteSession(cwd: string, sessionFile: string): Promise<void> {

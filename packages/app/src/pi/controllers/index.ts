@@ -43,10 +43,10 @@ export async function loadPiSessionTools(sessionId: string, signal?: AbortSignal
 /**
  * Load all Pi sessions globally.
  */
-export async function loadPiSessions(signal?: AbortSignal, serverId?: string): Promise<SessionInfo[]> {
+export async function loadPiSessions(signal?: AbortSignal, serverId?: string, search?: string): Promise<SessionInfo[]> {
   const revision = () => (serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration())
   const generation = revision()
-  const raw = await retryUnavailable(() => transport.listAllPiSessions(signal, serverId), signal)
+  const raw = await retryUnavailable(() => transport.listAllPiSessions(signal, serverId, search), signal)
   const sessions = serverId ? raw.map(info => ({ ...info, id: makeSessionKey(serverId, info.id) })) : raw
   if (revision() !== generation) return sessions
   if (serverId) piSessionInfoStore.replaceForServer(serverId, sessions)
@@ -61,10 +61,11 @@ export async function loadPiSessionsForCwd(
   cwd: string,
   signal?: AbortSignal,
   serverId?: string,
+  search?: string,
 ): Promise<SessionInfo[]> {
   const revision = () => (serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration())
   const generation = revision()
-  const raw = await retryUnavailable(() => transport.listPiSessions({ cwd }, signal, serverId), signal)
+  const raw = await retryUnavailable(() => transport.listPiSessions({ cwd, search }, signal, serverId), signal)
   const sessions = serverId ? raw.map(info => ({ ...info, id: makeSessionKey(serverId, info.id) })) : raw
   if (revision() !== generation) return sessions
   piSessionInfoStore.replaceForCwd(cwd, sessions, serverId)
@@ -110,20 +111,28 @@ export async function openPiSession(
     throw new Error('Session open failed: no sessionId returned')
   }
 
-  if (result.sessionFile && result.sessionFileReady !== false) {
-    // Existing sessions have a persisted file and can be previewed immediately.
-    await loadPiSessionData(result.sessionId, signal)
-  } else {
-    // A fresh Pi runtime has no session file until its first entry is written.
-    // Use the state returned by session.open instead of previewing a path that
-    // does not exist yet.
-    const state =
-      result.state && typeof result.state === 'object' && !Array.isArray(result.state)
-        ? (result.state as JsonObject)
-        : undefined
-    if (state) piSessionStateStore.setState(result.sessionId, state)
+  // session.open already carries the fresh runtime state, and branch.get reads
+  // the same runtime. Previewing the file again read the whole transcript a
+  // second time (21MB sessions cost ~220ms + page building on every open).
+  const state =
+    result.state && typeof result.state === 'object' && !Array.isArray(result.state)
+      ? (result.state as JsonObject)
+      : undefined
+  if (state) piSessionStateStore.setState(result.sessionId, state)
+
+  try {
+    const branch = await transport.getPiBranchPage(
+      result.sessionId,
+      { limit: BRANCH_PAGE_LIMIT, maxBytes: BRANCH_PAGE_MAX_BYTES },
+      signal,
+    )
+    piBranchStore.setData(result.sessionId, branch)
+  } catch (error) {
+    if (!state) throw error
+    // Keep the open usable even when the first page fails: show an empty
+    // timeline; the event stream refreshes it once the runtime catches up.
     piBranchStore.setData(result.sessionId, {
-      head: (state?.head ?? {
+      head: (state.head ?? {
         sdkVersion: 'unknown',
         revision: 0,
         header: null,

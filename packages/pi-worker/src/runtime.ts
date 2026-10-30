@@ -118,8 +118,8 @@ export interface SessionRuntime {
 }
 
 export interface CatalogProvider {
-  listSessions(cwd: string): Promise<JsonValue>
-  listAllSessions(): Promise<JsonValue>
+  listSessions(cwd: string, search?: string): Promise<JsonValue>
+  listAllSessions(search?: string): Promise<JsonValue>
   createSession(cwd: string): Promise<JsonValue>
   previewSession(
     cwd: string,
@@ -128,7 +128,7 @@ export interface CatalogProvider {
   ): Promise<JsonValue>
   previewSessionById(
     sessionId: string,
-    params?: { cursor?: string; limit?: number; maxBytes?: number },
+    params?: { cursor?: string; limit?: number; maxBytes?: number; cwd?: string; sessionFile?: string },
   ): Promise<JsonValue>
   deleteSession(cwd: string, sessionFile: string): Promise<void>
   listModels(): Promise<JsonValue>

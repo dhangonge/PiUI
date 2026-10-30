@@ -65,12 +65,16 @@ const PROMPT_PARAMS = objectSchema(
 const TEXT_IMAGES_PARAMS = objectSchema({ text: STRING, images: IMAGES }, ['text'])
 const OUTPUT_PATH_PARAMS = objectSchema({ outputPath: STRING }, ['outputPath'])
 const CWD_PARAMS = objectSchema({ cwd: STRING }, ['cwd'])
+const SESSION_LIST_PARAMS = objectSchema({ cwd: STRING, search: STRING }, ['cwd'])
+const SESSION_LIST_ALL_PARAMS = objectSchema({ search: STRING })
 const SESSION_PREVIEW_PARAMS = objectSchema(
   {
     sessionId: STRING,
     cursor: nullable(STRING),
     limit: { type: 'integer', minimum: 1 },
     maxBytes: { type: 'integer', minimum: 1 },
+    cwd: STRING,
+    sessionFile: STRING,
   },
   ['sessionId'],
 )
@@ -420,7 +424,7 @@ export const PI_COMMAND_SPECS = [
     name: 'session.list',
     scope: 'global',
     description: 'List Pi sessions for a workspace',
-    paramsSchema: CWD_PARAMS,
+    paramsSchema: SESSION_LIST_PARAMS,
     queue: 'immediate',
     idempotent: true,
   },
@@ -428,6 +432,7 @@ export const PI_COMMAND_SPECS = [
     name: 'session.listAll',
     scope: 'global',
     description: 'List all Pi sessions',
+    paramsSchema: SESSION_LIST_ALL_PARAMS,
     queue: 'immediate',
     idempotent: true,
   },
@@ -708,10 +713,10 @@ export type PiCommandParams = CoreCommandParams & {
   'agentsFiles.list': Record<string, never>
   'attachment.get': { entryId: string; blockIndex: number }
   'commands.completions': { name: string; prefix: string }
-  'session.list': { cwd: string }
-  'session.listAll': Record<string, never>
+  'session.list': { cwd: string; search?: string }
+  'session.listAll': { search?: string }
   'session.create': { cwd: string }
-  'session.preview': { sessionId: string } & PiPageParams
+  'session.preview': { sessionId: string; cwd?: string; sessionFile?: string } & PiPageParams
   'session.delete': { cwd: string; sessionFile: string }
   'models.list': Record<string, never>
   'settings.get': { cwd: string }

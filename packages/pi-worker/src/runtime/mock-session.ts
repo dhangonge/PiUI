@@ -169,15 +169,30 @@ function mockBranch(entries: JsonObject[], leafId: string | null): JsonObject[] 
   return branch
 }
 
+function filterMockSessions(sessions: JsonValue[], search?: string): JsonValue[] {
+  const query = search?.trim().toLowerCase()
+  if (!query) return sessions
+  return sessions.filter(session => {
+    if (!session || typeof session !== 'object' || Array.isArray(session)) return false
+    const record = session as Record<string, unknown>
+    return ['name', 'firstMessage', 'id', 'cwd', 'allMessagesText'].some(
+      key => typeof record[key] === 'string' && (record[key] as string).toLowerCase().includes(query),
+    )
+  })
+}
+
 export class MockCatalog implements CatalogProvider, PackagesGateway {
   private readonly store = new MockStore()
 
-  async listSessions(cwd: string): Promise<JsonValue> {
-    return this.store.list().filter(info => info.cwd === cwd || !cwd)
+  async listSessions(cwd: string, search?: string): Promise<JsonValue> {
+    return filterMockSessions(
+      this.store.list().filter(info => info.cwd === cwd || !cwd),
+      search,
+    )
   }
 
-  async listAllSessions(): Promise<JsonValue> {
-    return this.store.list()
+  async listAllSessions(search?: string): Promise<JsonValue> {
+    return filterMockSessions(this.store.list(), search)
   }
 
   async createSession(cwd: string): Promise<JsonValue> {

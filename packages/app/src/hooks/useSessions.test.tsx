@@ -85,7 +85,7 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(loadPiSessionsForCwdMock).toHaveBeenCalledWith('/workspace/demo')
+    expect(loadPiSessionsForCwdMock).toHaveBeenCalledWith('/workspace/demo', undefined, undefined, undefined)
   })
 
   it('passes the scoped directory when removing a session', async () => {
@@ -122,7 +122,7 @@ describe('useSessions', () => {
       await Promise.resolve()
     })
 
-    expect(loadPiSessionsForCwdMock).toHaveBeenCalledWith('/workspace/demo')
+    expect(loadPiSessionsForCwdMock).toHaveBeenCalledWith('/workspace/demo', undefined, undefined, undefined)
     expect(result.current.sessions.map(session => session.id)).toEqual(['session-1'])
   })
 
@@ -412,7 +412,10 @@ describe('useSessions', () => {
     rerender({ directory: '/workspace/new' })
     await advance(0)
     await advance(10000)
-    expect(loadPiSessionsForCwdMock.mock.calls).toEqual([['/workspace/old'], ['/workspace/new']])
+    expect(loadPiSessionsForCwdMock.mock.calls).toEqual([
+      ['/workspace/old', undefined, undefined, undefined],
+      ['/workspace/new', undefined, undefined, undefined],
+    ])
     expect(result.current.sessions.map(session => session.id)).toEqual(['fresh'])
     expect(result.current.error).toBeNull()
   })

@@ -148,11 +148,16 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
       try {
         for (let retryAttempt = 0; ; retryAttempt++) {
           try {
+            // Server-side search: with `allMessagesText` no longer shipped by
+            // default, transcript matches must be resolved on the worker.
+            const searchArg = queryParams.search?.trim() || undefined
             const nativeSessions = normalizedDirectory
               ? await (serverId
-                  ? loadPiSessionsForCwd(normalizedDirectory, retryAbort.signal, serverId)
-                  : loadPiSessionsForCwd(normalizedDirectory))
-              : await (serverId ? loadPiSessions(retryAbort.signal, serverId) : loadPiSessions())
+                  ? loadPiSessionsForCwd(normalizedDirectory, retryAbort.signal, serverId, searchArg)
+                  : loadPiSessionsForCwd(normalizedDirectory, undefined, undefined, searchArg))
+              : await (serverId
+                  ? loadPiSessions(retryAbort.signal, serverId, searchArg)
+                  : loadPiSessions(undefined, undefined, searchArg))
             const mapped = nativeSessions
               .map(piSessionInfoToUiSession)
               .filter((session): session is UiSession => session !== null)

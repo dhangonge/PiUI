@@ -353,6 +353,27 @@ export class SessionHost {
   }
 
   private async findSessionOnDisk(sessionId: string): Promise<{ cwd: string; sessionFile: string } | undefined> {
+    // Scan the Pi sessions directory directly for `<ts>_<sessionId>.jsonl` —
+    // two readdirs, no worker round trip. The catalog list below is the
+    // fallback for custom session directories.
+    try {
+      const root = join(homedir(), '.pi', 'agent', 'sessions')
+      const suffix = `_${sessionId}.jsonl`
+      const dirs = await readdir(root, { withFileTypes: true }).catch(() => [])
+      for (const dir of dirs) {
+        if (!dir.isDirectory()) continue
+        const files = await readdir(join(root, dir.name)).catch(() => [])
+        const match = files.find(file => file.endsWith(suffix))
+        if (!match) continue
+        const sessionFile = join(root, dir.name, match)
+        const firstLine = await readFirstLine(sessionFile)
+        const cwd = firstLine ? parseHeaderCwd(firstLine) : undefined
+        if (cwd) return { cwd, sessionFile }
+      }
+    } catch {
+      // Fall through to the catalog list.
+    }
+
     try {
       const listed = await this.catalogCommand('session.listAll', undefined, { retry: true, idempotent: true })
       if (Array.isArray(listed)) {
@@ -369,29 +390,9 @@ export class SessionHost {
         }
       }
     } catch {
-      // Fall back to the legacy default directory scan below.
+      // Unreachable worker: report the session as not found below.
     }
-
-    // Scan the Pi sessions directory directly for `<ts>_<sessionId>.jsonl` —
-    // more reliable than the catalog list, and reads cwd from the file header.
-    try {
-      const root = join(homedir(), '.pi', 'agent', 'sessions')
-      const suffix = `_${sessionId}.jsonl`
-      const dirs = await readdir(root, { withFileTypes: true }).catch(() => [])
-      for (const dir of dirs) {
-        if (!dir.isDirectory()) continue
-        const files = await readdir(join(root, dir.name)).catch(() => [])
-        const match = files.find(file => file.endsWith(suffix))
-        if (!match) continue
-        const sessionFile = join(root, dir.name, match)
-        const firstLine = await readFirstLine(sessionFile)
-        const cwd = firstLine ? parseHeaderCwd(firstLine) : undefined
-        if (cwd) return { cwd, sessionFile }
-      }
-      return undefined
-    } catch {
-      return undefined
-    }
+    return undefined
   }
 
   async piRegistry(signal?: AbortSignal): Promise<PiRegistrySnapshot> {

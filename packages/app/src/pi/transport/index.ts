@@ -81,6 +81,7 @@ export type PiBranchGetParams = {
 
 export type PiSessionListParams = {
   cwd: string
+  search?: string
 }
 
 export type PiSessionOpenParams = {
@@ -496,8 +497,12 @@ export function listPiSessions(
   return postPiGlobalCommand<PiSessionListResult>('session.list', params, signal, serverId)
 }
 
-export function listAllPiSessions(signal?: AbortSignal, serverId?: string): Promise<PiSessionListResult> {
-  return postPiGlobalCommand<PiSessionListResult>('session.listAll', undefined, signal, serverId)
+export function listAllPiSessions(
+  signal?: AbortSignal,
+  serverId?: string,
+  search?: string,
+): Promise<PiSessionListResult> {
+  return postPiGlobalCommand<PiSessionListResult>('session.listAll', search ? { search } : undefined, signal, serverId)
 }
 
 export function createPiSession(cwd: string, signal?: AbortSignal, serverId?: string): Promise<PiSessionCreateResult> {
