@@ -2,7 +2,7 @@
   "packages/app/src/components/FileExplorer.tsx": 2064,
   "packages/app/src/components/DiffViewer.tsx": 1997,
   "packages/app/src/features/chat/InputBox.tsx": 1939,
-  "packages/app/src/features/pi-chat/PiChatPane.tsx": 1866,
+  "packages/app/src/features/pi-chat/PiChatPane.tsx": 1752,
   "packages/pi-worker/src/runtime/real-session.integration.test.ts": 1626,
   "packages/app/src/components/MarkdownRenderer.tsx": 1621,
   "packages/app/src/components/MarkdownRenderer.test.tsx": 1522,

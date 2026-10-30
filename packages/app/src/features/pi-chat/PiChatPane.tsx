@@ -814,7 +814,7 @@ export function PiChatPane({
   // 放在这个位置（fork seed effect 之后）是有意的：hook 内部的镜像回填
   // effect 随调用点注册，注册顺序必须排在 fork seed effect 之后。
   const inputBoxRef = useRef<InputBoxHandle>(null)
-  const activeServerKey = `${activeServer?.id ?? ''}|${activeServer?.token ?? ''}|${activeServer?.url ?? ''}`
+  const activeServerKey = JSON.stringify([activeServer?.id, activeServer?.token, activeServer?.url])
   const { handleTextChange, clearExtensionEditorState } = usePiExtensionEditorBridge({
     sessionId,
     inputBoxRef,

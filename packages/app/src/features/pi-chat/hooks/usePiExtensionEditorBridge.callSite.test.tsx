@@ -1,6 +1,6 @@
-import { act, render } from '@testing-library/react'
+import { act, cleanup, render } from '@testing-library/react'
 import { useEffect, useRef, type RefObject } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { extensionUiStore } from '../../../pi/extensionUiStore'
 import type { InputBoxHandle } from '../../chat/index.js'
 import { EDITOR_SYNC_DEBOUNCE_MS, usePiExtensionEditorBridge } from './usePiExtensionEditorBridge'
@@ -38,7 +38,7 @@ function PaneCallSite({ sessionId, server, onReady }: CallSiteProps) {
   const lastEditorTextRef = useRef<string | undefined>(undefined)
   const sessionUnavailableRef = useRef(false)
   const inputBoxRef: RefObject<InputBoxHandle | null> = useRef(null)
-  const activeServerKey = `${server?.id ?? ''}|${server?.token ?? ''}|${server?.url ?? ''}`
+  const activeServerKey = JSON.stringify([server?.id, server?.token, server?.url])
   const { handleTextChange } = usePiExtensionEditorBridge({
     sessionId,
     inputBoxRef,
@@ -75,6 +75,11 @@ describe('editor bridge call site (PiChatPane shape)', () => {
     extensionUiStore.reset()
   })
 
+  afterEach(() => {
+    cleanup()
+    vi.useRealTimers()
+  })
+
   it('syncs the typed text to the current session when nothing switches', () => {
     const { type } = mountCallSite({ sessionId: 'session-1', server: SERVER_A })
 
@@ -99,6 +104,37 @@ describe('editor bridge call site (PiChatPane shape)', () => {
 
     type('draft')
     rerender(<PaneCallSite sessionId="session-1" server={SERVER_B} onReady={vi.fn()} />)
+    act(() => vi.advanceTimersByTime(EDITOR_SYNC_DEBOUNCE_MS))
+
+    expect(setEditorStateMock.mock.calls).toEqual([])
+  })
+
+  it.each([
+    {
+      name: 'token-only changes',
+      initial: SERVER_A,
+      next: { ...SERVER_A, token: 'replacement' },
+    },
+    {
+      name: 'URL-only changes',
+      initial: SERVER_A,
+      next: { ...SERVER_A, url: 'http://replacement.test' },
+    },
+    {
+      name: 'separator-containing identities',
+      initial: { id: 'server|part', token: 'credential', url: 'http://same.test' },
+      next: { id: 'server', token: 'part|credential', url: 'http://same.test' },
+    },
+    {
+      name: 'missing versus empty credentials',
+      initial: { id: 'server', url: 'http://same.test' },
+      next: { id: 'server', token: '', url: 'http://same.test' },
+    },
+  ])('drops pending sync for $name', ({ initial, next }) => {
+    const { type, rerender } = mountCallSite({ sessionId: 'session-1', server: initial })
+
+    type('draft')
+    rerender(<PaneCallSite sessionId="session-1" server={next} onReady={vi.fn()} />)
     act(() => vi.advanceTimersByTime(EDITOR_SYNC_DEBOUNCE_MS))
 
     expect(setEditorStateMock.mock.calls).toEqual([])
