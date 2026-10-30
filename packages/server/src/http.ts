@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
+import { gzipSync } from 'node:zlib'
 import {
   PI_PARITY_SDK_VERSION,
   PROTOCOL_VERSION,
@@ -28,16 +30,99 @@ const CORS_HEADERS: Record<string, string> = {
   'access-control-allow-headers': 'content-type,authorization,if-match',
 }
 
+/** 小于该阈值的 JSON 不压缩：gzip 头 + 缩小收益抵不过 CPU 与流控开销。 */
+const GZIP_MIN_BYTES = 1024
+
+/**
+ * sendJson 只拿到 res，但编码协商和条件请求都要看请求头。请求进入时把
+ * req 挂在这里，调用点签名保持不变（WeakMap 随 res 回收，无泄漏）。
+ */
+const responseRequests = new WeakMap<ServerResponse, IncomingMessage>()
+
+function acceptsGzip(req: IncomingMessage | undefined): boolean {
+  const header = req?.headers['accept-encoding']
+  if (!header) return false
+  for (const part of header.split(',')) {
+    const [rawName, ...params] = part.split(';')
+    const name = rawName!.trim().toLowerCase()
+    if (name !== 'gzip' && name !== '*') continue
+    const q = params.map(p => p.trim()).find(p => /^q=/i.test(p))
+    if (q) {
+      const weight = Number.parseFloat(q.slice(2))
+      // q=0 是显式拒绝；畸形 q 按不可接受处理，回退明文
+      if (!Number.isFinite(weight) || weight <= 0) continue
+    }
+    return true
+  }
+  return false
+}
+
+/**
+ * 强 ETag：内容 sha1 的 base64url（27 字符，正好覆盖 20 字节摘要）。
+ * 压缩与明文是两个不同的表示，必须给不同的验证器，否则拿到 gzip 实体
+ * 的客户端会用它去命中明文，反之亦然。
+ */
+function etagFor(payload: Buffer, gzipped: boolean): string {
+  const digest = createHash('sha1').update(payload).digest('base64url')
+  return `"${digest}${gzipped ? '-gzip' : ''}"`
+}
+
+function matchesIfNoneMatch(header: string | undefined, etag: string): boolean {
+  if (!header) return false
+  for (const candidate of header.split(',')) {
+    const value = candidate.trim()
+    if (!value) continue
+    if (value === '*') return true
+    // If-None-Match 用弱比较：忽略 W/ 前缀
+    if ((value.startsWith('W/') ? value.slice(2) : value) === etag) return true
+  }
+  return false
+}
+
+/** 合并已有 Vary（例如鉴权前写入的 Origin），不覆盖。 */
+function mergedVary(res: ServerResponse, ...values: string[]): string | undefined {
+  const existing = res.getHeader('vary')
+  const tokens = new Set<string>()
+  for (const raw of [...(existing === undefined ? [] : String(existing).split(',')), ...values]) {
+    const token = raw.trim()
+    if (token) tokens.add(token)
+  }
+  return tokens.size > 0 ? [...tokens].join(', ') : undefined
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown): boolean {
   if (res.destroyed || res.writableEnded) return false
-  const data = JSON.stringify(body)
+  const req = responseRequests.get(res)
+  const data = Buffer.from(JSON.stringify(body), 'utf8')
+  // 204/304 没有 body，压缩与内容校验器都无意义；304 也是这里自己产出的
+  const bodyStatus = status !== 204 && status !== 304
+  const gzipped = bodyStatus && data.length >= GZIP_MIN_BYTES && acceptsGzip(req)
+  // POST 命令接口不是幂等读，ETag 语义不成立：只有 GET 200 带验证器
+  const validators = bodyStatus && status === 200 && req?.method === 'GET'
+  const headers: Record<string, string | number> = {
+    'content-type': 'application/json; charset=utf-8',
+    ...CORS_HEADERS,
+  }
+  if (gzipped) headers['content-encoding'] = 'gzip'
+  const vary = mergedVary(res, ...(gzipped ? ['Accept-Encoding'] : []))
+  if (vary) headers.vary = vary
   try {
-    res.writeHead(status, {
-      'content-type': 'application/json; charset=utf-8',
-      'content-length': Buffer.byteLength(data),
-      ...CORS_HEADERS,
-    })
-    res.end(data)
+    const etag = validators ? etagFor(data, gzipped) : undefined
+    if (etag) {
+      headers.etag = etag
+      // no-cache 让客户端保存实体但每次重校验：命中即 304，省掉整个 body
+      headers['cache-control'] = 'no-cache'
+      if (matchesIfNoneMatch(req?.headers['if-none-match'], etag)) {
+        // 304 保留 CORS / ETag / Vary，但不带 body 也不带 content-length
+        res.writeHead(304, headers)
+        res.end()
+        return true
+      }
+    }
+    const payload = gzipped ? gzipSync(data) : data
+    headers['content-length'] = payload.length
+    res.writeHead(status, headers)
+    res.end(payload)
     return true
   } catch {
     return false
@@ -204,6 +289,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
 
   const server = createServer(async (req, res) => {
     const scope = requestScope(req, res)
+    responseRequests.set(res, req)
     try {
       const url = parseUrl(req)
       if (!url) {
@@ -352,6 +438,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
       const status = statusForError(error)
       return sendProblem(res, status, error)
     } finally {
+      responseRequests.delete(res)
       scope.cleanup()
     }
   })

@@ -32,6 +32,18 @@ function contentType(path: string): string {
   return MIME_TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream'
 }
 
+/** If-None-Match 弱比较，支持逗号分隔列表与 `*`。 */
+function matchesIfNoneMatch(header: string | undefined, etag: string): boolean {
+  if (!header) return false
+  for (const candidate of header.split(',')) {
+    const value = candidate.trim()
+    if (!value) continue
+    if (value === '*') return true
+    if ((value.startsWith('W/') ? value.slice(2) : value) === etag) return true
+  }
+  return false
+}
+
 /** Resolve a URL path inside root; returns undefined for traversal attempts. */
 export function resolveStaticPath(root: string, urlPath: string): string | undefined {
   let decoded: string
@@ -65,13 +77,30 @@ export function createStaticServer(root: string): StaticServer | undefined {
 
   if (!isInsideRoot(canonicalIndex)) return undefined
 
-  const sendFile = (res: ServerResponse, path: string, headOnly: boolean, cache: boolean): boolean => {
-    res.writeHead(200, {
+  const sendFile = (
+    req: IncomingMessage,
+    res: ServerResponse,
+    path: string,
+    headOnly: boolean,
+    cache: boolean,
+  ): boolean => {
+    const stats = statSync(path)
+    // 内容哈希要整文件读一遍，静态文件用 size+mtime 做验证器：同一 inode 改写
+    // 必然刷新 mtime（ms 精度），代价是一次 stat——已在手。
+    const etag = `"${stats.size.toString(36)}-${Math.trunc(stats.mtimeMs).toString(36)}"`
+    const headers: Record<string, string | number> = {
       'content-type': contentType(path),
-      'content-length': statSync(path).size,
+      etag,
       // 指纹资产随便缓存；index.html 必须每次重取，否则发新版用户看不到
       'cache-control': cache ? 'public, max-age=31536000, immutable' : 'no-cache',
-    })
+    }
+    if (matchesIfNoneMatch(req.headers['if-none-match'], etag)) {
+      res.writeHead(304, headers)
+      res.end()
+      return true
+    }
+    headers['content-length'] = stats.size
+    res.writeHead(200, headers)
     if (headOnly) {
       res.end()
       return true
@@ -93,11 +122,11 @@ export function createStaticServer(root: string): StaticServer | undefined {
         }
         if (!isInsideRoot(physicalPath)) return false
         const fingerprinted = /[.-][0-9a-zA-Z_-]{8,}\.(js|css|woff2?|png|jpg|svg|webp)$/.test(physicalPath)
-        return sendFile(res, physicalPath, headOnly, fingerprinted)
+        return sendFile(req, res, physicalPath, headOnly, fingerprinted)
       }
       // SPA fallback：客户端路由的路径都回 index.html
       if (!extname(urlPath)) {
-        return sendFile(res, canonicalIndex, headOnly, false)
+        return sendFile(req, res, canonicalIndex, headOnly, false)
       }
       return false
     },

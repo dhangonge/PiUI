@@ -43,39 +43,51 @@ export function entriesPageFromEntries<T>(
   const before = decoded ? entries.findIndex(entry => entryIdOf(entry) === decoded.beforeId) : entries.length
   if (before < 0) throw staleCursor('cursor anchor is no longer in the session')
   const emptyPage = { head, items: [], checkpoint: options.checkpoint, hasMore: before > 0 }
-  if (Buffer.byteLength(JSON.stringify(emptyPage), 'utf8') > options.maxBytes) {
+  if (bytesOf(JSON.stringify(emptyPage)) > options.maxBytes) {
     throw Object.assign(new Error('page metadata exceeds the byte limit'), { code: 'FILE_TOO_LARGE' })
   }
+  // 字节核算：不再每加一条就整页 stringify 一次（那是 O(k²)），而是把页的固定部分算一次，
+  // 逐条只累加单条序列化字节与条目间逗号，总成本 O(k)。
+  // 页的 JSON 形状固定，键序即对象字面量插入序，undefined 值的键会被 JSON.stringify 丢掉：
+  //   {"head":H,"items":[i0,i1,…][,"checkpoint":C][,"beforeCursor":"B"]"hasMore":M}
+  // 于是整页字节数 = prefix + items + suffix + cursor：
+  //   prefix = '{"head":' + H + ',"items":['
+  //   items  = Σ|i_n| + (n-1) 个逗号
+  //   suffix = ']' + [',"checkpoint":' + C] + ',"hasMore":' + M + '}'
+  //   cursor = [',"beforeCursor":' + B 的 JSON 字面量]（B 含首条 id，故逐条算，O(1) 不碰整页）
+  // UTF-8 字节数在字符串拼接时可加，所以这个和恒等于最终 JSON.stringify(page) 的字节数。
+  const prefixBytes = bytesOf('{"head":') + bytesOf(JSON.stringify(head)) + bytesOf(',"items":[')
+  const checkpointBytes =
+    options.checkpoint === undefined ? 0 : bytesOf(',"checkpoint":') + bytesOf(JSON.stringify(options.checkpoint))
+  const suffixBytes = bytesOf(']') + checkpointBytes + bytesOf(',"hasMore":') + bytesOf('}') + bytesOf('false')
+  const cursorKeyBytes = bytesOf(',"beforeCursor":')
   const selected: JsonObject[] = []
+  let itemsBytes = 0
   let index = before - 1
   while (index >= 0 && selected.length < options.limit) {
     const item = serialize(entries[index]!)
     if (typeof item.id !== 'string') {
       throw Object.assign(new Error('Pi session entry id is not a string'), { code: 'NATIVE_DATA_NOT_JSON' })
     }
-    const candidate = [item, ...selected]
-    const candidateStart = index
-    const candidateCursor =
-      candidateStart > 0 && candidate[0]
-        ? encodeCursor({ v: 1, epoch: head.epoch, beforeId: String(candidate[0].id) })
-        : undefined
-    const candidatePage = {
-      head,
-      items: candidate,
-      checkpoint: options.checkpoint,
-      beforeCursor: candidateCursor,
-      hasMore: candidateStart > 0,
-    }
-    const candidateBytes = Buffer.byteLength(JSON.stringify(candidatePage), 'utf8')
+    const hasMore = index > 0
+    const cursor = hasMore ? encodeCursor({ v: 1, epoch: head.epoch, beforeId: String(item.id) }) : undefined
+    const candidateItemsBytes = itemsBytes + bytesOf(JSON.stringify(item)) + (selected.length ? 1 : 0)
+    const cursorBytes = cursor === undefined ? 0 : cursorKeyBytes + bytesOf(JSON.stringify(cursor))
+    // hasMore 为 true 时 'true' 比 suffix 里预留的 'false' 少 1 字节
+    const hasMoreAdjust = hasMore ? 1 : 0
+    const candidateBytes = prefixBytes + candidateItemsBytes + suffixBytes + cursorBytes - hasMoreAdjust
     if (candidateBytes > options.maxBytes) {
       if (!selected.length)
         throw Object.assign(new Error('entry exceeds the page byte limit'), { code: 'FILE_TOO_LARGE' })
       break
     }
-    selected.unshift(item)
+    selected.push(item)
+    itemsBytes = candidateItemsBytes
     index -= 1
   }
   const start = index + 1
+  // 选中项是从尾往头 push 的，末尾整体反转回正序（原来是逐条 unshift，O(k²)）
+  selected.reverse()
   return {
     head,
     items: selected,
@@ -86,6 +98,10 @@ export function entriesPageFromEntries<T>(
         : undefined,
     hasMore: start > 0,
   }
+}
+
+function bytesOf(text: string): number {
+  return Buffer.byteLength(text, 'utf8')
 }
 
 export function imageAttachmentFromEntry(

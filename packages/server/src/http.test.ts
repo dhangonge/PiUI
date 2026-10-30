@@ -6,8 +6,10 @@ import { after, describe, it } from 'node:test'
 process.env.PIUI_WORKER_HANDSHAKE_TIMEOUT_MS ??= '60000'
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { gunzipSync } from 'node:zlib'
 import { createAppServer, type AppServer } from './http.ts'
 import { PI_PARITY_SDK_VERSION } from '@piui/protocol'
 
@@ -42,6 +44,42 @@ async function request(
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   })
   return { status: response.status, json: await response.json().catch(() => undefined) }
+}
+
+/**
+ * 裸 http 客户端：fetch/undici 默认自带 accept-encoding 并自动解压，
+ * 会把 content-encoding 与线上字节数都藏起来，压缩/304 只能这样测。
+ */
+async function rawRequest(
+  port: number,
+  method: string,
+  requestPath: string,
+  headers: Record<string, string> = {},
+  body?: unknown,
+): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: Buffer }> {
+  return await new Promise((resolve, reject) => {
+    const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body), 'utf8')
+    const req = httpRequest(
+      {
+        host: '127.0.0.1',
+        port,
+        method,
+        path: requestPath,
+        headers: {
+          ...headers,
+          ...(payload ? { 'content-type': 'application/json', 'content-length': String(payload.length) } : {}),
+        },
+      },
+      res => {
+        const chunks: Buffer[] = []
+        res.on('data', (chunk: Buffer) => chunks.push(chunk))
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }))
+      },
+    )
+    req.on('error', reject)
+    if (payload) req.write(payload)
+    req.end()
+  })
 }
 
 describe('http api', () => {
@@ -417,5 +455,93 @@ describe('http api', () => {
       { body: { echo: 'hi' } },
     )
     assert.equal(goodTool.status, 202)
+  })
+  it('gzip-compresses large JSON for clients that accept it', async () => {
+    const app = createAppServer({ authToken: null })
+    const port = await listen(app)
+    cleanups.push(() => app.dispose())
+
+    const plain = await rawRequest(port, 'GET', '/api/v1/host/registry')
+    assert.equal(plain.status, 200)
+    assert.equal(plain.headers['content-encoding'], undefined)
+    assert.equal(Number(plain.headers['content-length']), plain.body.length)
+    assert.ok(plain.body.length >= 1024, `registry payload too small to exercise gzip: ${plain.body.length}`)
+
+    const compressed = await rawRequest(port, 'GET', '/api/v1/host/registry', { 'accept-encoding': 'gzip, deflate' })
+    assert.equal(compressed.status, 200)
+    assert.equal(compressed.headers['content-encoding'], 'gzip')
+    assert.match(String(compressed.headers.vary), /Accept-Encoding/)
+    // content-length 必须是压缩后长度，否则客户端会等不到 body 结束
+    assert.equal(Number(compressed.headers['content-length']), compressed.body.length)
+    assert.deepEqual(JSON.parse(gunzipSync(compressed.body).toString('utf8')), JSON.parse(plain.body.toString('utf8')))
+    assert.ok(compressed.body.length < plain.body.length)
+    console.log(
+      `[gzip] registry ${plain.body.length} B -> ${compressed.body.length} B (${((compressed.body.length / plain.body.length) * 100).toFixed(1)}%)`,
+    )
+
+    // q=0 是显式拒绝，不能被当成接受
+    const refused = await rawRequest(port, 'GET', '/api/v1/host/registry', { 'accept-encoding': 'gzip;q=0' })
+    assert.equal(refused.headers['content-encoding'], undefined)
+    assert.equal(Number(refused.headers['content-length']), refused.body.length)
+
+    // 小响应低于阈值：即便接受 gzip 也不压
+    const small = await rawRequest(port, 'GET', '/api/v1/host/health', { 'accept-encoding': 'gzip' })
+    assert.equal(small.status, 200)
+    assert.equal(small.headers['content-encoding'], undefined)
+    assert.ok(small.body.length < 1024)
+  })
+
+  it('answers matching If-None-Match with 304 and keeps CORS plus ETag', async () => {
+    const app = createAppServer({ authToken: null })
+    const port = await listen(app)
+    cleanups.push(() => app.dispose())
+    const origin = `http://127.0.0.1:${port}`
+
+    const first = await rawRequest(port, 'GET', '/api/v1/host/registry', { origin })
+    assert.equal(first.status, 200)
+    const etag = String(first.headers.etag)
+    assert.match(etag, /^"[A-Za-z0-9_-]{27}"$/)
+    assert.equal(first.headers['cache-control'], 'no-cache')
+    assert.equal(first.headers['access-control-allow-origin'], origin)
+
+    const notModified = await rawRequest(port, 'GET', '/api/v1/host/registry', { origin, 'if-none-match': etag })
+    assert.equal(notModified.status, 304)
+    assert.equal(notModified.body.length, 0)
+    assert.equal(notModified.headers.etag, etag)
+    // 304 也要能通过浏览器 CORS 校验，否则客户端只会看到网络错误
+    assert.equal(notModified.headers['access-control-allow-origin'], origin)
+    assert.match(String(notModified.headers.vary), /Origin/)
+    assert.equal(notModified.headers['content-length'], undefined)
+
+    // 逗号分隔列表、* 与弱比较（W/）都算命中
+    for (const header of [`"nope", ${etag}`, '*', `W/${etag}`]) {
+      const cached = await rawRequest(port, 'GET', '/api/v1/host/registry', { 'if-none-match': header })
+      assert.equal(cached.status, 304, header)
+    }
+
+    // 验证器不等 → 正常 200 带 body
+    const revalidated = await rawRequest(port, 'GET', '/api/v1/host/registry', { 'if-none-match': '"stale"' })
+    assert.equal(revalidated.status, 200)
+    assert.ok(revalidated.body.length > 0)
+
+    // gzip 与明文是两个表示，验证器不共用：拿明文 ETag + accept-encoding: gzip 必须回 200
+    const gzipFirst = await rawRequest(port, 'GET', '/api/v1/host/registry', { 'accept-encoding': 'gzip' })
+    const gzipEtag = String(gzipFirst.headers.etag)
+    assert.equal(gzipEtag, `${etag.slice(0, -1)}-gzip"`)
+    for (const [header, status] of [
+      [gzipEtag, 304],
+      [etag, 200],
+    ] as const) {
+      const cached = await rawRequest(port, 'GET', '/api/v1/host/registry', {
+        'accept-encoding': 'gzip',
+        'if-none-match': header,
+      })
+      assert.equal(cached.status, status, header)
+    }
+
+    // POST 命令接口不是幂等读：不发 ETag，也不因 If-None-Match 变 304
+    const post = await rawRequest(port, 'POST', '/api/v1/host/commands/workspaces.list', { 'if-none-match': '*' }, {})
+    assert.equal(post.status, 200)
+    assert.equal(post.headers.etag, undefined)
   })
 })

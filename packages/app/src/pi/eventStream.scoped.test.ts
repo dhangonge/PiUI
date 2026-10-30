@@ -155,7 +155,8 @@ describe('parallel Pi event streams', () => {
     emit(sockets[0], 'sessions.activity', { sessions: {} }, 'server', 7)
     emit(sockets[1], 'sessions.activity', { sessions: {} }, 'server', 19)
     ;(sockets[0] as PiSocket).onclose?.({ code: 1006 })
-    await vi.advanceTimersByTimeAsync(1000)
+    // 首次重连退避 1s，带 ±20% 抖动
+    await vi.advanceTimersByTimeAsync(1_500)
     ;(sockets[2] as PiSocket).onopen?.()
     expect(mocks.open).toHaveBeenCalledTimes(3)
     expect(new URL(mocks.open.mock.calls[2][0]).host).toBe('a.example.test')

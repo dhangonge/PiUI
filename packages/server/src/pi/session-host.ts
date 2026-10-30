@@ -63,14 +63,24 @@ const SERVER_SESSION_CAPABILITIES: PiCapability[] = [
   },
 ]
 
-const DEFAULT_IDLE_RUNTIME_TTL_MS = 2 * 60_000
+// attach 一个 runtime 的固定成本约 1s（加载 SDK + 插件 + 本地扩展），与会话
+// 大小无关。用户来回切会话时反复付这笔钱，所以空闲 runtime 默认常驻 15 分钟；
+// 数量上限（见下）兜住内存，空闲最旧的先回收。
+export const DEFAULT_IDLE_RUNTIME_TTL_MS = 15 * 60_000
+export const DEFAULT_IDLE_RUNTIME_MAX = 6
 const RUNTIME_REAPER_INTERVAL_MS = 30_000
 const ATTACH_BUSY_RETRIES = 12
 const ATTACH_BUSY_DELAY_MS = 100
 
-function idleRuntimeTtlMs(): number {
+export function idleRuntimeTtlMs(): number {
   const configured = Number(process.env.PIUI_SESSION_IDLE_TTL_MS)
   return Number.isFinite(configured) && configured >= 30_000 ? configured : DEFAULT_IDLE_RUNTIME_TTL_MS
+}
+
+/** 常驻 runtime 数量上限（PIUI_SESSION_IDLE_MAX，≥1 生效）。 */
+export function idleRuntimeMax(): number {
+  const configured = Number(process.env.PIUI_SESSION_IDLE_MAX)
+  return Number.isFinite(configured) && configured >= 1 ? Math.floor(configured) : DEFAULT_IDLE_RUNTIME_MAX
 }
 
 export class SessionHost {
@@ -717,16 +727,25 @@ export class SessionHost {
     this.lastAccess.set(sessionId, Date.now())
   }
 
-  private async reapIdleRuntimes(): Promise<void> {
+  async reapIdleRuntimes(): Promise<void> {
     const cutoff = Date.now() - idleRuntimeTtlMs()
-    const candidates = [...this.runtimes.values()].filter(session => {
+    const maxRuntimes = idleRuntimeMax()
+    const attached = [...this.runtimes.values()]
+
+    // 数量上限：超过上限时按 lastAccess 最旧优先驱逐空闲 runtime，让长时间
+    // 使用后的常驻集合有界。忙的（activity / pending work / closing）永不入选。
+    const overCap = new Set<string>()
+    if (attached.length > maxRuntimes) {
+      const idle = attached
+        .filter(session => this.isReapable(session.sessionId))
+        .sort((a, b) => (this.lastAccess.get(a.sessionId) ?? 0) - (this.lastAccess.get(b.sessionId) ?? 0))
+      for (const session of idle.slice(0, attached.length - maxRuntimes)) overCap.add(session.sessionId)
+    }
+
+    const candidates = attached.filter(session => {
+      if (!this.isReapable(session.sessionId)) return false
       const last = this.lastAccess.get(session.sessionId) ?? 0
-      return (
-        last < cutoff &&
-        !this.activity.has(session.sessionId) &&
-        !this.executor.hasPendingWork(session.sessionId) &&
-        !this.executor.isClosing(session.sessionId)
-      )
+      return last < cutoff || overCap.has(session.sessionId)
     })
 
     for (const session of candidates) {
@@ -752,6 +771,13 @@ export class SessionHost {
       // 单共享进程下无需补 warm：worker 常驻，下次 attach 只是进程内建
       // runtime（旧架构里回收后补预热是为了避免冷启动新进程）。
     }
+  }
+
+  /** 可回收前置条件：无 activity、无 pending work、不在关闭中。 */
+  private isReapable(sessionId: string): boolean {
+    return (
+      !this.activity.has(sessionId) && !this.executor.hasPendingWork(sessionId) && !this.executor.isClosing(sessionId)
+    )
   }
 
   private emitCommandUpdate(record: CommandRecord): void {

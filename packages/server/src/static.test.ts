@@ -68,6 +68,30 @@ test('fingerprinted assets get immutable caching, missing files return false', a
   }
 })
 
+test('static files carry an ETag and answer If-None-Match with 304', async () => {
+  await withWebRootAsync(async root => {
+    const server = createStaticServer(root)!
+    const first = await collect(res => server.serve(fakeRequest('GET'), res as never, '/assets/app-a1b2c3d4.js'))
+    assert.equal(first.status, 200)
+    const etag = first.headers.etag!
+    assert.match(etag, /^"[^"]+"$/)
+
+    const cached = await collect(res =>
+      server.serve(fakeRequest('GET', { 'if-none-match': etag }), res as never, '/assets/app-a1b2c3d4.js'),
+    )
+    assert.equal(cached.status, 304)
+    assert.equal(cached.body, '')
+    assert.equal(cached.headers.etag, etag)
+    assert.match(cached.headers['cache-control']!, /immutable/)
+
+    const fresh = await collect(res =>
+      server.serve(fakeRequest('GET', { 'if-none-match': '"stale"' }), res as never, '/assets/app-a1b2c3d4.js'),
+    )
+    assert.equal(fresh.status, 200)
+    assert.equal(fresh.body, 'console.log(1)')
+  })
+})
+
 test('static hosting rejects directory links that leave the web root', () => {
   const root = mkdtempSync(join(tmpdir(), 'piui-static-root-'))
   const outside = mkdtempSync(join(tmpdir(), 'piui-static-outside-'))
@@ -95,8 +119,8 @@ async function withWebRootAsync(fn: (root: string) => Promise<void>): Promise<vo
   }
 }
 
-function fakeRequest(method: string) {
-  return { method } as never
+function fakeRequest(method: string, headers: Record<string, string> = {}) {
+  return { method, headers } as never
 }
 
 function fakeResponse() {

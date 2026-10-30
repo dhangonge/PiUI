@@ -8,7 +8,13 @@ import { EventHub } from '../event-hub.ts'
 import { getDriverMode } from '@piui/pi-worker'
 import type { WorkerSession } from './worker-client.ts'
 import type { RuntimeSupervisor } from './supervisor.ts'
-import { SessionHost } from './session-host.ts'
+import {
+  DEFAULT_IDLE_RUNTIME_MAX,
+  DEFAULT_IDLE_RUNTIME_TTL_MS,
+  idleRuntimeMax,
+  idleRuntimeTtlMs,
+  SessionHost,
+} from './session-host.ts'
 
 test('SessionHost notifies the session list when the session file materializes on disk', async () => {
   const sessionFile = join(tmpdir(), `piui-session-host-${randomUUID()}.jsonl`)
@@ -360,9 +366,9 @@ test('SessionHost reaps an idle runtime without prewarming', async () => {
   const host = new SessionHost(supervisor, new EventHub())
   await host.openSession('/workspace', 'idle-session.jsonl')
 
-  // 把 lastAccess 改成过去，让 reaper 判定该会话空闲
+  // 把 lastAccess 改成过去，让 reaper 判定该会话空闲（默认 TTL 15 分钟）
   const lastAccess = (host as unknown as { lastAccess: Map<string, number> }).lastAccess
-  lastAccess.set('idle-session', Date.now() - 10 * 60_000)
+  lastAccess.set('idle-session', Date.now() - (DEFAULT_IDLE_RUNTIME_TTL_MS + 60_000))
 
   try {
     // reaper 每 30s 跑一次，直接触发内部回收逻辑
@@ -376,6 +382,149 @@ test('SessionHost reaps an idle runtime without prewarming', async () => {
   // 单共享进程架构：回收后不再补预热（worker 常驻，无需预热进程）
   assert.equal(prewarmed, 0)
   host.dispose()
+})
+
+function mockRuntimeHarness() {
+  const disposed: string[] = []
+  const supervisor = {
+    onEvent: () => () => {},
+    open: async (_cwd: string, sessionFile?: string) => {
+      const sessionId = (sessionFile ?? 'session-1.jsonl').replace(/\.jsonl$/, '')
+      return {
+        command: async (type: string) => (type === 'state.get' ? { sessionId } : {}),
+        getSessionId: () => sessionId,
+        getSessionFile: () => sessionFile ?? 'session-1.jsonl',
+        getCwd: () => '/workspace',
+        updateSessionIdentity: () => {},
+        onEvent: () => () => {},
+        onCrash: () => () => {},
+        onClose: () => () => {},
+        dispose: async () => {
+          disposed.push(sessionId)
+        },
+      } as unknown as WorkerSession
+    },
+  } as unknown as RuntimeSupervisor
+  const host = new SessionHost(supervisor, new EventHub())
+  return {
+    host,
+    disposed,
+    lastAccess: (host as unknown as { lastAccess: Map<string, number> }).lastAccess,
+    activity: (host as unknown as { activity: Map<string, unknown> }).activity,
+    reap: () => (host as unknown as { reapIdleRuntimes(): Promise<void> }).reapIdleRuntimes.call(host),
+    open: async (sessionIds: string[]) => {
+      for (const id of sessionIds) await host.openSession('/workspace', `${id}.jsonl`)
+    },
+  }
+}
+
+test('SessionHost idle runtime defaults: 15 minute TTL, 6 resident runtimes', () => {
+  const savedTtl = process.env.PIUI_SESSION_IDLE_TTL_MS
+  const savedMax = process.env.PIUI_SESSION_IDLE_MAX
+  try {
+    delete process.env.PIUI_SESSION_IDLE_TTL_MS
+    delete process.env.PIUI_SESSION_IDLE_MAX
+    assert.equal(DEFAULT_IDLE_RUNTIME_TTL_MS, 15 * 60_000)
+    assert.equal(idleRuntimeTtlMs(), 15 * 60_000)
+    assert.equal(DEFAULT_IDLE_RUNTIME_MAX, 6)
+    assert.equal(idleRuntimeMax(), 6)
+
+    process.env.PIUI_SESSION_IDLE_TTL_MS = '60000'
+    assert.equal(idleRuntimeTtlMs(), 60_000)
+    // 下限仍是 30s：更小的值不生效，回落默认
+    process.env.PIUI_SESSION_IDLE_TTL_MS = '1000'
+    assert.equal(idleRuntimeTtlMs(), DEFAULT_IDLE_RUNTIME_TTL_MS)
+
+    process.env.PIUI_SESSION_IDLE_MAX = '2'
+    assert.equal(idleRuntimeMax(), 2)
+    // 上限 ≥1 才生效
+    process.env.PIUI_SESSION_IDLE_MAX = '0'
+    assert.equal(idleRuntimeMax(), DEFAULT_IDLE_RUNTIME_MAX)
+    process.env.PIUI_SESSION_IDLE_MAX = 'nope'
+    assert.equal(idleRuntimeMax(), DEFAULT_IDLE_RUNTIME_MAX)
+  } finally {
+    if (savedTtl === undefined) delete process.env.PIUI_SESSION_IDLE_TTL_MS
+    else process.env.PIUI_SESSION_IDLE_TTL_MS = savedTtl
+    if (savedMax === undefined) delete process.env.PIUI_SESSION_IDLE_MAX
+    else process.env.PIUI_SESSION_IDLE_MAX = savedMax
+  }
+})
+
+test('SessionHost reaps the oldest idle runtimes when the resident count exceeds the cap', async () => {
+  const harness = mockRuntimeHarness()
+  const savedMax = process.env.PIUI_SESSION_IDLE_MAX
+  await harness.open(['s1', 's2', 's3', 's4'])
+  // 都刚刚用过（远未到 TTL）：证明下面的回收只由数量上限触发
+  const now = Date.now()
+  harness.lastAccess.set('s1', now - 4000)
+  harness.lastAccess.set('s2', now - 3000)
+  harness.lastAccess.set('s3', now - 2000)
+  harness.lastAccess.set('s4', now - 1000)
+
+  try {
+    // 默认上限 6：4 个常驻，不该被驱逐
+    await harness.reap()
+    assert.deepEqual(harness.host.listAttachedIds().sort(), ['s1', 's2', 's3', 's4'])
+
+    process.env.PIUI_SESSION_IDLE_MAX = '2'
+    await harness.reap()
+  } finally {
+    if (savedMax === undefined) delete process.env.PIUI_SESSION_IDLE_MAX
+    else process.env.PIUI_SESSION_IDLE_MAX = savedMax
+  }
+
+  // 最旧的两个被回收，最近的保留
+  assert.deepEqual(harness.host.listAttachedIds().sort(), ['s3', 's4'])
+  assert.deepEqual(harness.disposed.sort(), ['s1', 's2'])
+  harness.host.dispose()
+})
+
+test('SessionHost never evicts a busy runtime to satisfy the resident cap', async () => {
+  const harness = mockRuntimeHarness()
+  const savedMax = process.env.PIUI_SESSION_IDLE_MAX
+  await harness.open(['s1', 's2', 's3'])
+  const now = Date.now()
+  harness.lastAccess.set('s1', now - 3000) // 最旧但正在工作
+  harness.lastAccess.set('s2', now - 2000)
+  harness.lastAccess.set('s3', now - 1000)
+  harness.activity.set('s1', { type: 'busy' })
+
+  try {
+    process.env.PIUI_SESSION_IDLE_MAX = '2'
+    await harness.reap()
+  } finally {
+    if (savedMax === undefined) delete process.env.PIUI_SESSION_IDLE_MAX
+    else process.env.PIUI_SESSION_IDLE_MAX = savedMax
+  }
+
+  // 跳过最旧的忙会话，改驱逐次旧的那个
+  assert.equal(harness.host.getAttached('s1')?.sessionId, 's1')
+  assert.equal(harness.host.getAttached('s2'), undefined)
+  assert.equal(harness.host.getAttached('s3')?.sessionId, 's3')
+  assert.deepEqual(harness.disposed, ['s2'])
+  harness.host.dispose()
+})
+
+test('SessionHost evicts down to a PIUI_SESSION_IDLE_MAX=1 cap, keeping the newest', async () => {
+  const harness = mockRuntimeHarness()
+  const savedMax = process.env.PIUI_SESSION_IDLE_MAX
+  await harness.open(['s1', 's2', 's3'])
+  const now = Date.now()
+  harness.lastAccess.set('s1', now - 3000)
+  harness.lastAccess.set('s2', now - 2000)
+  harness.lastAccess.set('s3', now - 1000)
+
+  try {
+    process.env.PIUI_SESSION_IDLE_MAX = '1'
+    await harness.reap()
+  } finally {
+    if (savedMax === undefined) delete process.env.PIUI_SESSION_IDLE_MAX
+    else process.env.PIUI_SESSION_IDLE_MAX = savedMax
+  }
+
+  assert.deepEqual(harness.host.listAttachedIds(), ['s3'])
+  assert.deepEqual(harness.disposed.sort(), ['s1', 's2'])
+  harness.host.dispose()
 })
 
 test('SessionHost piRegistry falls back to the static snapshot while the worker is booting', async () => {

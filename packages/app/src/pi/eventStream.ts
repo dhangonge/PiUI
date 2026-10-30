@@ -49,6 +49,9 @@ import { loadPiSessionData, refreshPiBranch, refreshPiSessionState } from './con
 
 const PING_INTERVAL_MS = 25_000
 const RECONNECT_DELAY_MS = 1_000
+const RECONNECT_MAX_DELAY_MS = 30_000
+/** 距上次收到任意帧超过这个时长视为半死连接（等于连续两次 ping 没有回音） */
+const STALE_FRAME_MS = PING_INTERVAL_MS * 2
 const REFRESH_DEBOUNCE_MS = 150
 
 type PiEventPayload = {
@@ -98,6 +101,8 @@ export class PiEventStream {
 
   constructor(serverId?: string) {
     this.serverId = serverId
+    this.onPageVisible = this.handlePageVisible.bind(this)
+    this.onNetworkOnline = this.handleNetworkOnline.bind(this)
     if (!serverId) queueMicrotask(() => this.ensureManagementWatch())
   }
 
@@ -129,6 +134,12 @@ export class PiEventStream {
   private cursors = new Map<string, EventCursor>()
   private pingTimer: ReturnType<typeof setInterval> | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectAttempts = 0
+  /** 最后一次收到任意服务端帧的时间戳；看门狗靠它判断连接是否还活着 */
+  private lastFrameAt = 0
+  private resumeListenersAttached = false
+  private readonly onPageVisible: () => void
+  private readonly onNetworkOnline: () => void
   private branchRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private stateRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -267,6 +278,9 @@ export class PiEventStream {
     const ws = this.ws
     this.ws = null
     this.clearPing()
+    this.lastFrameAt = 0
+    this.reconnectAttempts = 0
+    this.detachResumeListeners()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -283,13 +297,23 @@ export class PiEventStream {
 
     const ws = openPiSocket(url.toString())
     this.ws = ws
+    this.attachResumeListeners()
 
     ws.onopen = () => {
       if (this.ws !== ws) return
+      this.reconnectAttempts = 0
+      this.lastFrameAt = Date.now()
       this.sendSubscribe()
       notifyReconnected(this.serverId)
+      this.clearPing()
       this.pingTimer = setInterval(() => {
-        this.send({ type: 'ping', protocolVersion: PROTOCOL_VERSION })
+        if (this.isStale()) {
+          // 半死连接（后台冻结 / 网络切换后 TCP 已黑）：WS 层可能很久都不报
+          // close，只能自己拉断，让 onclose 走重连
+          ws.close()
+          return
+        }
+        this.sendPing()
       }, PING_INTERVAL_MS)
     }
     ws.onmessage = e => {
@@ -297,23 +321,87 @@ export class PiEventStream {
       // swapped this.ws (server switch). Ignore messages from any socket that
       // is no longer the active one, mirroring the onclose identity check.
       if (this.ws !== ws) return
+      this.lastFrameAt = Date.now()
       this.handleRaw(String(e.data))
     }
     ws.onclose = () => {
       if (this.ws !== ws) return
       this.clearPing()
+      this.lastFrameAt = 0
       this.ws = null
       if (this.hasSubscriptions()) {
         if (this.reconnectTimer) return
         this.reconnectTimer = setTimeout(() => {
           this.reconnectTimer = null
           if (!this.ws) this.openSocket()
-        }, RECONNECT_DELAY_MS)
+        }, this.nextReconnectDelay())
       }
     }
     ws.onerror = () => {
       // close follows; reconnect handled there
     }
+  }
+
+  private isStale(): boolean {
+    return this.lastFrameAt > 0 && Date.now() - this.lastFrameAt >= STALE_FRAME_MS
+  }
+
+  private sendPing(): void {
+    this.send({ type: 'ping', protocolVersion: PROTOCOL_VERSION })
+  }
+
+  /**
+   * 1s → 2s → 4s … 上限 30s，±20% 抖动：断网恢复时多端不会同时扑向服务端。
+   * 每次参与计数（而不是在 onopen 里算）——open 被对端立刻关掉的循环也要退避。
+   */
+  private nextReconnectDelay(): number {
+    const base = Math.min(RECONNECT_DELAY_MS * 2 ** this.reconnectAttempts, RECONNECT_MAX_DELAY_MS)
+    this.reconnectAttempts += 1
+    const jitter = base * 0.2 * (Math.random() * 2 - 1)
+    return Math.round(base + jitter)
+  }
+
+  private attachResumeListeners(): void {
+    if (this.resumeListenersAttached) return
+    if (typeof document === 'undefined' || typeof window === 'undefined') return
+    this.resumeListenersAttached = true
+    document.addEventListener('visibilitychange', this.onPageVisible)
+    window.addEventListener('online', this.onNetworkOnline)
+  }
+
+  private detachResumeListeners(): void {
+    if (!this.resumeListenersAttached) return
+    this.resumeListenersAttached = false
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.onPageVisible)
+    if (typeof window !== 'undefined') window.removeEventListener('online', this.onNetworkOnline)
+  }
+
+  private handlePageVisible(): void {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+    this.resumeNow()
+  }
+
+  private handleNetworkOnline(): void {
+    this.resumeNow()
+  }
+
+  /** 回前台 / 网络恢复：跳过退避立即重连，socket 还活着就先探活。 */
+  private resumeNow(): void {
+    if (!this.hasSubscriptions()) return
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    if (this.ws && this.ws.readyState === PI_SOCKET_OPEN) {
+      // 后台期间定时器被冻结，回来的第一刻可能已经过了整个 ping 周期：
+      // 已经超时就当半死直接拉断，否则立刻 ping 一次探活
+      if (this.isStale()) this.ws.close()
+      else this.sendPing()
+      return
+    }
+    // 之前的失败大多来自后台冻结 / 网络切换，不是服务端在拒绝：回前台从 1s 重新起跳
+    this.reconnectAttempts = 0
+    if (!this.ws) this.openSocket()
   }
 
   private sendSubscribe(): void {
@@ -379,7 +467,11 @@ export class PiEventStream {
     if ('channel' in message && message.channel === 'control' && message.type === 'problem') {
       this.closeSocket()
       window.dispatchEvent(new CustomEvent('piui:event-stream-error', { detail: message.problem }))
+      return
     }
+    // pong / hello 无 channel：帧本身已经算“连接还活着”（看门狗在 onmessage
+    // 里记时间戳），这里只需显式消费，不要当未知消息处理
+    if ('type' in message && (message.type === 'pong' || message.type === 'hello')) return
   }
 
   private handleEvent(envelope: EventEnvelope): void {
