@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { PRESS_TRANSITION_CLASS } from '../../constants/animation'
+import { MOTION_EASE_OUT, PRESS_FEEDBACK_MS, PRESS_TRANSITION_CLASS } from '../../constants/animation'
 import { Button } from './Button'
 
 describe('Button', () => {
@@ -48,8 +48,8 @@ describe('Button', () => {
     expect(button).toHaveClass(PRESS_TRANSITION_CLASS)
     // Tailwind 4 的 scale-* 输出独立的 scale 属性，按压需要连它一起过渡
     expect(PRESS_TRANSITION_CLASS).toContain('transition-[background-color,color,opacity,scale]')
-    expect(PRESS_TRANSITION_CLASS).toContain('duration-[140ms]')
-    expect(PRESS_TRANSITION_CLASS).toContain('ease-[cubic-bezier(0.23,1,0.32,1)]')
+    expect(PRESS_TRANSITION_CLASS).toContain(`duration-[${PRESS_FEEDBACK_MS}ms]`)
+    expect(PRESS_TRANSITION_CLASS).toContain(`ease-[cubic-bezier(${MOTION_EASE_OUT.join(',')})]`)
   })
 
   it('保留按压 scale，并在减少动态效果下关掉缩放', () => {
