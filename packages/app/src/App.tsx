@@ -943,8 +943,6 @@ function App() {
                   overscrollBehaviorX: 'contain',
                   scrollbarWidth: 'none',
                   WebkitOverflowScrolling: 'touch',
-                  perspective: '1200px',
-                  perspectiveOrigin: '50% 50%',
                 }}
                 onScroll={handleMobilePagerScroll}
                 onTouchStart={handleMobilePagerInteractionStart}
@@ -988,7 +986,7 @@ function App() {
                   }}
                 >
                   <div
-                    className="mobile-chat-surface absolute inset-y-0 -left-4 -right-4 z-10 flex flex-col overflow-hidden bg-bg-100 rounded-xl shadow-[0_0_24px_hsl(var(--always-black)/0.15)] [contain:layout_paint]"
+                    className="mobile-chat-surface absolute inset-y-0 -left-4 -right-4 z-10 flex flex-col overflow-hidden bg-bg-100 rounded-xl shadow-[0_0_24px_hsl(var(--always-black)/0.15)]"
                     aria-hidden={mobileActivePage !== 'chat'}
                     inert={mobileActivePage !== 'chat'}
                   >

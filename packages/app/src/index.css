@@ -44,6 +44,13 @@
   transform: none;
 }
 
+/* 3D 透视只在真的在滑的时候挂。静止态没有 3D 渲染上下文，
+ * 子级的 backdrop-filter 不会被拉伸到 3D 图层里。 */
+.mobile-chat-pager[data-mobile-chat-moving] {
+  perspective: 1200px;
+  perspective-origin: 50% 50%;
+}
+
 .mobile-chat-pager[data-mobile-chat-moving] .mobile-chat-surface {
   transform: translate3d(var(--mobile-chat-offset-x, 0px), 0, 0) rotateY(var(--mobile-chat-rotate-y, 0deg))
     scale(var(--mobile-chat-scale, 1));
@@ -1069,6 +1076,33 @@ body {
   background-color: hsl(var(--bg-100) / 0.78);
   -webkit-backdrop-filter: blur(22px) saturate(200%);
   backdrop-filter: blur(22px) saturate(200%);
+}
+
+/* 滚动期间：叠加层彻底不用 backdrop-filter。
+ *
+ * 根因：backdrop-filter 元素压在 composited scrolling 的内容上时，Chromium
+ * 每帧都要把背板重新渲染一遍再模糊；它与同层邻居（Header、输入区 footer、
+ * todo 卡片）共享合成层，所以整层会被一起重新光栅化，邻居出现一帧未完成
+ * 绘制 → 看起来就是「所有叠加层一起闪」，连实色的 Header 也跑不掉。
+ * 滚动时退成实色（与模糊后的平均色接近），停下 SCROLL_IDLE_MS 后恢复。 */
+:root[data-glass][data-scroll-active] .glass,
+:root[data-glass][data-scroll-active] .glass-alt {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root[data-glass][data-scroll-active] .glass {
+  background-color: hsl(var(--bg-000));
+}
+
+:root[data-glass][data-scroll-active] .glass-alt {
+  background-color: hsl(var(--bg-100));
+}
+
+/* 消息正文里的 backdrop-blur 芯片（MarkdownRenderer / CodeBlock）同理 */
+:root[data-glass][data-scroll-active] [class*='backdrop-blur'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 /* 收起/展开的 200ms 里祖先 opacity < 1 会形成 backdrop root，玻璃拿不到模糊，
