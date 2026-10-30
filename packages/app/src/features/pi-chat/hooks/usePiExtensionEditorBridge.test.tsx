@@ -1,7 +1,11 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { extensionUiStore } from '../../../pi/extensionUiStore'
-import { EDITOR_SYNC_DEBOUNCE_MS, usePiExtensionEditorBridge } from './usePiExtensionEditorBridge'
+import {
+  EDITOR_SYNC_DEBOUNCE_MS,
+  usePiExtensionEditorBridge,
+  type PiExtensionEditorBridgeOptions,
+} from './usePiExtensionEditorBridge'
 
 const { setEditorStateMock } = vi.hoisted(() => ({ setEditorStateMock: vi.fn() }))
 
@@ -9,20 +13,24 @@ vi.mock('../../../pi/controllers/index.js', () => ({
   setPiExtensionEditorState: (...args: unknown[]) => setEditorStateMock(...args),
 }))
 
-function renderBridge(initial: { sessionId: string | null; unavailable?: boolean } = { sessionId: 'session-1' }) {
+type BridgeProps = Pick<PiExtensionEditorBridgeOptions, 'sessionId' | 'resetKey'>
+
+function renderBridge(
+  initial: BridgeProps & { unavailable?: boolean; lastEditorText?: string } = { sessionId: 'session-1' },
+) {
   const setEditorText = vi.fn()
   const inputBoxRef = { current: { setEditorText } }
+  // PiChatPane 的持有方式：ref 在父层声明（更早的位置），hook 按引用读写
+  const lastEditorTextRef = { current: initial.lastEditorText }
+  const sessionUnavailableRef = { current: initial.unavailable ?? false }
   const rendered = renderHook(
-    ({ sessionId, sessionUnavailable }: { sessionId: string | null; sessionUnavailable?: boolean }) =>
-      usePiExtensionEditorBridge({ sessionId, inputBoxRef, sessionUnavailable }),
+    (props: BridgeProps) =>
+      usePiExtensionEditorBridge({ ...props, inputBoxRef, lastEditorTextRef, sessionUnavailableRef }),
     {
-      initialProps: {
-        sessionId: initial.sessionId,
-        sessionUnavailable: initial.unavailable ?? false,
-      },
+      initialProps: { sessionId: initial.sessionId, resetKey: initial.resetKey } as BridgeProps,
     },
   )
-  return { ...rendered, setEditorText }
+  return { ...rendered, setEditorText, lastEditorTextRef, sessionUnavailableRef }
 }
 
 /** worker 侧的 state 刷新：标记来源为 'mirror' */
@@ -84,7 +92,8 @@ describe('usePiExtensionEditorBridge', () => {
     })
 
     it('does not sync while the session is unavailable', () => {
-      const { result } = renderBridge({ sessionId: 'session-1', unavailable: true })
+      const { result, sessionUnavailableRef } = renderBridge({ sessionId: 'session-1' })
+      sessionUnavailableRef.current = true
 
       act(() => result.current.handleTextChange('typed'))
       act(() => vi.advanceTimersByTime(EDITOR_SYNC_DEBOUNCE_MS))
@@ -101,14 +110,38 @@ describe('usePiExtensionEditorBridge', () => {
       expect(setEditorStateMock).not.toHaveBeenCalled()
     })
 
-    it('cancels the pending sync on demand (session / server switch)', () => {
-      const { result } = renderBridge()
+    it('cancels the pending sync when the session changes', () => {
+      const { result, rerender } = renderBridge({ sessionId: 'session-1' })
 
-      act(() => result.current.handleTextChange('typed'))
-      act(() => result.current.cancelEditorSync())
+      act(() => result.current.handleTextChange('draft for session-1'))
+      rerender({ sessionId: 'session-2' })
+
+      act(() => vi.advanceTimersByTime(EDITOR_SYNC_DEBOUNCE_MS))
+      expect(setEditorStateMock).not.toHaveBeenCalled()
+      // 新会话的输入照常同步
+      act(() => result.current.handleTextChange('draft for session-2'))
+      act(() => vi.advanceTimersByTime(EDITOR_SYNC_DEBOUNCE_MS))
+      expect(setEditorStateMock).toHaveBeenCalledWith('session-2', 'draft for session-2')
+    })
+
+    it('cancels the pending sync when the server changes (url/token under same session id)', () => {
+      const { result, rerender } = renderBridge({ sessionId: 'session-1', resetKey: 'server-a|tok|url' })
+
+      act(() => result.current.handleTextChange('draft on server-a'))
+      rerender({ sessionId: 'session-1', resetKey: 'server-b|tok|url' })
+
+      act(() => vi.advanceTimersByTime(EDITOR_SYNC_DEBOUNCE_MS))
+      expect(setEditorStateMock).not.toHaveBeenCalled()
+    })
+
+    it('keeps the pending sync when the server key is unchanged', () => {
+      const { result, rerender } = renderBridge({ sessionId: 'session-1', resetKey: 'server-a|tok|url' })
+
+      act(() => result.current.handleTextChange('draft'))
+      rerender({ sessionId: 'session-1', resetKey: 'server-a|tok|url' })
       act(() => vi.advanceTimersByTime(EDITOR_SYNC_DEBOUNCE_MS))
 
-      expect(setEditorStateMock).not.toHaveBeenCalled()
+      expect(setEditorStateMock).toHaveBeenCalledWith('session-1', 'draft')
     })
 
     it('cancels the pending sync on unmount', () => {
@@ -199,10 +232,9 @@ describe('usePiExtensionEditorBridge', () => {
       expect(setEditorText).toHaveBeenCalledTimes(1)
     })
 
-    it('treats fork-seeded text as already applied', () => {
-      const { result, setEditorText } = renderBridge()
+    it('treats text already registered by the caller (fork seed) as applied', () => {
+      const { setEditorText } = renderBridge({ sessionId: 'session-1', lastEditorText: 'seed text' })
 
-      act(() => result.current.setLastEditorText('seed text'))
       restoreEditorText('session-1', 'seed text')
 
       expect(setEditorText).not.toHaveBeenCalled()

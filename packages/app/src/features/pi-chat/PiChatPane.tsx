@@ -277,6 +277,7 @@ export function PiChatPane({
   // 即使 piSessionStateStore 因无事件流而 stale（如 bash 等待期），
   // 输入框发送按钮也保持「停止」状态，避免按钮变暗。
   const sessionActive = Boolean(sessionEntry)
+  const sessionUnavailableRef = useRef(false)
   const [isRetryingSession, setIsRetryingSession] = useState(false)
   // 本 pane 当前会话的实际工作区（来自会话列表或全局当前目录），用于 @ 补全根目录。
   const inputRootPath = useMemo(() => {
@@ -293,6 +294,9 @@ export function PiChatPane({
   const sessionUnavailable = Boolean(sessionId && !branch && branchError && isSessionNotFoundError(branchError))
   const sessionLoadError = Boolean(sessionId && !branch && branchError && !sessionUnavailable)
   const sessionBusy = Boolean(sessionId && !branch && branchError && isSessionBusyError(branchError))
+  useEffect(() => {
+    sessionUnavailableRef.current = sessionUnavailable || sessionLoadError
+  })
 
   const retrySession = useCallback(async () => {
     if (!sessionId || isRetryingSession) return
@@ -316,18 +320,6 @@ export function PiChatPane({
     return () => piEventStream.disconnect(sessionId)
   }, [boundServerId, activeServer?.token, activeServer?.url, sessionId, sessionLoadError, sessionUnavailable])
 
-  // ============================================
-  // Extension editor bridge: extension set/paste -> composer; composer
-  // text -> extension editor state (debounced)
-  // ============================================
-  const inputBoxRef = useRef<InputBoxHandle>(null)
-  const { handleTextChange, setLastEditorText, cancelEditorSync, clearExtensionEditorState } =
-    usePiExtensionEditorBridge({
-      sessionId,
-      inputBoxRef,
-      sessionUnavailable: sessionUnavailable || sessionLoadError,
-    })
-
   // Fork 带来的待编辑文本：进入目标会话时取走，灌进输入框。
   // fork 的 replacement 事件比命令结果先到时，导航会先于 stash 发生，
   // 所以既要在 sessionId 变化时尝试，也要订阅 stash 通知补漏；
@@ -335,6 +327,10 @@ export function PiChatPane({
   const [forkSeedText, setForkSeedText] = useState<string | undefined>(undefined)
   const forkSeedAppliedForRef = useRef<string | null>(null)
   const forkSeedHomeAppliedRef = useRef(false)
+  // 已应用到输入框的编辑器文本：由本层持有，桥接 hook 按引用读写。
+  // 必须声明在 fork seed effect 之前——hook 的镜像回填 effect 注册顺序
+  // 跟随 hook 调用点，种子要先消耗，旧镜像才不能抢先回填。
+  const lastEditorTextRef = useRef<string | undefined>(undefined)
   // fork stash 是外部 store：取到一次性种子后同步进本地 state（订阅外部系统同步，
   // 一次性消费语义无法用“渲染期间调整 state”表达，这里保留 effect 同步）
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -359,14 +355,14 @@ export function PiChatPane({
       // 让扩展编辑器状态和种子一致：worker 端新会话的 editorText 是空，
       // 同步 effect 会把种子抹掉；同时推到 worker，刷新后也能恢复
       extensionUiStore.editorCommand(sid, { kind: 'set', text: seed })
-      setLastEditorText(seed)
+      lastEditorTextRef.current = seed
       void setPiExtensionEditorState(sid, seed).catch(() => undefined)
     }
     applySeed(sessionId)
     return subscribeForkSeed(sid => {
       if (sid === sessionId) applySeed(sid)
     })
-  }, [sessionId, setLastEditorText])
+  }, [sessionId])
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // 树导航的编辑器草稿（undo 语义：回到用户消息前，文本进输入框）。
@@ -811,6 +807,22 @@ export function PiChatPane({
     return () => ro.disconnect()
   }, [])
 
+  // ============================================
+  // Extension editor bridge: extension set/paste -> composer; composer
+  // text -> extension editor state (debounced)
+  // ============================================
+  // 放在这个位置（fork seed effect 之后）是有意的：hook 内部的镜像回填
+  // effect 随调用点注册，注册顺序必须排在 fork seed effect 之后。
+  const inputBoxRef = useRef<InputBoxHandle>(null)
+  const activeServerKey = `${activeServer?.id ?? ''}|${activeServer?.token ?? ''}|${activeServer?.url ?? ''}`
+  const { handleTextChange, clearExtensionEditorState } = usePiExtensionEditorBridge({
+    sessionId,
+    inputBoxRef,
+    lastEditorTextRef,
+    sessionUnavailableRef,
+    resetKey: activeServerKey,
+  })
+
   const refreshTimerRefs = useRef(new Set<number>())
   const scheduleDelayedRefresh = useCallback((sid: string) => {
     const timer = window.setTimeout(() => {
@@ -824,12 +836,10 @@ export function PiChatPane({
   useEffect(() => {
     const timerRefs = refreshTimerRefs.current
     return () => {
-      // 会话 / 服务器切换与卸载：取消挂起的输入同步防抖
-      cancelEditorSync()
       for (const timer of timerRefs) window.clearTimeout(timer)
       timerRefs.clear()
     }
-  }, [activeServer?.id, activeServer?.token, activeServer?.url, sessionId, cancelEditorSync])
+  }, [activeServer?.id, activeServer?.token, activeServer?.url, sessionId])
 
   const handleSend = useCallback(
     async (text: string, attachments: Attachment[], options?: { delivery?: 'steer' | 'followUp' }) => {

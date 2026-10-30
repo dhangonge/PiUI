@@ -11,16 +11,22 @@ export interface PiExtensionEditorBridgeOptions {
   sessionId: string | null
   /** 输入框句柄：扩展 set/paste 与镜像恢复都通过它写入 composer */
   inputBoxRef: RefObject<InputBoxHandle | null>
+  /**
+   * 已应用到输入框的编辑器文本。由调用方持有并在原位置声明——fork seed
+   * effect 要先于本 hook 的镜像回填 effect 运行，所以这个 ref 必须留在
+   * 调用方「更早」的位置上，而不是在 hook 内部新建。
+   */
+  lastEditorTextRef: RefObject<string | undefined>
   /** 会话不可用（404 / 加载失败）时不再向服务端同步编辑器状态 */
-  sessionUnavailable?: boolean
+  sessionUnavailableRef: RefObject<boolean>
+  /** 会话 / 服务器身份；变化时取消防抖中的同步（切换、卸载） */
+  resetKey?: string
 }
 
 export interface PiExtensionEditorBridge {
   /** InputBox 的 onTextChange：记录本地最新文本 + 500ms 防抖同步到 worker */
   handleTextChange: (text: string) => void
-  /** 外部（fork 种子 / 树导航）已经把文本同步进 worker 时，登记为已知镜像值 */
-  setLastEditorText: (text: string) => void
-  /** 取消挂起的输入同步防抖（会话 / 服务器切换、卸载） */
+  /** 取消挂起的输入同步防抖 */
   cancelEditorSync: () => void
   /** 发送前清理：先取消防抖，再清空 worker 编辑器状态（顺序不可换） */
   clearExtensionEditorState: (targetSessionId: string) => void
@@ -34,11 +40,16 @@ export interface PiExtensionEditorBridge {
  * 输入过」或扩展真实发出 set/paste（source='extension'）时才允许回填，
  * 否则输入框会被打回旧文本。发送前必须先取消防抖、再清空 worker 状态，
  * 否则 500ms 后旧文本被写回 worker，下一次 state 刷新又会把它回填进输入框。
+ *
+ * 生效顺序约定：调用点必须排在 fork seed effect 之后（PiChatPane 里的原
+ * 位置），镜像回填才是「后跑」的那一个；否则旧镜像会先于种子回填输入框。
  */
 export function usePiExtensionEditorBridge({
   sessionId,
   inputBoxRef,
-  sessionUnavailable = false,
+  lastEditorTextRef,
+  sessionUnavailableRef,
+  resetKey,
 }: PiExtensionEditorBridgeOptions): PiExtensionEditorBridge {
   const extensionState = useSyncExternalStore(
     extensionUiStore.subscribe,
@@ -49,12 +60,7 @@ export function usePiExtensionEditorBridge({
   // worker 镜像比较，防止滞后的镜像把用户正在编辑的内容打回旧值。
   const localComposerTextRef = useRef<string | undefined>(undefined)
   const composerMountedRef = useRef(false)
-  const lastEditorTextRef = useRef<string | undefined>(undefined)
   const editorSyncTimerRef = useRef<number | null>(null)
-  const sessionUnavailableRef = useRef(false)
-  useEffect(() => {
-    sessionUnavailableRef.current = sessionUnavailable
-  })
 
   useEffect(() => {
     if (!extensionState || extensionState.editorText === lastEditorTextRef.current) return
@@ -71,7 +77,7 @@ export function usePiExtensionEditorBridge({
     }
     lastEditorTextRef.current = extensionState.editorText
     inputBoxRef.current?.setEditorText(extensionState.editorText)
-  }, [extensionState, sessionId, inputBoxRef])
+  }, [extensionState, sessionId, inputBoxRef, lastEditorTextRef])
 
   const cancelEditorSync = useCallback(() => {
     if (editorSyncTimerRef.current !== null) {
@@ -80,8 +86,8 @@ export function usePiExtensionEditorBridge({
     }
   }, [])
 
-  // 卸载取消挂起的同步（会话/服务器切换的清理由调用方用同一函数处理）
-  useEffect(() => cancelEditorSync, [cancelEditorSync])
+  // 会话 / 服务器切换与卸载：取消挂起的同步（只清 cleanup，不额外跳过一次同步）
+  useEffect(() => () => cancelEditorSync(), [sessionId, resetKey, cancelEditorSync])
 
   const handleTextChange = useCallback(
     (text: string) => {
@@ -100,12 +106,8 @@ export function usePiExtensionEditorBridge({
         void setPiExtensionEditorState(sessionId, text).catch(() => undefined)
       }, EDITOR_SYNC_DEBOUNCE_MS)
     },
-    [sessionId, cancelEditorSync],
+    [sessionId, sessionUnavailableRef, cancelEditorSync],
   )
-
-  const setLastEditorText = useCallback((text: string) => {
-    lastEditorTextRef.current = text
-  }, [])
 
   const clearExtensionEditorState = useCallback(
     (targetSessionId: string) => {
@@ -115,5 +117,5 @@ export function usePiExtensionEditorBridge({
     [cancelEditorSync],
   )
 
-  return { handleTextChange, setLastEditorText, cancelEditorSync, clearExtensionEditorState }
+  return { handleTextChange, cancelEditorSync, clearExtensionEditorState }
 }
