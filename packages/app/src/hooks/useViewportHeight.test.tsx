@@ -111,7 +111,7 @@ describe('useViewportHeight', () => {
 /**
  * Tauri Android 分支的契约（对 48344fd3 的原实现成立）：
  * 原生 MainActivity 用 setPadding 处理底部（键盘与系统栏取较大值），
- * 并注入 --safe-area-inset-* 全 0。Web 侧只跟踪 --app-height，
+ * 并注入底部 / 左右 safe area 为 0，顶部保留真实 inset。Web 侧只跟踪 --app-height，
  * 不能再叠一层 --keyboard-inset-bottom 或 safe-area padding。
  */
 describe('useViewportHeight (Tauri Android)', () => {
@@ -131,10 +131,12 @@ describe('useViewportHeight (Tauri Android)', () => {
 
   it('writes only --app-height from window.innerHeight', () => {
     setInnerHeight(915)
+    document.documentElement.style.setProperty('--safe-area-inset-top', '24px')
 
     renderTauriViewport()
 
     expect(readRootVar('--app-height')).toBe('915px')
+    expect(readRootVar('--safe-area-inset-top')).toBe('24px')
     expect(readRootVar('--keyboard-inset-bottom')).toBe('')
     expect(readRootVar('--safe-area-inset-bottom')).toBe('')
     // 浏览器分支临时插入的 safe-area probe 不得在 Tauri 分支出现或泄漏。

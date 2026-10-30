@@ -12,14 +12,16 @@ import { useBackClose } from './useBackClose'
 
 const BACK_CLOSE_KEY = '__piuiBackClose'
 
-type HookHandle = RenderHookResult<unknown, { open: boolean }>
+type HookProps = { open: boolean; onClose?: () => void }
+type HookHandle = RenderHookResult<unknown, HookProps>
 
 let handles: HookHandle[] = []
 
 function mountBackClose(open: boolean, onClose: () => void): HookHandle {
-  const handle = renderHook(({ open: isOpen }: { open: boolean }) => useBackClose(isOpen, onClose), {
-    initialProps: { open },
-  }) as HookHandle
+  const handle = renderHook(
+    ({ open: isOpen, onClose: nextClose }: HookProps) => useBackClose(isOpen, nextClose ?? onClose),
+    { initialProps: { open } },
+  )
   handles.push(handle)
   return handle
 }
@@ -78,7 +80,7 @@ describe('useBackClose', () => {
     expect(pushState).toHaveBeenCalledTimes(1)
     expect(window.history.state).toMatchObject({ [BACK_CLOSE_KEY]: true })
 
-    // onClose 变化会触发 effect 重跑，但已经压入的 history 条目不能被重复压栈。
+    // open 状态不变的重渲染不能重复压入 history 条目。
     for (let i = 0; i < 3; i++) {
       const handle = handles[0]
       act(() => handle.rerender({ open: true }))
@@ -158,7 +160,7 @@ describe('useBackClose', () => {
     expect(window.history.state).toBeNull()
   })
 
-  it('swallows exactly one late popstate after a programmatic close', async () => {
+  it('retains the legacy one-popstate ignore flag after a cancelled traversal', async () => {
     vi.useFakeTimers()
     const onClose = vi.fn()
     const back = vi.spyOn(History.prototype, 'back')
@@ -183,14 +185,14 @@ describe('useBackClose', () => {
     })
     expect(window.history.state).toMatchObject({ [BACK_CLOSE_KEY]: true })
 
-    // 迟到的合成 popstate 落在新开的叠加层上，但属于上一次回退，必须被忽略。
+    // 取消遍历后，旧实现仍吞掉首次 popstate；这里只记录现状，不保证其事件来源正确。
     dispatchPopState(null)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
     })
     expect(reopened).not.toHaveBeenCalled()
 
-    // 只吞一次：用户真正的下一次返回仍然要能关闭。
+    // 第二次人工派发可关闭；真实浏览器 / 硬件返回的对应行为需另行验证。
     dispatchPopState(null)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
@@ -259,19 +261,13 @@ describe('useBackClose', () => {
     const handle = mountBackClose(true, first)
     await flushHistoryTasks()
 
-    act(() => handle.rerender({ open: true }))
-    // onClose 通过 ref 转发：替换回调后应调用新的那个。
-    const replacement = mountBackClose(true, second)
+    act(() => handle.rerender({ open: true, onClose: second }))
     await flushHistoryTasks()
 
     act(() => window.history.back())
     await flushHistoryTasks()
     expect(second).toHaveBeenCalledTimes(1)
     expect(first).not.toHaveBeenCalled()
-
-    act(() => replacement.unmount())
-    handles = handles.filter(item => item !== replacement)
-    await flushHistoryTasks()
   })
 
   it('does not call a stale onClose after teardown', async () => {

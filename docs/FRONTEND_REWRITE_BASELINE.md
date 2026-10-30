@@ -2,7 +2,7 @@
 
 - 分支：`rewrite/round1-contracts`，基线提交 `48344fd3`（`docs: record frontend compatibility rewrite plan`）。
 - 工作区：`/tmp/piui-round1-contracts`（隔离 worktree，`node_modules` 为指向主仓的 symlink，未改依赖）。
-- 本文件只记录**实际运行过**的命令与结果。未运行或未通过的项目列在「未验证」里，不写成通过。
+- 本文件记录旧版基线及 H 初版交付证据；主代理的审查修订、合并后结果见 `docs/FRONTEND_REWRITE_ROUND_1.md`。未运行或未通过的项目不得写成通过。
 
 ## 1. 写入范围
 
@@ -87,7 +87,7 @@ packages/app/src/features/chat/chatPageModel.ts: 1039 行（基线 1036，超 3�
 packages/app/src/features/chat/sidebar/FolderRecentList.tsx: 已降到 1273（基线 1300，需下调登记）
 ```
 
-本轮新增文件 `useBackClose.test.tsx` 292 行、`useViewportHeight.test.tsx` 200 行，均低于 1000 行上限，未触碰基线文件。
+H 初版新增文件 `useBackClose.test.tsx` 292 行、扩展后 `useViewportHeight.test.tsx` 200 行，均低于 1000 行上限，未触碰基线文件。集成审查随后修正了回调测试与顶部 inset 断言，当前行数以源码为准。
 
 ### 2.4 浏览器 / 界面冒烟
 
@@ -125,18 +125,18 @@ NODE_ENV=test npx vitest run src/hooks/useBackClose.test.tsx src/hooks/useViewpo
 
 ### 4.1 `useBackClose`（旧实现先绿的 10 条）
 
-| 契约                                | 断言要点                                                                                                   |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| 打开只压入一条 back-close 条目      | `pushState` 恰好 1 次，`history.state.__piuiBackClose === true`；`onClose` 变更导致 effect 重跑后仍为 1 次 |
-| 自己的条目被遍历不触发关闭          | 派发 `{__piuiBackClose:true}` 的 popstate，`onClose` 不被调用                                              |
-| 用户返回关闭并退回上一状态          | `history.back()` 后 `onClose` 1 次、`history.state === null`                                               |
-| 嵌套栈只关顶层并重新挂条目          | 两层时返回只关后压栈的那个；关掉后 `history.state` 重新是 back-close；卸载顶层后第二次返回关底层           |
-| programmatic close 不回调 `onClose` | `rerender({open:false})` 后 `onClose` 0 次，且 `history.back()` 1 次（自己回退，不留死条目）               |
-| `ignoreNextPopState` 精确吞一次     | 程序化关闭后重开，迟到 popstate 被吞；下一次 popstate 仍能关闭                                             |
-| 卸载清理                            | 卸载不调用 `onClose`、`back()` 1 次；卸载后残留 popstate 不回调                                            |
-| 快速开关                            | 5 轮 open/close 不额外 `pushState`、不 `back()`、不误关；最终卸载才 `back()` 1 次                          |
-| 回调走 ref                          | 替换 `onClose` 后调用新的那个                                                                              |
-| 卸载后无 stale 回调                 | 拆卸后两种 popstate 都不回调旧句柄                                                                         |
+| 契约                                | 断言要点                                                                                         |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------ |
+| 打开只压入一条 back-close 条目      | `pushState` 恰好 1 次，`history.state.__piuiBackClose === true`；open 不变的重渲染不增加条目     |
+| 自己的条目被遍历不触发关闭          | 派发 `{__piuiBackClose:true}` 的 popstate，`onClose` 不被调用                                    |
+| 用户返回关闭并退回上一状态          | `history.back()` 后 `onClose` 1 次、`history.state === null`                                     |
+| 嵌套栈只关顶层并重新挂条目          | 两层时返回只关后压栈的那个；关掉后 `history.state` 重新是 back-close；卸载顶层后第二次返回关底层 |
+| programmatic close 不回调 `onClose` | `rerender({open:false})` 后 `onClose` 0 次，且 `history.back()` 1 次（自己回退，不留死条目）     |
+| `ignoreNextPopState` 精确吞一次     | 程序化关闭后取消遍历，旧实现吞掉首次人工 popstate，第二次仍能关闭；不据此保证真实事件来源正确    |
+| 卸载清理                            | 卸载不调用 `onClose`、`back()` 1 次；卸载后残留 popstate 不回调                                  |
+| 快速开关                            | 5 轮 open/close 不额外 `pushState`、不 `back()`、不误关；最终卸载才 `back()` 1 次                |
+| 回调走 ref                          | 替换 `onClose` 后调用新的那个                                                                    |
+| 卸载后无 stale 回调                 | 拆卸后两种 popstate 都不回调旧句柄                                                               |
 
 jsdom 真实性注意（踩坑记录，写测试前必须先验证）：
 
@@ -167,12 +167,12 @@ jsdom 真实性注意（踩坑记录，写测试前必须先验证）：
 
 ## 5. 发现的旧实现问题（未修，仅报告）
 
-1. **`ignoreNextPopState` 可能吞掉用户的一次真实返回（需要按两次返回）。**
-   机制：`scheduleHistoryEntryCleanup` 在 `setTimeout(…,0)` 里置 `ignoreNextPopState = true` 后调用 `history.back()`。若在这次遍历完成前又有叠加层打开并 `pushState`，jsdom 的 `pushState` 会 `clearHistoryTraversalTasks()` 取消掉遍历（浏览器里同为待处理导航被后续 push 覆盖），于是合成 popstate 永不到达，`ignoreNextPopState` 一直 armed。用户下一次真实返回会被当成「迟到的合成事件」吞掉，必须再按一次才关闭。
-   复现：`useBackClose.test.tsx` 的 “swallows exactly one late popstate after a programmatic close” 就是这条路径（测试断言的正是当前行为，即旧契约；换实现时该用例会暴露差异）。
+1. **jsdom 暴露潜在返回竞态：取消遍历后，旧实现仍可能吞掉下一次 popstate。**
+   机制：`scheduleHistoryEntryCleanup` 在 `setTimeout(…,0)` 里置 `ignoreNextPopState = true` 后调用 `history.back()`。若遍历完成前又打开叠加层并 `pushState`，jsdom 会取消尚未完成的遍历，标志可能持续为 true。当前单测通过人工派发两次 popstate 记录「第一次被忽略、第二次关闭」的旧行为，不能证明两次事件的真实来源，也不能直接推出 Android 用户一定需要按两次返回。
+   用例：`useBackClose.test.tsx` 的 “retains the legacy one-popstate ignore flag after a cancelled traversal”。真实 Chromium / Android 返回行为需另行验证，再单独决定修复；不把这个旧行为当作新实现应长期保持的设计目标。
 2. 相关但不单独成 bug 的既有语义：`closeTopEntry` 里 `setTimeout(0)` 重新挂条目，与清理定时器同为 0ms 任务，先后顺序依赖任务队列而非显式状态；快速开关时靠 `clearCleanupTimer()` 抵消。
 
-两条都属生产代码，本轮按要求未改动，交由主代理判断是否进第一轮修复清单。
+两条都属旧生产实现，本轮未改动；后续以独立修复包评估，不混入兼容重构。
 
 ## 6. 未验证 / 不宣称
 
