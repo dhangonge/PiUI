@@ -12,7 +12,7 @@
 
 | 项目         | Linux ARM64                                         | Android Termux ARM64                      |
 | ------------ | --------------------------------------------------- | ----------------------------------------- |
-| Pi SDK / CLI | 1.3.0                                               | 1.3.0                                     |
+| Pi SDK / CLI | 1.4.0                                               | 1.4.0                                     |
 | Node         | 官方 24.21.0                                        | Termux nodejs-lts 24.18.0-1               |
 | npm          | 官方 Node 包自带 11.19.0                            | 相同 npm JS，使用 Android Node            |
 | rg / fd      | Debian 12 的 ripgrep 13.0.0 / fd 8.6.0              | Termux ripgrep 15.2.0 / fd 10.5.0         |

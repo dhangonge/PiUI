@@ -1,6 +1,6 @@
-# Pi 1.3.0 Native Parity Matrix
+# Pi 1.4.0 Native Parity Matrix
 
-本文是 PiUI 能力状态的权威清单，基线固定为 `@earendil-works/pi-coding-agent@1.3.0`
+本文是 PiUI 能力状态的权威清单，基线固定为 `@earendil-works/pi-coding-agent@1.4.0`
 
 支持等级：
 
@@ -101,6 +101,23 @@
 
 ## SDK 升级记录
 
+### 1.3.0 → 1.4.0
+
+驱动原因：用户桌面 Pi 升到 1.4.0，`pi` 同时把已装插件整体升级（`pi-mcp-adapter` 5.3.1 → 7.0.0 跨大版本、`@plannotator/pi-extension` 0.28.22 → 0.28.38、`pi-context-view` 0.7.1 → 0.8.1、`pi-cache-optimizer` 2.8.25 → 2.10.4、`@juicesharp/rpiv-todo` 与 `rpiv-ask-user-question` 2.13.8 → 2.15.0、`pi-simple-web-tools` 0.2.0 → 0.3.0、`billion-context` 0.1.197 → 0.1.209、`@narumitw/pi-lsp` 0.49.10 → 0.49.11、`pi-subagents-lite` 1.17.0 → 1.17.1），本地扩展增至 9 个（新增 `agentrouter-responses-item-ids.ts`）。
+
+代码改动为零：只改 `packages/{app,pi-worker}/package.json`、`packages/protocol/src/version.ts`、`packages/pi-worker/src/bundled-sdk-version.ts`、`packages/protocol/src/index.test.ts`、`docs/` 三处基线与 `package-lock.json`。
+
+无需改动的兼容性事实：
+
+- `dist/index.d.ts`、`dist/index.js`、`dist/core/session-manager.{js,d.ts}`、`dist/core/event-bus.*`、`dist/core/resource-loader.*` 与 1.3.0 **逐字节相同** —— 子代理子会话落盘桥（`packages/pi-worker/src/runtime/subagent-sessions.ts` 对 `SessionManager.inMemory` 的补丁）与 `createEventBus` 注入不受影响。
+- `PI_SDK_MODULE_CONTRACT` 的 12 个符号在 1.4.0 全部存在；`core/extensions/types.d.ts`（插件可见的 Extension API 面）未变。
+- 删除/改名的只有本仓未引用的部分：`AgentSession._lastAssistantToolResults`（私有）、pi-ai 的 `telemetryContext`（改为 `telemetry?: TelemetrySpan`）、`generateSummary` 的第二参数改名 `_reserveTokens`（位置与类型兼容）。
+- `dist/core/extensions/loader.js` 只新增 `@earendil-works/pi-ai/models`、`@mariozechner/pi-ai/models` 两个 jiti 别名。
+- 行为变更未触及 PiUI：交互模式扩展对话框改为栈式（TUI 专用）、classifier 图片输入、`pi update` BOM、pi-tui 的 markdown CJK 强调修复（正文由 app 自己的 `markdownHtmlRenderer.ts` 渲染）、provider 归属头改由 pi-ai client identity 提供（本机 9 个本地扩展均不监听 `before_provider_headers`）。
+- 依赖新增一处：pi-tui 引入 `marked-cjk-friendly@0.1.2`，由 `npm install` 自动装入。
+
+验证：`typecheck` 0 错误、`conformance:sdk` 通过、protocol 15 / pi-worker 96 / server 134(+2 skip) / app 149 文件 901 项通过、构建通过、`check:docs` 通过、沙箱插件探针 **11/11 通过**（含 `pi-mcp-adapter` 7.0.0 与 `@plannotator/pi-extension` 0.28.38）。未验证：插件深层行为、真机与真实模型调用。
+
 ### 1.0.3 → 1.3.0
 
 驱动原因：用户桌面 Pi 升到 1.3.0 后，`pi` 同时把 11 个 npm 插件中的 9 个升到新版本，原插件基线（`sdkCandidate: 1.0.3`）失效；1.1–1.3 还包含中转网关重试（`Unable to forward upstream stream`、`The service is temporarily unavailable`、`The upstream provider returned an error`）、OpenAI 兼容流式的 reasoning 顺序、压缩时省略 thinking 等修复。
@@ -122,7 +139,7 @@
 
 每个能力完成时必须同时满足：
 
-1. Pi 1.3.0 来源 API 和语义已记录（见上方《SDK 升级记录》）
+1. Pi 1.4.0 来源 API 和语义已记录（见上方《SDK 升级记录》）
 2. Protocol 使用判别联合，不以 `unknown` 掩盖已知数据
 3. worker 保持 session 单写并处理 replacement generation
 4. server 返回明确 capability、错误和 command 状态

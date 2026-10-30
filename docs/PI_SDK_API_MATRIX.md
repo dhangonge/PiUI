@@ -1,6 +1,6 @@
 # Pi SDK API Matrix
 
-Baseline: `@earendil-works/pi-coding-agent@1.3.0`（权威版本号见 `packages/protocol/src/version.ts` 的 `PI_PARITY_SDK_VERSION`；一致性由 `npm run conformance:sdk` 门禁）。1.3.0 已原生导出本文依赖的全部 API，无需 `patches/` 中的 SDK 补丁。
+Baseline: `@earendil-works/pi-coding-agent@1.4.0`（权威版本号见 `packages/protocol/src/version.ts` 的 `PI_PARITY_SDK_VERSION`；一致性由 `npm run conformance:sdk` 门禁）。1.4.0 已原生导出本文依赖的全部 API，无需 `patches/` 中的 SDK 补丁。
 
 Worker IPC: `PI_WORKER_PROTOCOL_VERSION`（`packages/pi-worker/src/ipc.ts`，当前 `3`）。
 
@@ -90,7 +90,7 @@ These remain usable by extensions inside the isolated worker. JSON-serializable 
 
 ## SDK Export Integration
 
-PiUI depends on the SDK's `resolveProjectTrusted` and `applyHttpProxySettings` exports, the native `SettingsManager.getHttpProxy()/setHttpProxy()` pair, and the native command catalog exposed through `AgentSession.getCommands()`. All four ship in the pinned `1.3.0` dependency, so no SDK patch is applied at install time; no Pi behavior is reimplemented in PiUI. (When these were fork-only additions, `patch-package` carried them on top of `0.81.1`.)
+PiUI depends on the SDK's `resolveProjectTrusted` and `applyHttpProxySettings` exports, the native `SettingsManager.getHttpProxy()/setHttpProxy()` pair, and the native command catalog exposed through `AgentSession.getCommands()`. All four ship in the pinned `1.4.0` dependency, so no SDK patch is applied at install time; no Pi behavior is reimplemented in PiUI. (When these were fork-only additions, `patch-package` carried them on top of `0.81.1`.)
 
 ## Conformance
 
