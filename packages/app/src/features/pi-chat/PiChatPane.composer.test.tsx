@@ -14,12 +14,22 @@ import i18n from '../../i18n'
 /**
  * PiChatPane → InputBox 的 prop 边界。
  *
- * InputBox 是 memo 组件：任何一项 prop 引用变化都会整块重渲染。这里用真实的
- * PiChatPane 接线（store 订阅、effect、Task/队列/编辑桥接 hook 全是真代码），
- * 只把三样东西换成测试替身：
- * - `InputBox` → memo spy（记录每次渲染收到的完整 props，用真实 InputBoxProps 类型）
- * - `ChatArea` → memo spy（记录 props，让测试能推动滚动 / onAtBottomChange）
- * - 数据出口（pi/hooks、controllers、eventStream、contexts）→ 可控的假实现
+ * InputBox 是 memo 组件：任何一项 prop 引用变化都会整块重渲染。这里跑的是真实的
+ * PiChatPane 容器/渲染树（真实的 hook 调用顺序、effect、控制器接线、队列与编辑器
+ * 桥接 hook `usePiQueueControl` / `usePiExtensionEditorBridge` 都是原实现），加上
+ * 部分真实的本地 store（`extensionUiStore` / `redoPlanStore` / `sessionEditorDraftStore`
+ * / i18n 都是真实模块，靠真实 API 推状态）。
+ *
+ * 替身只有两类，且都在测试文件里显式列出：
+ * - 重 UI：`InputBox` → memo spy（记录每次渲染收到的完整 props，类型是真实
+ *   `InputBoxProps`）、`ChatArea` → memo spy（让测试能推动 at-bottom / 记渲染次数）、
+ *   `Header` → 非 memo 探针（计 PiChatPane 提交次数 + 挂 modelSelectorRef 假句柄）、
+ *   `ExtensionUiDialogHost` → 折叠开关按钮、`ProjectTrustPrompt` → null。这些替身
+ *   不实现任何业务逻辑，只把入参/回调透出来。
+ * - 数据出口：`pi/hooks`（branch / runtime state / models / todos 订阅）、
+ *   `activeSessionStore`、`useServerStore`、`useDirectory`、`useSessionContext`、
+ *   `pi/eventStream`、`pi/controllers`、`utils/clipboard` → 可控假实现。也就是说
+ *   时间线数据与控制器调用是模拟的，不是真 SSE、真进程或真磁盘。
  *
  * 断言方式：比较「边界上每个 prop 的 Object.is」+ memo spy 的渲染计数，而不是
  * 只断言某一个 useMemo。渲染计数只代表合成环境里的组件提交次数，不是真机
@@ -431,7 +441,7 @@ describe('PiChatPane composer boundary: unrelated updates', () => {
     expect(changedProps(before, lastProps())).toEqual([])
   })
 
-  it('does not re-render InputBox when a streaming token replaces the timeline', () => {
+  it('does not re-render InputBox when a settled assistant entry is appended', () => {
     renderPane()
     const before = lastProps()
     const chatAreaRendersBefore = spy.chatAreaProps.length
@@ -443,6 +453,35 @@ describe('PiChatPane composer boundary: unrelated updates', () => {
     expect(spy.chatAreaProps[spy.chatAreaProps.length - 1]?.items).toHaveLength(2)
     expect(renderCount()).toBe(1)
     expect(changedProps(before, lastProps())).toEqual([])
+  })
+
+  it('does not re-render InputBox while streaming text grows on the same assistant entry', () => {
+    // 模拟一条流式 chunk 到达：isStreaming 保持 true，同一 assistant 条目的正文变长。
+    // 这不是真 SSE —— 直接把「branch store 收到新 page」这件事推给 PiChatPane，
+    // 真实事件流/增量解析不在本文件覆盖范围内。
+    push({ sessionState: runningState({ isStreaming: true }) })
+    renderPane()
+    expect(lastProps().isStreaming).toBe(true)
+    const boundary = lastProps()
+    const chatAreaRendersBefore = spy.chatAreaProps.length
+
+    push({ branch: page([assistantEntry('a1', 'first ')]), sessionState: runningState({ isStreaming: true }) })
+    push({
+      branch: page([assistantEntry('a1', 'first answer, still')]),
+      sessionState: runningState({ isStreaming: true }),
+    })
+    push({
+      branch: page([assistantEntry('a1', 'first answer, still arriving…')]),
+      sessionState: runningState({ isStreaming: true }),
+    })
+
+    // 正文确实在变：ChatArea 每次都拿到新的时间线，且流式标记没被复位
+    expect(spy.chatAreaProps.length).toBeGreaterThanOrEqual(chatAreaRendersBefore + 3)
+    expect(spy.chatAreaProps[spy.chatAreaProps.length - 1]?.isStreaming).toBe(true)
+    // 输入区边界一位不动
+    expect(renderCount()).toBe(1)
+    expect(lastProps().isStreaming).toBe(true)
+    expect(changedProps(boundary, lastProps())).toEqual([])
   })
 
   it('rebuilds the model catalog from the catalog store only (shallow copy, no deep comparator)', () => {
@@ -706,7 +745,7 @@ describe('PiChatPane composer boundary: callbacks keep real semantics', () => {
   })
 
   it('cycles model and thinking level through the session-bound handlers', async () => {
-    renderPane()
+    const { rerenderPane } = renderPane()
     const onCycleModel = lastProps().onCycleModel
     const onCycleThinkingLevel = lastProps().onCycleThinkingLevel
 
@@ -719,12 +758,14 @@ describe('PiChatPane composer boundary: callbacks keep real semantics', () => {
     expect(ctl.cyclePiThinkingLevel).toHaveBeenCalledWith(SESSION)
     expect(ctl.refreshPiSessionState).toHaveBeenCalledWith(SESSION)
 
-    // 切到 home 后这些回调必须换引用并停止作用在旧会话上
-    const { rerenderPane } = renderPane()
+    // 同一个 pane 实例切到 home：这些回调必须换引用并停止作用在旧会话上
     rerenderPane({ sessionId: null })
     expect(lastProps().onCycleModel).not.toBe(onCycleModel)
+    expect(lastProps().onCycleThinkingLevel).not.toBe(onCycleThinkingLevel)
     lastProps().onCycleModel?.('backward')
+    lastProps().onCycleThinkingLevel?.()
     expect(ctl.cyclePiModel).toHaveBeenCalledTimes(1)
+    expect(ctl.cyclePiThinkingLevel).toHaveBeenCalledTimes(1)
   })
 
   it('dispatches slash commands to the latest handler without re-rendering InputBox', async () => {
