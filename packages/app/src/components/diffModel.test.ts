@@ -12,6 +12,7 @@ import {
   expandRegion,
   isCollapsed,
   isTooFragmented,
+  type UnifiedLine,
 } from './diffModel'
 
 /** 把 paired 行压成便于断言的元组 */
@@ -163,7 +164,8 @@ describe('diffModel 上下文折叠', () => {
     const folded = collapseContextUnified(computeUnifiedLines(before, after))
     expect(folded[0]).toEqual({ collapsed: true, count: 6, id: 0, isFirst: true, isLast: false, chunked: false })
     expect(folded.at(-1)).toEqual({ collapsed: true, count: 7, id: 11, isFirst: false, isLast: true, chunked: false })
-    expect(folded.filter(item => !isCollapsed(item)).map(item => item.content)).toEqual([
+    // isCollapsed 的谓词类型含 paired 侧折叠块，不能直接给 filter 收窄 unified 数组，这里显式标注
+    expect(folded.filter((item): item is UnifiedLine => !isCollapsed(item)).map(item => item.content)).toEqual([
       'l7',
       'l8',
       'l9',
