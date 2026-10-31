@@ -533,5 +533,6 @@ try {
   if (browserClosed) await browserClosed
   eventServers.forEach(server => closeEventWebSocket(server))
   await Promise.all(apps.map(app => app.dispose()))
-  rmSync(root, { recursive: true, force: true })
+  // maxRetries 覆盖 ENOTEMPTY/EBUSY：浏览器退出后仍有极短的写入尾巴。
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 }

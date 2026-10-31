@@ -69,7 +69,9 @@
 2. **覆盖率门禁在 CI 假失败（既有缺陷）**：`scripts/node-coverage.mjs` 只认 spec 报告器的 `ℹ ` 行前缀，而 Node 22 在非 TTY（CI）下默认用 tap（`# ` 前缀），于是判成“所有文件没被测试加载”。本机 Node 26 默认 spec，所以本地一直看不出来。已显式传 `--test-reporter=spec`，输出版本无关。
 3. **Windows 格式门禁必失败（既有缺陷）**：仓库没有 `.gitattributes`，Windows runner 的 `core.autocrlf=true` 把检出写成 CRLF，`prettier . --check`（`endOfLine` 默认 lf）报 778 个文件。已加 `* text=auto eol=lf`，只影响检出与后续提交的换行归一。
 
-这三处属于 CI 基础设施与测试夹具修正，没有改变产品行为；第 2、3 条在第三轮起点之前就已存在。
+4. **冒烟脚本的临时目录清理竞态（既有缺陷，偶发）**：`scripts/smoke-timeline-order.mjs` 在 `kill` 掉 Chromium 之后没有等进程真正退出就 `rmSync` 递归删除临时 profile；Chrome 退出尾期仍在写文件，遍历途中撞上新写入的文件，抛 `Error: ENOTEMPTY: directory not empty, rmdir '/tmp/piui-timeline-smoke-8Mh7zY/chromium/Default'`。此时所有断言其实都已经 PASS，红的是清理阶段。已改为先用 `browser.once('exit')` 等进程退出，并给两个冒烟脚本的 `rmSync` 加上 `maxRetries: 5, retryDelay: 100` 兜住退出尾巴。
+
+这四处属于 CI 基础设施与测试夹具修正，没有改变产品行为；第 2、3、4 条在第三轮起点之前就已存在。
 
 ### 3. 真实浏览器动效采样（fork CI，可复现）
 

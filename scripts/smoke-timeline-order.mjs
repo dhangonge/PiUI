@@ -31,6 +31,7 @@ const SESSION_ID = 'shared'
 const PROMPT = 'mock-slow: live probe'
 const HIDDEN_HOOK_ID = 'hook-hidden'
 let browser
+let browserClosed
 let app
 let events
 let cdp
@@ -217,6 +218,9 @@ async function openBrowser(origin, token) {
     ],
     { stdio: ['ignore', 'ignore', 'pipe'] },
   )
+  // 记下退出信号：浏览器被杀后仍会短暂写 profile，先等它退出再删临时目录，
+  // 否则 rmSync 会在遍历途中撞上 Chrome 新写出的文件，报 ENOTEMPTY。
+  browserClosed = new Promise(resolve => browser.once('exit', resolve))
   const endpoint = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Chromium did not expose DevTools')), 20_000)
     browser.once('error', reject)
@@ -365,8 +369,10 @@ try {
 } finally {
   cdp?.close()
   browser?.kill('SIGTERM')
+  if (browserClosed) await browserClosed
   if (events) closeEventWebSocket(events)
   await app?.dispose()
-  if (!process.env.PIUI_SMOKE_KEEP) rmSync(root, { recursive: true, force: true })
+  // maxRetries 覆盖 ENOTEMPTY/EBUSY：浏览器退出后仍有极短的写入尾巴。
+  if (!process.env.PIUI_SMOKE_KEEP) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   else console.log('[keep]', root)
 }
