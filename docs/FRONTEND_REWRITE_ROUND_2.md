@@ -4,7 +4,7 @@
 
 - 用户已授权：处理第一轮阻塞，然后开始第二轮。
 - 起点：`655eaa6c`，工作区干净；第一轮证据见 `docs/FRONTEND_REWRITE_ROUND_1.md`。
-- 当前为执行中的记录，不代表下列工作已通过验收。
+- 前置门禁已通过；第二轮 C / D / E / H 开始实施，后文性能目标不代表已经达标。
 - 不提高行数基线、不降低测试阈值、不改变静态风格、操作逻辑、持久化键、原生接口或 Pi 协议。
 - worker 仅为修复既有门禁而做兼容提取，不扩展后端功能。真机安装与操作不自动进行。
 
@@ -30,10 +30,11 @@
 - Gate Runtime 已集成：real-session 1510→1171、mock-session 1093→881、原集成测试 1707→650；24 条集成用例迁移后的回调 AST 一致，worker 仍为 107 条通过。
 - Gate Render 已集成：MarkdownRenderer 1664→233，拆为内联 / 表格 / Mermaid / HTML artifact / DOM block 五个模块；原测试 1571→1426、themeStore 1177→1003。101 个字面量测试回调 AST 一致，动态生成的用例另由运行验证。
 - 三路集成后完整 typecheck 通过；LSP 检查 14 个关键文件无错误，有 1 条既有 FormEvent 废弃提示。check:docs / conformance:sdk:check 通过。
-
 - Gate Shell 已集成：FileExplorer 2159→1925、SidePanel 1392→1352、App 1114→928、SessionList 1068→977。命令表在仅将 sessionArchive 参数化后 AST 一致，6 个迁移的叶子 / 纯函数体一致；App 的 12 项 useMemo 依赖未改。
 
-进行中：已完成全部结构拆分和登记同步，正在运行全仓 validate 及两项浏览器冒烟。通过前不宣布阻塞已清零。
+**前置门禁通过（`694ce780`）**：`npm run validate` 退出 0；文件大小检查覆盖 657 个文件，保留 13 个只许缩小的既有登记；格式全通过。app 164 文件 / 1015 测试通过，protocol / worker / server 无失败，lint 为 0 errors / 30 warnings。两项原始浏览器 smoke 均通过，参数与第一轮相同。日志：`gate-validate.log`、`gate-smoke-timeline.log`、`gate-smoke-android-ui.log`。
+
+前置拆分没有删除用例，也没有将所有旧文件压到 1000 行以内；解决的是现行门禁违规，剩余 13 个登记文件仍需后续按职责收敛。真机与完整主题矩阵不在这次本地通过声明中。
 
 ### 审查中撤回的扩张
 
@@ -43,7 +44,7 @@ Render 的 href 解码合并经逐体比较，两个旧函数实现相同；HTML
 
 ## 2. 第二轮首个工作包
 
-门禁通过后，以集成后的共同基线启动 C / D / E / H，最多 4 个子代理并行；主代理独占基线、公共记录与集成。以下是边界，不是已取得的性能结果。
+以门禁通过后的共同基线启动 C / D / E / H，最多 4 个子代理并行；主代理独占基线、公共记录与集成。以下是边界，不是已取得的性能结果。
 
 ### C：时间线
 
