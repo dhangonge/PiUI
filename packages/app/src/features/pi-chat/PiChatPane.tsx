@@ -11,7 +11,6 @@ import { FolderProjectDropOverlay } from '../chat/FolderProjectDropOverlay.js'
 import { ChatViewportProvider, useChatViewportMaybe, type ChatViewportValue } from '../chat/chatViewport.js'
 import type { Attachment } from '../attachment/index.js'
 import { ExtensionUiDialogHost } from '../chat/ExtensionUiDialogHost.js'
-import { TodoWidget } from '../../components/TodoWidget'
 import { ProjectTrustPrompt } from './ProjectTrustPrompt'
 import { OutlineIndex } from '../../components/OutlineIndex'
 import { buildOutlineSourceEntries } from '../../components/outlineIndexModel'
@@ -22,8 +21,6 @@ import {
   abortPiOperation,
   abortPiCompaction,
   compactPiSession,
-  cyclePiModel,
-  cyclePiThinkingLevel,
   executePiBash,
   exportPiSession,
   forkPiSession,
@@ -56,6 +53,7 @@ import { useSessionActiveEntry } from '../../store/activeSessionStore'
 import type { PiImageInput } from '../../pi/transport/index.js'
 import { attachmentToImage } from './attachmentToImage'
 import { usePiExtensionEditorBridge } from './hooks/usePiExtensionEditorBridge'
+import { usePiComposerBindings } from './hooks/usePiComposerBindings'
 import { usePiQueueControl } from './hooks/usePiQueueControl'
 import { piBranchStore } from '../../pi/state/index.js'
 import { captureRedoCheckpoints, commitRedoPlan, redoPlanStore, type RedoPlan } from '../../pi/redoPlanStore'
@@ -1366,6 +1364,24 @@ export function PiChatPane({
     ? currentModelObj.input.includes('image')
     : models.some(model => model.input.includes('image'))
 
+  // 输入框边界的引用稳定层（见 hooks/usePiComposerBindings.tsx 顶部说明）：
+  // 值真变才换引用，回调按真实依赖重建，避免父层无关更新击穿 InputBox 的 memo。
+  const composer = usePiComposerBindings({
+    sessionId,
+    compacting,
+    imageCapable,
+    models,
+    collapsedDialogTitle: dialogRequest?.title,
+    collapsedDialogQueueLength: pendingDialogs.length,
+    dialogCollapsed,
+    setDialogCollapsed,
+    modelSelectorRef,
+    chatAreaRef,
+    onRedoStep: handleRedoStep,
+    onRedoAll: handleRedoAll,
+    onCommand: handleCommand,
+  })
+
   // ============================================
   // Pane focus + drag & drop (ocui shell behavior)
   // ============================================
@@ -1531,7 +1547,7 @@ export function PiChatPane({
           <div className="pointer-events-auto">
             <Header
               sessionId={sessionId}
-              models={[...models]}
+              models={composer.models}
               modelsLoading={modelsLoading}
               selectedModelKey={selectedModelKey}
               onModelChange={handleModelChange}
@@ -1629,40 +1645,26 @@ export function PiChatPane({
         <div className="pointer-events-auto">
           <InputBox
             ref={inputBoxRef}
-            aboveComposer={<TodoWidget key={`${sessionId}:todo`} sessionId={sessionId} />}
+            aboveComposer={composer.todoSlot}
             paneId={paneId}
             sessionId={sessionId}
             rootPath={inputRootPath}
             onSend={handleSend}
-            onCommand={handleCommand}
-            onCycleModel={direction =>
-              sessionId &&
-              void cyclePiModel(sessionId, direction)
-                .then(() => refreshPiSessionState(sessionId))
-                .catch(() => undefined)
-            }
-            onCycleThinkingLevel={() =>
-              sessionId &&
-              void cyclePiThinkingLevel(sessionId)
-                .then(() => refreshPiSessionState(sessionId))
-                .catch(() => undefined)
-            }
-            onOpenModelSelector={() => modelSelectorRef.current?.openMenu()}
+            onCommand={composer.command}
+            onCycleModel={composer.cycleModel}
+            onCycleThinkingLevel={composer.cycleThinkingLevel}
+            onOpenModelSelector={composer.openModelSelector}
             onTextChange={handleTextChange}
-            onAbort={() =>
-              sessionId
-                ? void (compacting ? abortPiCompaction(sessionId) : abortPiOperation(sessionId)).catch(() => undefined)
-                : undefined
-            }
+            onAbort={composer.abort}
             onNewChat={onNewChat}
             isStreaming={isStreaming}
             sessionActive={sessionActive}
             isCompacting={compacting}
             isAtBottom={isAtBottom}
             showScrollToBottom={!isAtBottom}
-            onScrollToBottom={() => chatAreaRef.current?.scrollToBottom()}
-            fileCapabilities={{ image: imageCapable, pdf: false, audio: false, video: false }}
-            models={[...models]}
+            onScrollToBottom={composer.scrollToBottom}
+            fileCapabilities={composer.fileCapabilities}
+            models={composer.models}
             selectedModelKey={selectedModelKey}
             onModelChange={handleModelChange}
             modelsLoading={modelsLoading}
@@ -1673,17 +1675,9 @@ export function PiChatPane({
             revertedText={editorDraft?.text ?? forkSeedText}
             canRedo={canRedo}
             revertSteps={revertSteps}
-            onRedo={() => void handleRedoStep()}
-            onRedoAll={() => void handleRedoAll()}
-            collapsedPermission={
-              dialogRequest && dialogCollapsed
-                ? {
-                    label: dialogRequest.title,
-                    queueLength: pendingDialogs.length,
-                    onExpand: () => setDialogCollapsed(false),
-                  }
-                : undefined
-            }
+            onRedo={composer.redo}
+            onRedoAll={composer.redoAll}
+            collapsedPermission={composer.collapsedPermission}
           />
         </div>
       </div>
