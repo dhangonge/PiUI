@@ -1,20 +1,20 @@
 import { randomUUID } from 'node:crypto'
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-  appendFileSync,
-  readdirSync,
-  promises as fs,
-} from 'node:fs'
-import { tmpdir } from 'node:os'
+import { appendFileSync, existsSync, readFileSync, writeFileSync, promises as fs } from 'node:fs'
 import path from 'node:path'
 import { realpath } from 'node:fs/promises'
 import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot } from '@piui/protocol'
-import { isJsonObject } from '@piui/protocol'
 import type { CatalogProvider, PiEventMeta, SessionRuntime, Unsubscribe } from '../runtime.js'
 import type { PackagesGateway } from '../command-table.js'
+import { mockLiveState, mockPreviewState } from './mock-session-state.js'
+import {
+  MockStore,
+  assertMockSessionFileInside,
+  filterMockSessions,
+  mockBranch,
+  nowIso,
+  sessionsDir,
+  textFromContent,
+} from './mock-session-store.js'
 import {
   entriesPageFromEntries,
   sessionHeadFromParts,
@@ -23,163 +23,13 @@ import {
   type SessionHead,
 } from './pagination.js'
 
+// 会话仓（jsonl 读写、路径校验）拆到独立模块；公开出口保持不变
+export { MockStore } from './mock-session-store.js'
+
 const MOCK_SDK_VERSION = 'mock'
 
 /** Prompt prefix that makes the mock stream a slow thinking + tool turn (UI smoke). */
 export const MOCK_SLOW_TOOL_PREFIX = 'mock-slow:'
-
-function mockHome(): string {
-  return process.env.PIUI_MOCK_DIR?.trim() || path.join(tmpdir(), 'piui-mock')
-}
-
-function sessionsDir(): string {
-  return path.join(mockHome(), 'sessions')
-}
-
-function nowIso(): string {
-  return new Date().toISOString()
-}
-
-export class MockStore {
-  list(): JsonObject[] {
-    const dir = sessionsDir()
-    if (!existsSync(dir)) return []
-    return readDirJsonl(dir)
-  }
-
-  open(sessionFile: string): { header: JsonObject | null; entries: JsonObject[] } {
-    return readJsonlFile(sessionFile)
-  }
-
-  create(cwd: string): { sessionFile: string; sessionId: string } {
-    const dir = sessionsDir()
-    mkdirSync(dir, { recursive: true })
-    const sessionId = randomUUID()
-    const sessionFile = path.join(dir, `${sessionId}.jsonl`)
-    const header: JsonObject = {
-      type: 'session',
-      version: 1,
-      id: sessionId,
-      cwd,
-      timestamp: nowIso(),
-    }
-    writeFileSync(sessionFile, `${JSON.stringify(header)}\n`, 'utf8')
-    return { sessionFile, sessionId }
-  }
-
-  async delete(sessionFile: string): Promise<void> {
-    await fs.unlink(sessionFile)
-  }
-}
-
-function readDirJsonl(dir: string): JsonObject[] {
-  const result: JsonObject[] = []
-  for (const name of safeReaddir(dir)) {
-    if (!name.endsWith('.jsonl')) continue
-    const file = path.join(dir, name)
-    try {
-      const { header, entries } = readJsonlFile(file)
-      const id = typeof header?.id === 'string' ? header.id : path.basename(name, '.jsonl')
-      const messages = entries.filter(entry => entry.type === 'message')
-      const firstUser = messages.find(entry => isJsonObject(entry.message) && entry.message.role === 'user')
-      result.push({
-        id,
-        path: file,
-        cwd: typeof header?.cwd === 'string' ? header.cwd : '',
-        name: typeof header?.name === 'string' ? header.name : null,
-        parentSessionPath: typeof header?.parentSession === 'string' ? header.parentSession : null,
-        created: typeof header?.timestamp === 'string' ? header.timestamp : nowIso(),
-        modified: lastTimestamp(entries) ?? (typeof header?.timestamp === 'string' ? header.timestamp : nowIso()),
-        messageCount: messages.length,
-        firstMessage:
-          firstUser && isJsonObject(firstUser.message) ? textFromContent(firstUser.message.content).slice(0, 120) : '',
-      })
-    } catch {
-      /* skip corrupted mock session files */
-    }
-  }
-  result.sort((a, b) => String(b.modified).localeCompare(String(a.modified)))
-  return result
-}
-
-function safeReaddir(dir: string): string[] {
-  try {
-    return readdirSync(dir)
-  } catch {
-    return []
-  }
-}
-
-function readJsonlFile(file: string): { header: JsonObject | null; entries: JsonObject[] } {
-  const lines = readFileSync(file, 'utf8')
-    .split('\n')
-    .filter(line => line.trim())
-  let header: JsonObject | null = null
-  const entries: JsonObject[] = []
-  for (const line of lines) {
-    const value = JSON.parse(line) as unknown
-    if (!isJsonObject(value)) continue
-    if (value.type === 'session') header = value
-    else entries.push(value)
-  }
-  return { header, entries }
-}
-
-async function assertMockSessionFileInside(sessionFile: string): Promise<void> {
-  const root = await realpath(sessionsDir())
-  const target = await realpath(sessionFile)
-  const rootKey = process.platform === 'win32' ? root.toLowerCase() : root
-  const targetKey = process.platform === 'win32' ? target.toLowerCase() : target
-  if (targetKey !== rootKey && !targetKey.startsWith(rootKey + path.sep)) {
-    throw Object.assign(new Error('Mock session file is outside the session directory'), {
-      code: 'PATH_OUTSIDE_WORKSPACE',
-    })
-  }
-}
-
-function lastTimestamp(entries: JsonObject[]): string | undefined {
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const ts = entries[index]?.timestamp
-    if (typeof ts === 'string') return ts
-  }
-  return undefined
-}
-
-function textFromContent(content: JsonValue | undefined): string {
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  return content
-    .filter(block => isJsonObject(block) && block.type === 'text' && typeof block.text === 'string')
-    .map(block => String((block as JsonObject).text))
-    .join('')
-}
-
-function mockBranch(entries: JsonObject[], leafId: string | null): JsonObject[] {
-  const byId = new Map(entries.map(entry => [String(entry.id), entry]))
-  const branch: JsonObject[] = []
-  const visited = new Set<string>()
-  let id = leafId
-  while (id && !visited.has(id)) {
-    visited.add(id)
-    const entry = byId.get(id)
-    if (!entry) break
-    branch.unshift(entry)
-    id = typeof entry.parentId === 'string' ? entry.parentId : null
-  }
-  return branch
-}
-
-function filterMockSessions(sessions: JsonValue[], search?: string): JsonValue[] {
-  const query = search?.trim().toLowerCase()
-  if (!query) return sessions
-  return sessions.filter(session => {
-    if (!session || typeof session !== 'object' || Array.isArray(session)) return false
-    const record = session as Record<string, unknown>
-    return ['name', 'firstMessage', 'id', 'cwd', 'allMessagesText'].some(
-      key => typeof record[key] === 'string' && (record[key] as string).toLowerCase().includes(query),
-    )
-  })
-}
 
 export class MockCatalog implements CatalogProvider, PackagesGateway {
   private readonly store = new MockStore()
@@ -230,48 +80,14 @@ export class MockCatalog implements CatalogProvider, PackagesGateway {
       entry => entry,
     )
     return {
-      state: {
+      state: mockPreviewState({
         sessionId,
         sessionFile,
         sessionName: header?.name ?? null,
         cwd,
-        model: null,
-        thinkingLevel: 'off',
-        isStreaming: false,
-        isCompacting: false,
-        steeringMode: 'one-at-a-time',
-        followUpMode: 'one-at-a-time',
-        autoCompactionEnabled: true,
-        autoRetryEnabled: true,
-        messageCount: entries.length,
-        pendingMessageCount: 0,
-        availableThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
-        isIdle: true,
-        isBashRunning: false,
-        hasPendingBashMessages: false,
-        isRetrying: false,
-        retryAttempt: 0,
-        queue: { steering: [], followUp: [], steeringMode: 'one-at-a-time', followUpMode: 'one-at-a-time' },
-        supportsThinking: true,
-        activeTools: [],
-        scopedModels: [],
-        sessionStats: {
-          sessionFile: sessionFile,
-          sessionId,
-          userMessages: entries.filter(entry => isJsonObject(entry.message) && entry.message.role === 'user').length,
-          assistantMessages: entries.filter(entry => isJsonObject(entry.message) && entry.message.role === 'assistant')
-            .length,
-          toolCalls: 0,
-          toolResults: 0,
-          totalMessages: entries.length,
-          tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          cost: 0,
-        },
-        contextUsage: { tokens: 0, contextWindow: 200000, percent: 0 },
-        retry: null,
-        compaction: null,
+        entries,
         head,
-      },
+      }),
       branch,
     }
   }
@@ -516,53 +332,25 @@ export class MockPiSession implements SessionRuntime {
   }
 
   getState(): JsonObject {
-    return {
+    return mockLiveState({
       sessionId: this.getSessionId(),
-      sessionFile: this.sessionFile ?? null,
+      sessionFile: this.sessionFile,
       sessionName: typeof this.header?.name === 'string' ? this.header.name : null,
       cwd: this.cwd,
       model: { provider: 'mock', id: 'mock', name: 'Mock' },
       thinkingLevel: this.thinkingLevel,
-      isStreaming: this.streaming,
-      isCompacting: this.compacting,
+      streaming: this.streaming,
+      compacting: this.compacting,
       steeringMode: this.steeringMode,
       followUpMode: this.followUpMode,
       autoCompactionEnabled: this.autoCompaction,
       autoRetryEnabled: this.autoRetry,
-      messageCount: this.entries.length,
-      pendingMessageCount: this.steeringQueue.length + this.followUpQueue.length,
-      availableThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high'],
-      isIdle: !this.streaming,
-      isBashRunning: false,
-      hasPendingBashMessages: false,
-      isRetrying: false,
-      retryAttempt: 0,
-      queue: {
-        steering: [...this.steeringQueue],
-        followUp: [...this.followUpQueue],
-        steeringMode: this.steeringMode,
-        followUpMode: this.followUpMode,
-      },
-      supportsThinking: true,
-      activeTools: [...this.activeTools],
-      scopedModels: [],
-      // 与真实 SDK getSessionStats/getContextUsage 形状一致（mock 无真实消耗）
-      sessionStats: {
-        sessionFile: this.sessionFile ?? null,
-        sessionId: this.getSessionId(),
-        userMessages: 0,
-        assistantMessages: 0,
-        toolCalls: 0,
-        toolResults: 0,
-        totalMessages: this.entries.length,
-        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        cost: 0,
-      },
-      contextUsage: { tokens: 0, contextWindow: 200000, percent: 0 },
-      retry: { phase: 'idle', autoEnabled: this.autoRetry },
-      compaction: { autoEnabled: this.autoCompaction, operation: { type: 'none' } },
+      entriesLength: this.entries.length,
+      steeringQueue: this.steeringQueue,
+      followUpQueue: this.followUpQueue,
+      activeTools: this.activeTools,
       head: this.getHead(),
-    }
+    })
   }
 
   listSkills(): JsonValue {
