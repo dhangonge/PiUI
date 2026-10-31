@@ -544,8 +544,10 @@ describe('frozen diff reference corpus', () => {
 // 3. 碎片阈值
 // ============================================
 
+// isTooFragmented 只读 value 与 added/removed；count 是 ChangeObject 的必填字段，
+// 这里按 diffWordsWithSpace 的词级语义取字符数，不参与断言。
 function change(value: string, kind: 'common' | 'added' | 'removed'): ChangeObject<string> {
-  return kind === 'common' ? { value } : kind === 'added' ? { value, added: true } : { value, removed: true }
+  return { value, added: kind === 'added', removed: kind === 'removed', count: value.length }
 }
 
 describe('frozen fragmentation threshold', () => {
