@@ -20,13 +20,27 @@ import {
   type CSSProperties,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { diffLines, diffWordsWithSpace } from 'diff'
 import { useSyntaxHighlight, type HighlightTokens } from '../hooks/useSyntaxHighlight'
 import { useDynamicVirtualScroll } from '../hooks/useDynamicVirtualScroll'
 import { themeStore } from '../store/themeStore'
 import type { DiffStyle } from '../store/themeStore'
 import { getLineCount, getLineNumberColumnWidth } from '../utils/lineNumberUtils'
 import { useUiState } from '../utils/uiDisclosureState'
+import {
+  collapseContextPaired,
+  collapseContextUnified,
+  computePairedLines,
+  computeUnifiedLines,
+  expandRegion,
+  isCollapsed,
+  type DiffLine,
+  type ExpandDirection,
+  type ExpansionRegion,
+  type LineType,
+  type PairedLine,
+  type UnifiedLine,
+  type WordDiffSegment,
+} from './diffModel'
 
 // ============================================
 // 常量
@@ -64,191 +78,6 @@ export interface DiffViewerData {
   pairedLines: PairedLine[]
   unifiedLines: UnifiedLine[]
   lineNumberWidth: number
-}
-
-export type LineType = 'add' | 'delete' | 'context' | 'empty'
-
-interface DiffLine {
-  type: LineType
-  content: string
-  lineNo?: number
-  /** 词级别 diff 标记（结构化），与 syntax token 共存 */
-  wordDiffSegments?: WordDiffSegment[]
-}
-
-/** 词级别 diff 的单个片段 */
-interface WordDiffSegment {
-  text: string
-  /** 'add' | 'delete' 表示增删标记，undefined 表示无变化 */
-  diffType?: 'add' | 'delete'
-}
-
-interface PairedLine {
-  left: DiffLine
-  right: DiffLine
-}
-
-/** 折叠的 context 行占位 */
-interface CollapsedPairedLine {
-  collapsed: true
-  count: number
-  /** 在原始 lines 数组中的起始索引，用于展开 */
-  id: number
-  isFirst: boolean
-  isLast: boolean
-  chunked: boolean
-}
-
-type PairedLineOrCollapsed = PairedLine | CollapsedPairedLine
-
-interface UnifiedLine extends DiffLine {
-  oldLineNo?: number
-  newLineNo?: number
-}
-
-interface CollapsedUnifiedLine {
-  collapsed: true
-  count: number
-  id: number
-  isFirst: boolean
-  isLast: boolean
-  chunked: boolean
-}
-
-type UnifiedLineOrCollapsed = UnifiedLine | CollapsedUnifiedLine
-
-function isCollapsed(
-  line: PairedLineOrCollapsed | UnifiedLineOrCollapsed,
-): line is CollapsedPairedLine | CollapsedUnifiedLine {
-  return 'collapsed' in line && line.collapsed === true
-}
-
-function expandRegion(
-  prev: Map<number, ExpansionRegion>,
-  id: number,
-  direction: ExpandDirection,
-): Map<number, ExpansionRegion> {
-  const next = new Map(prev)
-  const current = next.get(id) ?? { fromStart: 0, fromEnd: 0 }
-  next.set(id, {
-    fromStart: current.fromStart + (direction === 'up' || direction === 'both' ? EXPANSION_LINE_COUNT : 0),
-    fromEnd: current.fromEnd + (direction === 'down' || direction === 'both' ? EXPANSION_LINE_COUNT : 0),
-  })
-  return next
-}
-
-/** 上下文行保留数：变更前后各保留 CONTEXT_LINES 行 */
-const CONTEXT_LINES = 3
-const EXPANSION_LINE_COUNT = 100
-type ExpandDirection = 'up' | 'down' | 'both'
-interface ExpansionRegion {
-  fromStart: number
-  fromEnd: number
-}
-
-/** 将连续 context 行折叠，只保留变更前后各 CONTEXT_LINES 行 */
-function collapseContextPaired(
-  lines: PairedLine[],
-  expandedRegions?: ReadonlyMap<number, ExpansionRegion>,
-): PairedLineOrCollapsed[] {
-  if (lines.length === 0) return []
-
-  const result: PairedLineOrCollapsed[] = []
-  let contextStart = -1
-
-  for (let i = 0; i <= lines.length; i++) {
-    const isCtx = i < lines.length && lines[i].left.type === 'context' && lines[i].right.type === 'context'
-
-    if (isCtx) {
-      if (contextStart === -1) contextStart = i
-    } else {
-      if (contextStart !== -1) {
-        const ctxLen = i - contextStart
-        const minToCollapse = CONTEXT_LINES * 2 + 2
-        if (ctxLen > minToCollapse) {
-          const isFirst = contextStart === 0
-          const isLast = i === lines.length
-          const keepBefore = isFirst ? 0 : CONTEXT_LINES
-          const keepAfter = isLast ? 0 : CONTEXT_LINES
-          const expanded = expandedRegions?.get(contextStart) ?? { fromStart: 0, fromEnd: 0 }
-          const prefixCount = Math.min(ctxLen, keepBefore + expanded.fromStart)
-          const suffixStart = Math.max(prefixCount, ctxLen - keepAfter - expanded.fromEnd)
-
-          for (let j = contextStart; j < contextStart + prefixCount; j++) result.push(lines[j])
-          if (suffixStart > prefixCount) {
-            const count = suffixStart - prefixCount
-            result.push({
-              collapsed: true,
-              count,
-              id: contextStart,
-              isFirst,
-              isLast,
-              chunked: count > EXPANSION_LINE_COUNT,
-            })
-          }
-          for (let j = contextStart + suffixStart; j < i; j++) result.push(lines[j])
-        } else {
-          for (let j = contextStart; j < i; j++) result.push(lines[j])
-        }
-        contextStart = -1
-      }
-      if (i < lines.length) result.push(lines[i])
-    }
-  }
-
-  return result
-}
-
-function collapseContextUnified(
-  lines: UnifiedLine[],
-  expandedRegions?: ReadonlyMap<number, ExpansionRegion>,
-): UnifiedLineOrCollapsed[] {
-  if (lines.length === 0) return []
-
-  const result: UnifiedLineOrCollapsed[] = []
-  let contextStart = -1
-
-  for (let i = 0; i <= lines.length; i++) {
-    const isCtx = i < lines.length && lines[i].type === 'context'
-
-    if (isCtx) {
-      if (contextStart === -1) contextStart = i
-    } else {
-      if (contextStart !== -1) {
-        const ctxLen = i - contextStart
-        const minToCollapse = CONTEXT_LINES * 2 + 2
-        if (ctxLen > minToCollapse) {
-          const isFirst = contextStart === 0
-          const isLast = i === lines.length
-          const keepBefore = isFirst ? 0 : CONTEXT_LINES
-          const keepAfter = isLast ? 0 : CONTEXT_LINES
-          const expanded = expandedRegions?.get(contextStart) ?? { fromStart: 0, fromEnd: 0 }
-          const prefixCount = Math.min(ctxLen, keepBefore + expanded.fromStart)
-          const suffixStart = Math.max(prefixCount, ctxLen - keepAfter - expanded.fromEnd)
-
-          for (let j = contextStart; j < contextStart + prefixCount; j++) result.push(lines[j])
-          if (suffixStart > prefixCount) {
-            const count = suffixStart - prefixCount
-            result.push({
-              collapsed: true,
-              count,
-              id: contextStart,
-              isFirst,
-              isLast,
-              chunked: count > EXPANSION_LINE_COUNT,
-            })
-          }
-          for (let j = contextStart + suffixStart; j < i; j++) result.push(lines[j])
-        } else {
-          for (let j = contextStart; j < i; j++) result.push(lines[j])
-        }
-        contextStart = -1
-      }
-      if (i < lines.length) result.push(lines[i])
-    }
-  }
-
-  return result
 }
 
 // ============================================
@@ -1716,7 +1545,6 @@ const WrappedUnifiedDiffView = memo(function WrappedUnifiedDiffView({
 // ============================================
 
 type HighlightToken = HighlightTokens[number][number]
-type WordDiffChange = ReturnType<typeof diffWordsWithSpace>[number]
 
 const LineContent = memo(function LineContent({ line, tokens }: { line: DiffLine; tokens: HighlightTokens | null }) {
   const lineTokens = tokens && line.lineNo ? tokens[line.lineNo - 1] : null
@@ -1817,181 +1645,4 @@ function MergedWordDiffLine({ segments, lineTokens }: { segments: WordDiffSegmen
   }
 
   return <>{result}</>
-}
-
-// ============================================
-// Diff Computation
-// ============================================
-
-function computePairedLines(before: string, after: string, skipWordDiff: boolean): PairedLine[] {
-  const changes = diffLines(before, after)
-  const result: PairedLine[] = []
-  const beforeLines = before.split('\n')
-  const afterLines = after.split('\n')
-
-  let oldIdx = 0,
-    newIdx = 0,
-    i = 0
-
-  while (i < changes.length) {
-    const change = changes[i]
-    const count = change.count || 0
-
-    if (change.removed) {
-      const next = changes[i + 1]
-      if (next?.added) {
-        const addCount = next.count || 0
-        const maxCount = Math.max(count, addCount)
-
-        for (let j = 0; j < maxCount; j++) {
-          const oldLine = j < count ? beforeLines[oldIdx + j] : undefined
-          const newLine = j < addCount ? afterLines[newIdx + j] : undefined
-
-          let leftSegments: WordDiffSegment[] | undefined
-          let rightSegments: WordDiffSegment[] | undefined
-
-          if (!skipWordDiff && oldLine !== undefined && newLine !== undefined) {
-            const wordDiff = computeWordDiff(oldLine, newLine)
-            if (!isTooFragmented(wordDiff.changes)) {
-              leftSegments = wordDiff.left
-              rightSegments = wordDiff.right
-            }
-          }
-
-          result.push({
-            left:
-              oldLine !== undefined
-                ? { type: 'delete', content: oldLine, lineNo: oldIdx + j + 1, wordDiffSegments: leftSegments }
-                : { type: 'empty', content: '' },
-            right:
-              newLine !== undefined
-                ? { type: 'add', content: newLine, lineNo: newIdx + j + 1, wordDiffSegments: rightSegments }
-                : { type: 'empty', content: '' },
-          })
-        }
-
-        oldIdx += count
-        newIdx += addCount
-        i += 2
-        continue
-      }
-
-      for (let j = 0; j < count; j++) {
-        result.push({
-          left: { type: 'delete', content: beforeLines[oldIdx + j] || '', lineNo: oldIdx + j + 1 },
-          right: { type: 'empty', content: '' },
-        })
-      }
-      oldIdx += count
-    } else if (change.added) {
-      for (let j = 0; j < count; j++) {
-        result.push({
-          left: { type: 'empty', content: '' },
-          right: { type: 'add', content: afterLines[newIdx + j] || '', lineNo: newIdx + j + 1 },
-        })
-      }
-      newIdx += count
-    } else {
-      for (let j = 0; j < count; j++) {
-        result.push({
-          left: { type: 'context', content: beforeLines[oldIdx + j] || '', lineNo: oldIdx + j + 1 },
-          right: { type: 'context', content: afterLines[newIdx + j] || '', lineNo: newIdx + j + 1 },
-        })
-      }
-      oldIdx += count
-      newIdx += count
-    }
-    i++
-  }
-
-  return result
-}
-
-function computeUnifiedLines(before: string, after: string): UnifiedLine[] {
-  const changes = diffLines(before, after)
-  const result: UnifiedLine[] = []
-  const beforeLines = before.split('\n')
-  const afterLines = after.split('\n')
-
-  let oldIdx = 0,
-    newIdx = 0
-
-  for (const change of changes) {
-    const count = change.count || 0
-
-    if (change.removed) {
-      for (let j = 0; j < count; j++) {
-        result.push({ type: 'delete', content: beforeLines[oldIdx + j] || '', oldLineNo: oldIdx + j + 1 })
-      }
-      oldIdx += count
-    } else if (change.added) {
-      for (let j = 0; j < count; j++) {
-        result.push({ type: 'add', content: afterLines[newIdx + j] || '', newLineNo: newIdx + j + 1 })
-      }
-      newIdx += count
-    } else {
-      for (let j = 0; j < count; j++) {
-        result.push({
-          type: 'context',
-          content: afterLines[newIdx + j] || '',
-          oldLineNo: oldIdx + j + 1,
-          newLineNo: newIdx + j + 1,
-        })
-      }
-      oldIdx += count
-      newIdx += count
-    }
-  }
-
-  return result
-}
-
-function isTooFragmented(changes: WordDiffChange[]): boolean {
-  let commonLength = 0,
-    totalLength = 0
-  for (const change of changes) {
-    totalLength += change.value.length
-    if (!change.added && !change.removed) commonLength += change.value.length
-  }
-  return totalLength > 10 && commonLength / totalLength < 0.4
-}
-
-function computeWordDiff(
-  oldLine: string,
-  newLine: string,
-): { left: WordDiffSegment[]; right: WordDiffSegment[]; changes: WordDiffChange[] } {
-  const changes = diffWordsWithSpace(oldLine, newLine)
-
-  const mergedChanges: WordDiffChange[] = []
-  for (let i = 0; i < changes.length; i++) {
-    const current = changes[i]
-    const prev = mergedChanges[mergedChanges.length - 1]
-
-    if (prev && !current.added && !current.removed && /^\s*$/.test(current.value)) {
-      const next = changes[i + 1]
-      if ((prev.removed && next?.removed) || (prev.added && next?.added)) {
-        prev.value += current.value
-        continue
-      }
-    }
-
-    if (prev && ((prev.added && current.added) || (prev.removed && current.removed))) {
-      prev.value += current.value
-    } else {
-      mergedChanges.push({ ...current })
-    }
-  }
-
-  const left: WordDiffSegment[] = []
-  const right: WordDiffSegment[] = []
-  for (const change of mergedChanges) {
-    if (change.removed) left.push({ text: change.value, diffType: 'delete' })
-    else if (change.added) right.push({ text: change.value, diffType: 'add' })
-    else {
-      left.push({ text: change.value })
-      right.push({ text: change.value })
-    }
-  }
-
-  return { left, right, changes: mergedChanges }
 }
