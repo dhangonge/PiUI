@@ -567,10 +567,20 @@ describe('PiChatPane composer boundary: meaningful updates', () => {
     expect(after.revertSteps).toBe(2)
     expect(after.onRedo).not.toBe(before.onRedo)
 
+    // 返回 undefined（不是 Promise）：沿用旧内联箭头 `() => void handleRedoStep()` 的边界
+    let redoResult: unknown
     await act(async () => {
-      after.onRedo?.()
+      redoResult = after.onRedo?.()
     })
+    expect(redoResult).toBeUndefined()
     expect(ctl.navigatePiTree).toHaveBeenCalledWith(SESSION, { entryId: 'a2' })
+
+    let redoAllResult: unknown
+    await act(async () => {
+      redoAllResult = after.onRedoAll?.()
+    })
+    expect(redoAllResult).toBeUndefined()
+    expect(ctl.navigatePiTree).toHaveBeenLastCalledWith(SESSION, { entryId: 'a3' })
   })
 
   it('updates the undo text when a redo draft arrives', () => {

@@ -144,6 +144,16 @@ export function usePiComposerBindings({
     chatAreaRef.current?.scrollToBottom()
   }, [chatAreaRef])
 
+  // 沿用内联箭头的 `void` 语义：redo handler 本身是 async，这里把 Promise
+  // 吞掉、返回 undefined，别把 Promise 漏给 InputBox 的 `onClick` 边界。
+  const redo = useCallback(() => {
+    void onRedoStep()
+  }, [onRedoStep])
+
+  const redoAll = useCallback(() => {
+    void onRedoAll()
+  }, [onRedoAll])
+
   return useMemo(
     () => ({
       models: stableModels,
@@ -156,8 +166,8 @@ export function usePiComposerBindings({
       abort,
       openModelSelector,
       scrollToBottom,
-      redo: onRedoStep,
-      redoAll: onRedoAll,
+      redo,
+      redoAll,
     }),
     [
       stableModels,
@@ -170,8 +180,8 @@ export function usePiComposerBindings({
       abort,
       openModelSelector,
       scrollToBottom,
-      onRedoStep,
-      onRedoAll,
+      redo,
+      redoAll,
     ],
   )
 }
