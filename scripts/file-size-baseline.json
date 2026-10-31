@@ -1,6 +1,6 @@
 {
   "packages/app/src/components/FileExplorer.tsx": 1925,
-  "packages/app/src/components/DiffViewer.tsx": 1997,
+  "packages/app/src/components/DiffViewer.tsx": 1655,
   "packages/app/src/features/chat/InputBox.tsx": 1778,
   "packages/app/src/features/pi-chat/PiChatPane.tsx": 1746,
   "packages/app/src/components/MarkdownRenderer.test.tsx": 1426,
