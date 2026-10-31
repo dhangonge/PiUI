@@ -99,6 +99,10 @@ function runPackage(pkg) {
     '--import',
     'tsx',
     '--test',
+    // 固定 spec 输出：Node 22 在非 TTY（CI）下默认用 tap，报告行前缀是 `# `，
+    // 而下面的解析和 scope 校验只认 spec 的 `ℹ `；本机 Node 26 默认 spec，
+    // 所以这个差异只在 CI 里显形。
+    '--test-reporter=spec',
     '--experimental-test-coverage',
     '--test-coverage-include=src/**',
     '--test-coverage-exclude=src/**/*.test.ts',
