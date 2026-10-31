@@ -344,17 +344,65 @@ function corpus(): CorpusCase[] {
     ],
   }
 
+  const durationMapNonPositive: CorpusCase = {
+    name: 'turnDurationMap 里 0 值被忽略，回落到时间戳耗时',
+    items: [
+      createUserItem('user-1', 1000),
+      createAssistantItem('assistant-1', [createToolCall('tool-1'), createTextBlock('done')], 1001, 1200),
+    ],
+    options: {
+      ...base,
+      turnDurationMap: new Map([
+        ['assistant-1', 0],
+        ['assistant-0', -5],
+      ]),
+      sessionIsStreaming: false,
+    },
+    expectedKeys: ['user-1', 'process-shell:user-1'],
+    expectedShells: [
+      {
+        userMessageId: 'user-1',
+        isActive: false,
+        durationMs: 200,
+        childScopes: [['assistant-1', 'process']],
+        finalEntryId: 'assistant-1',
+      },
+    ],
+  }
+
+  const emptyTurnBeforeBusyTurn: CorpusCase = {
+    name: 'busy / 空回合后面已出现助手：空回合收壳，不再挂 Working',
+    items: [
+      createUserItem('user-1', 1000),
+      createUserItem('user-2', 2000),
+      streaming(createAssistantItem('assistant-1', [createToolCall('tool-1')], 2001)),
+    ],
+    options: { ...base, sessionIsStreaming: true, isUserEntryReady: readySet(['user-1', 'user-2']) },
+    expectedKeys: ['user-1', 'user-2', 'process-shell:user-2'],
+    expectedShells: [
+      {
+        userMessageId: 'user-2',
+        isActive: true,
+        durationMs: undefined,
+        childScopes: [['assistant-1', 'process']],
+        finalEntryId: null,
+      },
+    ],
+  }
+
   return [
     pureFinalSettled,
     processThenFinal,
     busyMultiAssistant,
     emptyUserNotReady,
     emptyUserReady,
+    emptyTurnBeforeBusyTurn,
     laterLive,
     pageHeadAndRenderKey,
     systemEntry,
     toolResultDuration,
     durationMapFallback,
+    durationMapNonPositive,
     busyMultiStepGap,
     abortedEmptyTurn,
     queuedEmptyUser,
@@ -553,5 +601,129 @@ describe(`reuseProcessTimelineItems 兼容冻结基线 ${REFERENCE_SOURCE_COMMIT
     expect(reuseProcessTimelineItems(undefined, next)).toBe(next)
     expect(referenceReuseProcessTimelineItems(undefined, referenceNext)).toBe(referenceNext)
     expect(reuseProcessTimelineItems([], next)).toBe(next)
+  })
+})
+
+/**
+ * 定种随机差分：语料表只覆盖手挑组合，这里按固定种子生成一批随机时间线，
+ * 逐条比旧 / 新输出。种子固定 → 可复现，失败用例的 shape 打印在断言消息里。
+ */
+function mulberry32(seed: number) {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+type RandomTimeline = {
+  items: PiTimelineItem[]
+  options: BuildOptions
+  label: string
+}
+
+function randomTimeline(seed: number): RandomTimeline {
+  const rnd = mulberry32(seed)
+  const pick = <T>(values: T[]): T => values[Math.floor(rnd() * values.length)]
+  const items: PiTimelineItem[] = []
+  const count = Math.floor(rnd() * 9)
+  let clock = 1000
+  let userIndex = 0
+  let assistantIndex = 0
+
+  for (let i = 0; i < count; i++) {
+    const kind = pick(['user', 'user', 'assistant', 'assistant', 'assistant', 'system'] as const)
+    clock += 10 + Math.floor(rnd() * 50)
+    if (kind === 'user') {
+      const id = `user-${++userIndex}`
+      items.push(rnd() < 0.25 ? { ...createUserItem(id, clock), renderKey: `live-${id}` } : createUserItem(id, clock))
+      continue
+    }
+    if (kind === 'system') {
+      items.push(
+        rnd() < 0.5
+          ? compactionItem(`compaction-${i}`, clock)
+          : {
+              kind: 'custom_message',
+              entryId: `custom-${i}`,
+              timestamp: clock,
+              rawEntry: rawEntry(`custom-${i}`, clock),
+              customType: 'piui-test',
+              content: `custom-${i}`,
+              display: true,
+            },
+      )
+      continue
+    }
+    const id = `assistant-${++assistantIndex}`
+    const blockRoll = rnd()
+    const blocks =
+      blockRoll < 0.3
+        ? [createTextBlock(`text-${id}`)]
+        : blockRoll < 0.6
+          ? [createToolCall(id)]
+          : [createToolCall(id), createTextBlock(`text-${id}`)]
+    const completed = rnd() < 0.45 ? clock + Math.floor(rnd() * 200) : undefined
+    const built = createAssistantItem(id, blocks, clock, completed)
+    items.push(rnd() < 0.3 ? { ...built, isStreaming: true } : built)
+  }
+
+  const turnDurationMap = new Map<string, number>()
+  for (let i = 1; i <= assistantIndex; i++) {
+    if (rnd() < 0.5) turnDurationMap.set(`assistant-${i}`, 50 + Math.floor(rnd() * 1000))
+  }
+  const readyIds = new Set<string>()
+  for (let i = 1; i <= userIndex; i++) if (rnd() < 0.5) readyIds.add(`user-${i}`)
+
+  return {
+    items,
+    label: `seed=${seed} kinds=[${items.map(item => item.kind).join(',')}]`,
+    options: {
+      turnDurationMap,
+      sessionIsStreaming: rnd() < 0.5,
+      messageHasProcess: hasProcess,
+      messageHasFinal: hasFinal,
+      isUserEntryReady: id => readyIds.has(id),
+    },
+  }
+}
+
+describe('buildProcessTimeline 定种随机差分', () => {
+  it('200 条随机时间线：旧 / 新输出逐条深等价且不破坏输入', () => {
+    for (let seed = 1; seed <= 200; seed++) {
+      const scenario = randomTimeline(seed)
+      const before = structuredClone(scenario.items)
+      const production = buildProcessTimeline(scenario.items, scenario.options)
+      const reference = referenceBuildProcessTimeline(scenario.items, scenario.options)
+      expect(production, scenario.label).toStrictEqual(reference)
+      expect(scenario.items, scenario.label).toStrictEqual(before)
+      expectOutputSharesInputItems(production, scenario.items)
+    }
+  })
+
+  it('流式把最后一条助手弄脏时，复用位置与旧实现一致', () => {
+    for (let seed = 201; seed <= 260; seed++) {
+      const scenario = randomTimeline(seed)
+      const lastAssistant = [...scenario.items].reverse().find(item => item.kind === 'assistant_message')
+      if (!lastAssistant) continue
+      const dirtyItems = scenario.items.map(item =>
+        item === lastAssistant ? streaming(item as PiAssistantMessageItem) : item,
+      )
+
+      const previous = buildProcessTimeline(scenario.items, scenario.options)
+      const next = buildProcessTimeline(dirtyItems, scenario.options)
+      const productionResult = reuseProcessTimelineItems(previous, next)
+
+      const referencePrevious = referenceBuildProcessTimeline(scenario.items, scenario.options)
+      const referenceNext = referenceBuildProcessTimeline(dirtyItems, scenario.options)
+      const referenceResult = referenceReuseProcessTimelineItems(referencePrevious, referenceNext)
+
+      expect(signatureOf(productionResult, previous, next), scenario.label).toStrictEqual(
+        signatureOf(referenceResult, referencePrevious, referenceNext),
+      )
+      expect(productionResult, scenario.label).toStrictEqual(referenceResult)
+    }
   })
 })
