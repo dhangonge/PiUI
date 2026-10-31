@@ -65,4 +65,12 @@
 - 本机浏览器复用第一轮隔离参数：`--password-store=basic --use-mock-keychain --disable-background-networking`，不改系统配置。
 - 大型临时产物使用 home 下 TMPDIR，避免第一轮 `/tmp` 配额问题。
 - 本轮工作树和日志根目录：`/home/zhangtung/.cache/piui-round2-1eUv5J/`。
-- 所有通过 / 性能数字待实际执行后补充。真机帧率、IME、系统返回和完整主题矩阵仍需单列验收。
+- 所有通过 / 性能数字以实际执行为准。真机帧率、IME、系统返回和完整主题矩阵仍需单列验收。
+
+### 拆分前模型基线
+
+主代理在 `09769ff8`（聊天模型源码与 `655eaa6c` 相同）运行独立 Node 探针：100 / 1000 / 5000 回合，已结束、尾部 live、空队列三种固定场景；校验输出行数、唯一 active 壳并记录结果摘要。
+
+已结束场景对 `isStreaming` 的访问次数为 5250 / 502500 / 12512500，尾部 live 为 5050 / 500500 / 12502500，验证后缀扫描存在二次增长。探针将计数与计时分开，结果保存在 `timeline-baseline.json`；计时采集时有并行子代理负载，只作为原始记录，不据此声称浏览器或真机性能。优化后需要同环境成对复测。
+
+另一个隔离 Node 进程以 mock Worker 完成 200 个独立 key 的一次性高亮请求：客户端 Map 在完成后仍保留 200 个 key，显式 dispose 后归零。结果见 `highlight-retention-baseline.json`。这验证生命周期清理缺口，不是实际堆字节数或真实 Worker 性能；第二轮 D 必须同时保持并发 latest-only 与失败清理语义。
