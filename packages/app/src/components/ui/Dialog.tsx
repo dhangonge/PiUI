@@ -2,8 +2,9 @@ import { useEffect, useState, useRef, useCallback, useId } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { CloseIcon } from '../Icons'
-import { useDelayedRender } from '../../hooks/useDelayedRender'
+import { OVERLAY_MOTION } from '../../constants/animation'
 import { useBackClose } from '../../hooks/useBackClose'
+import { useModalVisibility } from '../../hooks/useModalVisibility'
 
 interface DialogProps {
   isOpen: boolean
@@ -35,9 +36,8 @@ export function Dialog({
   allowTouchBackdropClose = false,
 }: DialogProps) {
   const { t } = useTranslation(['common'])
-  // Animation state
-  const [isVisible, setIsVisible] = useState(false)
-  const shouldRender = useDelayedRender(isOpen, 200)
+  // 可见性生命周期（首帧先在隐藏态落一次 paint、退场等过渡、偏好减少动态效果）
+  const { isVisible, shouldRender, reduceMotion } = useModalVisibility(isOpen)
   const dialogRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const previousFocusedElementRef = useRef<HTMLElement | null>(null)
@@ -212,24 +212,6 @@ export function Dialog({
   }, [])
 
   useEffect(() => {
-    let frameId: number | null = null
-
-    if (shouldRender && isOpen) {
-      frameId = requestAnimationFrame(() => {
-        setIsVisible(true)
-      })
-    } else {
-      frameId = requestAnimationFrame(() => {
-        setIsVisible(false)
-      })
-    }
-
-    return () => {
-      if (frameId !== null) cancelAnimationFrame(frameId)
-    }
-  }, [shouldRender, isOpen])
-
-  useEffect(() => {
     if (!isOpen) return
 
     if (restoreFocusTimerRef.current !== null) {
@@ -237,8 +219,20 @@ export function Dialog({
       restoreFocusTimerRef.current = null
     }
 
-    previousFocusedElementRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    // 只在「开」的那一次抓 opener：这个 effect 的依赖只有 isOpen。
+    // 打开期间父级重渲染（onClose 通常是内联箭头）或系统切换「减少动态效果」
+    // 都会让组件重渲染，若把捕获挂在每次渲染上，会把面板内的当前焦点
+    // 误记成 opener，关闭后焦点就回不去了。
+    const activeElement = document.activeElement
+    // 快速关→开时面板还没卸载、焦点仍在面板内：保留上一次抓到的真正 opener。
+    if (activeElement instanceof HTMLElement && dialogRef.current?.contains(activeElement)) return
+
+    previousFocusedElementRef.current = activeElement instanceof HTMLElement ? activeElement : null
     previousFocusedElementIdRef.current = previousFocusedElementRef.current?.id || null
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const topDialog = getTopOpenDialog()
@@ -296,6 +290,22 @@ export function Dialog({
 
   if (!shouldRender) return null
 
+  // 只列真正会变的属性：transition-all 会把布局属性也带进去。
+  // 拖拽期间必须没有过渡，否则手指位移会被缓动拖慢。
+  const panelTransition = isDraggingActive
+    ? 'none'
+    : reduceMotion
+      ? `opacity ${OVERLAY_MOTION.reducedDurationMs}ms ease-out`
+      : `opacity ${OVERLAY_MOTION.durationMs}ms ease-out, transform ${OVERLAY_MOTION.durationMs}ms ease-out`
+
+  // 减少动态效果时去掉自动位移 / 缩放；拖拽位移是手势直驱，保留。
+  const hiddenTransform = reduceMotion ? 'none' : 'scale(0.95) translateY(8px)'
+  const shownTransform = reduceMotion
+    ? dragY > 0
+      ? `translateY(${dragY}px)`
+      : 'none'
+    : `scale(1) translateY(${dragY}px)`
+
   return createPortal(
     <div
       className="fixed inset-0 z-[300]"
@@ -336,7 +346,6 @@ export function Dialog({
           className={`
             relative glass border border-border-200/60 rounded-xl shadow-lg 
             flex flex-col overflow-hidden
-            ${isDraggingActive ? '' : 'transition-all duration-200 ease-out'}
             ${fullscreen ? '!rounded-none' : ''} ${className}
           `}
           style={{
@@ -345,7 +354,8 @@ export function Dialog({
             maxWidth: '100%',
             maxHeight: '100%',
             opacity: isVisible ? (dragY > 0 ? Math.max(0.3, 1 - dragY / 300) : 1) : 0,
-            transform: isVisible ? `scale(1) translateY(${dragY}px)` : 'scale(0.95) translateY(8px)',
+            transform: isVisible ? shownTransform : hiddenTransform,
+            transition: panelTransition,
           }}
           role="dialog"
           aria-modal="true"
