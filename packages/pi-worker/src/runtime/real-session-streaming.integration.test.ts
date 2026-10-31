@@ -27,7 +27,7 @@ import {
   openOfflineSession,
   loadPiAiFromPinnedSdk,
   emptyResourceLoader,
-} from './real-session-test-support.ts'
+} from '../../test-support/real-session.ts'
 
 await loadPiSdk()
 

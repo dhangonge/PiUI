@@ -8,7 +8,7 @@ import {
   type CreateAgentSessionRuntimeFactory,
   type ResourceLoader,
 } from '@earendil-works/pi-coding-agent'
-import { RealPiSession } from './real-session.js'
+import { RealPiSession } from '../src/runtime/real-session.js'
 
 // 集成测试共用夹具：原生条目/树读取、离线 faux provider 会话。
 // 只导出纯函数与工厂，不持有模块级可变状态——每个用例自己开会话，
@@ -166,12 +166,6 @@ export async function loadPiAiFromPinnedSdk(): Promise<PiAiTestApi> {
   return (await import(piAiEntry)) as unknown as PiAiTestApi
 }
 
-/**
- * 最小资源加载器：集成测试不加载真实主题/技能/提示词。
- * SDK 的 ResourceLoader 类型还声明了 getSystemPromptSource /
- * getAppendSystemPromptSources，集成测试路径不调用它们，夹具故意不实现，
- * 因此这里显式断言（运行时形状与改动前一致）。
- */
 export function emptyResourceLoader(): ResourceLoader {
   const extensions = { extensions: [], errors: [], runtime: createExtensionRuntime() }
   return {
@@ -184,5 +178,5 @@ export function emptyResourceLoader(): ResourceLoader {
     getAppendSystemPrompt: () => [],
     extendResources: () => {},
     reload: async () => {},
-  } as unknown as ResourceLoader
+  }
 }

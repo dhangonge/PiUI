@@ -23,12 +23,6 @@ import { createDefaultRuntime } from './default-runtime.js'
 import { extensionActionError } from './extension-diagnostics.js'
 import { extensionBindings, type ExtensionHostActions } from './extension-host.js'
 import { ExtensionUiBridge } from './extension-ui-bridge.js'
-import {
-  nextLiveMessageCheckpoint,
-  provisionalLiveMessageCheckpoint,
-  shouldClearPersistedLiveMessage,
-  type LiveMessageCheckpoint,
-} from './live-message.js'
 import { assertSessionFileInside, pathKey, stripDuplicatePartial, toJson, toJsonObject } from './native-json.js'
 import {
   entriesPageFromEntries,
@@ -36,22 +30,14 @@ import {
   sessionHeadFromParts,
   type BranchCheckpoint,
   type EntriesPage,
+  type LiveMessage,
   type SessionHead,
 } from './pagination.js'
 import { verifySdkSessionContract } from './sdk-contract.js'
-import {
-  activityStatus,
-  initialSessionShadow,
-  resetSessionShadow,
-  trackSessionShadow,
-  withBranchSummaryFinished,
-  withBranchSummaryRunning,
-  type SessionShadow,
-} from './session-shadow.js'
 import type { PiEventMeta, SessionRuntime, Unsubscribe } from '../runtime.js'
 
-// 契约门禁、子代理公告、JSON 归一与扩展宿主动作下沉到独立模块，
-// 这里保持原有公开出口不变（其余包按这些名字引用）。
+// 契约门禁、子代理频道、默认运行时、扩展宿主动作、JSON 与路径归一都拆到
+// 独立模块；公开导出仍从本文件转出，其它包按原名字引用。
 export { verifySdkSessionContract } from './sdk-contract.js'
 export { forwardChildSessionEvents, toChildSessionEvent, type ChildSessionPhase } from './child-session-events.js'
 export { stripDuplicatePartial } from './native-json.js'
@@ -64,6 +50,13 @@ export interface RealPiSessionOpenOptions {
   hostActions?: ExtensionHostActions
   /** 进程级共享 ModelRuntime：多个会话 runtime 共享同一个模型/认证实例 */
   modelRuntime?: ModelRuntime
+}
+
+interface LiveMessageCheckpoint {
+  value: LiveMessage
+  messageIdentity: unknown
+  entriesBeforeEnd: number
+  provisional: boolean
 }
 
 export class RealPiSession implements SessionRuntime {
@@ -83,7 +76,9 @@ export class RealPiSession implements SessionRuntime {
   private eventEpoch = randomUUID()
   private eventSequence = 0
   private liveMessage?: LiveMessageCheckpoint
-  private shadow: SessionShadow = initialSessionShadow()
+  private isCompactingFlag = false
+  private retryShadow: JsonObject = { phase: 'idle' }
+  private compactionShadow: JsonObject = { autoEnabled: true, operation: { type: 'none' } }
 
   private constructor(
     runtime: AgentSessionRuntime,
@@ -227,42 +222,150 @@ export class RealPiSession implements SessionRuntime {
    */
   private emitActivityIfChanged(): void {
     const session = this.runtime.session
-    const flags = {
-      streaming: Boolean(session.isStreaming),
-      retrying: Boolean(session.isRetrying),
-      compacting: Boolean(session.isCompacting) || this.shadow.isCompacting,
-    }
+    const streaming = Boolean(session.isStreaming)
+    const retrying = Boolean(session.isRetrying)
+    const compacting = Boolean(session.isCompacting) || this.isCompactingFlag
     if (
-      flags.streaming === this.lastActivity.streaming &&
-      flags.retrying === this.lastActivity.retrying &&
-      flags.compacting === this.lastActivity.compacting
+      streaming === this.lastActivity.streaming &&
+      retrying === this.lastActivity.retrying &&
+      compacting === this.lastActivity.compacting
     )
       return
-    this.lastActivity = flags
+    this.lastActivity = { streaming, retrying, compacting }
 
-    const status = activityStatus(flags, this.shadow, session.retryAttempt)
+    let status: SessionActivityStatus | null = null
+    if (retrying) {
+      const nextAtIso = typeof this.retryShadow.nextAttemptAt === 'string' ? this.retryShadow.nextAttemptAt : undefined
+      const nextAt = nextAtIso ? Date.parse(nextAtIso) : 0
+      status = {
+        type: 'retry',
+        attempt:
+          typeof this.retryShadow.attempt === 'number' ? this.retryShadow.attempt : Number(session.retryAttempt ?? 1),
+        message: typeof this.retryShadow.errorMessage === 'string' ? this.retryShadow.errorMessage : '',
+        next: Number.isFinite(nextAt) ? nextAt : 0,
+      }
+    } else if (streaming) {
+      status = { type: 'busy' }
+    } else if (compacting) {
+      // 压缩中没有 LLM 流，但会话确实在干活——让宿主把它标为工作中
+      status = { type: 'compacting' }
+    }
     for (const listener of this.activityListeners) listener(status)
   }
 
   private lastActivity = { streaming: false, retrying: false, compacting: false }
 
-  /** 每帧把原生事件累积进影子状态（自动压缩/重试/压缩操作的可读视图） */
   private trackShadowState(event: { type: string; [key: string]: unknown }): void {
     const session = this.runtime.session
-    this.shadow = trackSessionShadow(this.shadow, event, {
-      autoCompactionEnabled: session.autoCompactionEnabled,
-      autoRetryEnabled: session.autoRetryEnabled,
-    })
+    if (event.type === 'compaction_start') {
+      this.isCompactingFlag = true
+      this.compactionShadow = {
+        autoEnabled: session.autoCompactionEnabled,
+        operation: {
+          type: 'compaction',
+          phase: 'running',
+          reason: toJson(event.reason) ?? null,
+        },
+        lastAborted: null,
+        lastError: null,
+        lastNotice: null,
+      }
+    } else if (event.type === 'compaction_end') {
+      this.isCompactingFlag = false
+      this.compactionShadow = {
+        ...this.compactionShadow,
+        autoEnabled: session.autoCompactionEnabled,
+        operation: { type: 'none' },
+        lastResult: toJson(event.result) ?? this.compactionShadow.lastResult ?? null,
+        lastAborted: Boolean(event.aborted),
+        lastError: toJson(event.errorMessage) ?? null,
+      }
+    } else if (event.type === 'auto_retry_start') {
+      this.retryShadow = {
+        phase: 'waiting',
+        autoEnabled: session.autoRetryEnabled,
+        attempt: Number(event.attempt),
+        maxAttempts: Number(event.maxAttempts),
+        delayMs: Number(event.delayMs),
+        nextAttemptAt: new Date(Date.now() + Number(event.delayMs)).toISOString(),
+        errorMessage: toJson(event.errorMessage) ?? null,
+      }
+    } else if (event.type === 'agent_start' && this.retryShadow.phase === 'waiting') {
+      this.retryShadow = {
+        phase: 'running',
+        autoEnabled: session.autoRetryEnabled,
+        attempt: this.retryShadow.attempt ?? 0,
+        maxAttempts: this.retryShadow.maxAttempts ?? 0,
+      }
+    } else if (event.type === 'agent_start' && this.retryShadow.phase === 'finished') {
+      this.retryShadow = { phase: 'idle', autoEnabled: session.autoRetryEnabled }
+    } else if (event.type === 'auto_retry_end') {
+      this.retryShadow = {
+        phase: 'finished',
+        autoEnabled: session.autoRetryEnabled,
+        success: Boolean(event.success),
+        attempt: Number(event.attempt),
+        finalError: toJson(event.finalError) ?? null,
+      }
+    } else if (event.type === 'summarization_retry_scheduled') {
+      const operation = isJsonObject(this.compactionShadow.operation) ? this.compactionShadow.operation : undefined
+      if (operation && operation.type !== 'none') {
+        this.compactionShadow = {
+          ...this.compactionShadow,
+          operation: {
+            ...operation,
+            phase: 'retrying',
+            attempt: Number(event.attempt),
+            maxAttempts: Number(event.maxAttempts),
+            delayMs: Number(event.delayMs),
+            errorMessage: toJson(event.errorMessage) ?? null,
+          },
+        }
+      }
+    } else if (event.type === 'summarization_retry_attempt_start') {
+      const operation = isJsonObject(this.compactionShadow.operation) ? this.compactionShadow.operation : undefined
+      if (operation && operation.type !== 'none') {
+        this.compactionShadow = {
+          ...this.compactionShadow,
+          operation: { ...operation, phase: 'running' },
+        }
+      }
+    }
   }
 
   private captureEvent(event: { type: string; message?: unknown }, nativeEvent: JsonObject): PiEventMeta {
     const position = { epoch: this.eventEpoch, sequence: ++this.eventSequence }
-    this.liveMessage = nextLiveMessageCheckpoint(
-      this.liveMessage,
-      event,
-      nativeEvent,
-      this.runtime.session.sessionManager.getEntries().length,
-    )
+    const nativeMessage = isJsonObject(nativeEvent.message) ? nativeEvent.message : undefined
+    const nativeRole = nativeMessage?.role
+    const current = this.liveMessage
+    const trackedMessage = nativeRole === 'user' || nativeRole === 'assistant' || nativeRole === 'toolResult'
+    if (
+      trackedMessage &&
+      (event.type === 'message_start' || event.type === 'message_update' || event.type === 'message_end')
+    ) {
+      const isStart = event.type === 'message_start'
+      const currentMessage = current && isJsonObject(current.value.message) ? current.value.message : undefined
+      const currentRole = currentMessage?.role
+      const reusedCheckpoint =
+        current &&
+        currentRole === nativeRole &&
+        current.value.phase === 'streaming' &&
+        (current.provisional || !isStart)
+      this.liveMessage = {
+        value: {
+          id: reusedCheckpoint ? current.value.id : randomUUID(),
+          revision: reusedCheckpoint ? current.value.revision + 1 : 1,
+          phase: event.type === 'message_end' ? 'persisting' : 'streaming',
+          message: nativeMessage ?? null,
+        },
+        messageIdentity: event.message,
+        entriesBeforeEnd:
+          event.type === 'message_end'
+            ? this.runtime.session.sessionManager.getEntries().length
+            : (current?.entriesBeforeEnd ?? this.runtime.session.sessionManager.getEntries().length),
+        provisional: false,
+      }
+    }
     return {
       ...position,
       liveMessage: this.liveMessage
@@ -271,20 +374,44 @@ export class RealPiSession implements SessionRuntime {
     }
   }
 
-  /** 采样会话同步状态里的 streamingMessage（扩展拦下 message_start 时的兜底） */
   private syncLiveMessageFromAgentState(): void {
-    this.liveMessage = provisionalLiveMessageCheckpoint(
-      this.liveMessage,
-      this.runtime.session.agent.state.streamingMessage,
-      this.runtime.session.sessionManager.getEntries().length,
+    const messageIdentity = this.runtime.session.agent.state.streamingMessage
+    const message = toJson(messageIdentity)
+    const role = isJsonObject(message) ? message.role : undefined
+    if (
+      !messageIdentity ||
+      !isJsonObject(message) ||
+      (role !== 'user' && role !== 'assistant' && role !== 'toolResult')
     )
+      return
+    const current = this.liveMessage
+    if (current?.value.phase === 'persisting') return
+    const currentMessage = current && isJsonObject(current.value.message) ? current.value.message : undefined
+    const currentRole = currentMessage?.role
+    const reusedCheckpoint =
+      current && currentRole === role && current.value.phase === 'streaming' ? current : undefined
+    if (reusedCheckpoint && JSON.stringify(reusedCheckpoint.value.message) === JSON.stringify(message)) return
+    this.liveMessage = {
+      value: {
+        id: reusedCheckpoint?.value.id ?? randomUUID(),
+        revision: reusedCheckpoint ? reusedCheckpoint.value.revision + 1 : 1,
+        phase: 'streaming',
+        message,
+      },
+      messageIdentity,
+      entriesBeforeEnd: this.runtime.session.sessionManager.getEntries().length,
+      provisional: true,
+    }
   }
 
   private clearPersistedLiveMessage(): void {
     const checkpoint = this.liveMessage
-    if (!checkpoint) return
-    if (!shouldClearPersistedLiveMessage(checkpoint, this.runtime.session.sessionManager.getEntries())) return
-    if (this.liveMessage?.value.id === checkpoint.value.id) this.liveMessage = undefined
+    if (!checkpoint || checkpoint.value.phase !== 'persisting') return
+    const persisted = this.runtime.session.sessionManager
+      .getEntries()
+      .slice(checkpoint.entriesBeforeEnd)
+      .some(entry => entry.type === 'message' && entry.message === checkpoint.messageIdentity)
+    if (persisted && this.liveMessage?.value.id === checkpoint.value.id) this.liveMessage = undefined
   }
 
   private detachSessionSubscriptions(): void {
@@ -295,10 +422,12 @@ export class RealPiSession implements SessionRuntime {
   }
 
   private resetSessionShadowState(): void {
-    this.shadow = resetSessionShadow({
-      autoCompactionEnabled: this.runtime.session.autoCompactionEnabled,
-      autoRetryEnabled: this.runtime.session.autoRetryEnabled,
-    })
+    this.isCompactingFlag = false
+    this.retryShadow = { phase: 'idle', autoEnabled: this.runtime.session.autoRetryEnabled }
+    this.compactionShadow = {
+      autoEnabled: this.runtime.session.autoCompactionEnabled,
+      operation: { type: 'none' },
+    }
     this.eventEpoch = randomUUID()
     this.eventSequence = 0
     this.liveMessage = undefined
@@ -484,7 +613,7 @@ export class RealPiSession implements SessionRuntime {
       model: toJson(session.model) ?? null,
       thinkingLevel: String(session.thinkingLevel ?? 'off'),
       isStreaming: Boolean(session.isStreaming),
-      isCompacting: this.shadow.isCompacting || Boolean(session.isCompacting),
+      isCompacting: this.isCompactingFlag || Boolean(session.isCompacting),
       steeringMode: String(session.steeringMode),
       followUpMode: String(session.followUpMode),
       autoCompactionEnabled: Boolean(session.autoCompactionEnabled),
@@ -517,8 +646,8 @@ export class RealPiSession implements SessionRuntime {
       scopedModels: toJson(session.scopedModels) ?? [],
       contextUsage: toJson(contextUsage) ?? null,
       sessionStats: toJson(stats) ?? null,
-      retry: this.shadow.retry,
-      compaction: this.shadow.compaction,
+      retry: this.retryShadow,
+      compaction: this.compactionShadow,
       head: this.getHead(),
     }) as JsonObject
   }
@@ -944,12 +1073,21 @@ export class RealPiSession implements SessionRuntime {
       label?: string
     } = {},
   ): Promise<JsonObject> {
-    if (options.summarize) this.shadow = withBranchSummaryRunning(this.shadow, entryId)
+    if (options.summarize) {
+      this.isCompactingFlag = true
+      this.compactionShadow = {
+        ...this.compactionShadow,
+        operation: { type: 'branchSummary', phase: 'running', targetEntryId: entryId },
+      }
+    }
     let result: Awaited<ReturnType<AgentSessionRuntime['session']['navigateTree']>>
     try {
       result = await this.runtime.session.navigateTree(entryId, options)
     } finally {
-      if (options.summarize) this.shadow = withBranchSummaryFinished(this.shadow)
+      if (options.summarize) {
+        this.isCompactingFlag = false
+        this.compactionShadow = { ...this.compactionShadow, operation: { type: 'none' } }
+      }
     }
     if (!result.cancelled) this.emitHeadIfChanged()
     return {

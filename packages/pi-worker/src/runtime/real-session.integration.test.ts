@@ -7,7 +7,7 @@ import { SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent
 import { RealPiSession } from './real-session.ts'
 import { loadPiSdk } from '../sdk-host.ts'
 import { PiCatalog } from './catalog.ts'
-import { AnyRecord, loadPiAiFromPinnedSdk } from './real-session-test-support.ts'
+import { AnyRecord, loadPiAiFromPinnedSdk } from '../../test-support/real-session.ts'
 
 await loadPiSdk()
 
