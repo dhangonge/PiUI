@@ -1096,9 +1096,13 @@ export const ChatArea = memo(
             onScroll={onScroll}
             onClick={autoHandleInteraction}
           >
+            {/* 历史加载提示：用 sticky + h-0 脱离文档流。
+                原来它是 in-flow 行（py-3 ≈ 44px），每次翻页插入/移除都会让
+                内容高度跳 44px，滚动补偿随之每帧改写 scrollTop，表现为加载期间
+                画面上下抖动。零高度不占布局，视觉位置不变。 */}
             {visibleItems.length > 0 && isLoadingMore && (
-              <div className="flex justify-center py-3" aria-live="polite">
-                <div className="flex items-center gap-2 text-text-400 text-[length:var(--fs-sm)]">
+              <div className="pointer-events-none sticky top-0 z-10 flex h-0 justify-center" aria-live="polite">
+                <div className="mt-2 flex items-center gap-2 rounded-full border border-border-200/60 bg-bg-100/90 px-3 py-1 text-[length:var(--fs-sm)] text-text-400 shadow-sm">
                   <span className="w-3.5 h-3.5 border-2 border-text-400/30 border-t-text-400 rounded-full animate-spin" />
                   {t('chatArea.loadingHistory')}
                 </div>
