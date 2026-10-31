@@ -26,8 +26,20 @@
 
 - `d3451351` 修复 3 个格式文件，复核无政策语义变化；FolderRecentList 登记从 1300 下调为实际 1273。
 - `format:check` 通过；sessionChildrenExpansionStore 的 3 条测试通过。
+- Gate Chat 已集成：InputBox 1957→1778、ChatArea 1342→1210、ChatArea.test 1278→786、chatPageModel 1039→736；保留 re-export 和 effect 位置。主代理比较了 61 个字面量测试回调，未删除或改写。
+- Gate Runtime 已集成：real-session 1510→1171、mock-session 1093→881、原集成测试 1707→650；24 条集成用例迁移后的回调 AST 一致，worker 仍为 107 条通过。
+- Gate Render 已集成：MarkdownRenderer 1664→233，拆为内联 / 表格 / Mermaid / HTML artifact / DOM block 五个模块；原测试 1571→1426、themeStore 1177→1003。101 个字面量测试回调 AST 一致，动态生成的用例另由运行验证。
+- 三路集成后完整 typecheck 通过；LSP 检查 14 个关键文件无错误，有 1 条既有 FormEvent 废弃提示。check:docs / conformance:sdk:check 通过。
 
-进行中：4 路结构拆分、主代理审查、登记同步、全仓 validate 及两项浏览器冒烟。通过前不宣布阻塞已清零。
+- Gate Shell 已集成：FileExplorer 2159→1925、SidePanel 1392→1352、App 1114→928、SessionList 1068→977。命令表在仅将 sessionArchive 参数化后 AST 一致，6 个迁移的叶子 / 纯函数体一致；App 的 12 项 useMemo 依赖未改。
+
+进行中：已完成全部结构拆分和登记同步，正在运行全仓 validate 及两项浏览器冒烟。通过前不宣布阻塞已清零。
+
+### 审查中撤回的扩张
+
+Runtime 初版 live-message 拆分把 `getEntries()` 提前到原本会早退的路径，shadow 辅助函数又增加了求时间操作。主代理要求撤回这两块，仅保留纯辅助模块迁移；最终 RealPiSession 类体 AST 与 `655eaa6c` 一致。测试工装移到原本不参与生产编译的范围，撤去为编译工装而加入的双重类型断言，没有修改 tsconfig。
+
+Render 的 href 解码合并经逐体比较，两个旧函数实现相同；HTML sandbox、控件状态与原生系统栏调用时序没有改动。这里只说明审查结论，不替代最后的浏览器与真机验收。
 
 ## 2. 第二轮首个工作包
 
