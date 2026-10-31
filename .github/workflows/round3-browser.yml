@@ -1,0 +1,50 @@
+name: round3 browser probe
+
+# 一次性诊断工作流，只存在于 fork 的 ci/round3-browser 分支。
+# 远端构建（本地不编译），在真实 Chromium 里采样第三轮新增的切换动效。
+on:
+  push:
+    branches: ['ci/**']
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: drop windows-only patch
+        run: rm -f patches/@lydell+node-pty-win32-x64+*.patch
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Resolve Chromium
+        run: |
+          for bin in google-chrome google-chrome-stable chromium chromium-browser; do
+            if command -v "$bin" >/dev/null 2>&1; then
+              echo "CHROMIUM_BIN=$(command -v "$bin")" >> "$GITHUB_ENV"
+              echo "probe browser: $bin"
+              exit 0
+            fi
+          done
+          echo "no Chromium/Google Chrome found on PATH" >&2
+          exit 1
+
+      - name: Probe
+        env:
+          PIUI_ROUND3_OUTPUT: ${{ runner.temp }}/round3-evidence
+        run: node --import tsx scripts/round3-browser-probe.mjs
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: round3-browser-evidence
+          path: ${{ runner.temp }}/round3-evidence
+          if-no-files-found: warn
