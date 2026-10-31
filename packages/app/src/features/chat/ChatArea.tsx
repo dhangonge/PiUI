@@ -691,6 +691,8 @@ export const ChatArea = memo(
       const prependAnchor = useRef<{ key: string; offset: number } | undefined>(undefined)
       const prependFrame = useRef<number | undefined>(undefined)
       const prependLoading = useRef(false)
+      // 手势进行中：历史加载的锚点纠偏先让位给手指
+      const pointerDownRef = useRef(false)
 
       const clearPrepend = useCallback(() => {
         prependLoading.current = false
@@ -724,13 +726,21 @@ export const ChatArea = memo(
           prependFrame.current = undefined
           const a = prependAnchor.current
           if (!a) return
+          // 手指还在拖动时不要和手势抢滚动：修正推迟到抬手后再做。
+          // 否则 3s 修正循环会和惯性滚动互相拉扯，看起来就是加载期间持续抖动。
+          if (pointerDownRef.current) {
+            if (++frames < 180) prependFrame.current = requestAnimationFrame(apply)
+            return
+          }
           const el = root.querySelector<HTMLElement>(`[data-timeline-key="${CSS.escape(a.key)}"]`)
           const delta = el ? el.getBoundingClientRect().top - root.getBoundingClientRect().top - a.offset : undefined
-          if (delta !== undefined && Math.abs(delta) > 0.5) {
+          // 2px 以内是行高/亚像素重排噪声，追它会持续写 scrollTop，视觉上就是抖
+          if (delta !== undefined && Math.abs(delta) > 2) {
             root.scrollTop += delta
             stable = 0
           } else stable++
-          if (++frames >= 180 || stable >= 30) {
+          // 稳定 8 帧即收敛，不再为后续亚像素变化继续纠偏
+          if (++frames >= 180 || stable >= 8) {
             if (!prependLoading.current) prependAnchor.current = undefined
             return
           }
@@ -1093,6 +1103,15 @@ export const ChatArea = memo(
             }}
             onWheel={onWheel}
             onTouchStart={onTouchStart}
+            onPointerDown={() => {
+              pointerDownRef.current = true
+            }}
+            onPointerUp={() => {
+              pointerDownRef.current = false
+            }}
+            onPointerCancel={() => {
+              pointerDownRef.current = false
+            }}
             onScroll={onScroll}
             onClick={autoHandleInteraction}
           >
