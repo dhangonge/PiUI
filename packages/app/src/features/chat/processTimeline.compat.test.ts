@@ -1,8 +1,8 @@
 /**
  * 时间线差分兼容测试（H 独立验证，不改生产代码）。
  *
- * 期望值来自 `src/test/processTimelineReference.ts` —— 940844c5 旧实现的逐字冻结拷贝，
- * 不调用当前 production 计算期望。每个语料同时断言：
+ * 期望值来自 `src/test/processTimelineReference.ts` —— 940844c5 旧实现的逻辑冻结，
+ * 不调用当前 production 计算期望。手写语料同时断言：
  *   1. production 输出与冻结参考深相等（行为等价）；
  *   2. 手写的 key / 壳属性（独立于两个实现，防止两边一起写错）；
  *   3. 输入不被就地改写、输出复用输入 item 引用（引用稳定契约）。

@@ -54,6 +54,7 @@ class FakeWorker {
 
 const trackedMaps = new Set<Map<unknown, unknown>>()
 const trackedNumericMaps = new Set<Map<unknown, unknown>>()
+const probeRequestIds = new Set<number>()
 
 function retainedProbeKeys(): string[] {
   const keys = new Set<string>()
@@ -65,10 +66,7 @@ function retainedProbeKeys(): string[] {
   return [...keys].sort()
 }
 
-/**
- * 客户端只有 pendingRequests 用数字键。请求结算后它必须为空，
- * 否则就是没人认领的 pending 条目（即便 Promise 已经 reject）。
- */
+/** 只统计探针请求对应的 pending Map，不把测试框架或依赖的数字键 Map 算进来。 */
 function retainedPendingSizes(): number[] {
   return [...trackedNumericMaps].map(map => map.size)
 }
@@ -151,17 +149,32 @@ beforeEach(() => {
   FakeWorker.instances = []
   trackedMaps.clear()
   trackedNumericMaps.clear()
+  probeRequestIds.clear()
   Map.prototype.set = function trackedSet(this: Map<unknown, unknown>, key: unknown, value: unknown) {
-    if (typeof key === 'string' && key.startsWith(KEY_PREFIX)) trackedMaps.add(this)
-    if (typeof key === 'number') trackedNumericMaps.add(this)
+    if (typeof key === 'string' && key.startsWith(KEY_PREFIX)) {
+      trackedMaps.add(this)
+      if (typeof value === 'number') probeRequestIds.add(value)
+    }
+    if (
+      typeof key === 'number' &&
+      probeRequestIds.has(key) &&
+      value !== null &&
+      typeof value === 'object' &&
+      'resolve' in value &&
+      typeof value.resolve === 'function' &&
+      'reject' in value &&
+      typeof value.reject === 'function'
+    ) {
+      trackedNumericMaps.add(this)
+    }
     return originalMapSet.call(this, key, value)
   } as typeof Map.prototype.set
-  ;(globalThis as { Worker?: unknown }).Worker = FakeWorker
+  vi.stubGlobal('Worker', FakeWorker)
 })
 
 afterEach(() => {
   Map.prototype.set = originalMapSet
-  delete (globalThis as { Worker?: unknown }).Worker
+  vi.unstubAllGlobals()
   vi.resetModules()
 })
 
@@ -237,11 +250,13 @@ describe('shikiWorkerClient 一次性请求的 key 标记释放', () => {
     expect(retainedProbeKeys()).toEqual([streamKey])
 
     const pending = await startTokens(client, worker, oneShotKey, { complete: true })
+    const unrelated = new Map<number, unknown>()
+    unrelated.set(999999, { resolve: () => undefined, reject: () => undefined })
     worker.onerror?.(new Error('worker died'))
 
     expect(rejectionMessage(await pending.outcome)).toBe('worker died')
-    // onerror 后客户端丢弃整个 Worker 实例，worker 侧的 tokenizer 也随之消失，
-    // 所有 key 标记都成了死引用（新请求会懒建新 Worker），ref 拿到的 dispose 也已是空转。
+    // 这里只验证客户端状态；置空 worker 引用不等于已 terminate 真实 Worker。
+    expect(unrelated.size).toBe(1)
     expect(retainedProbeKeys()).toEqual([])
     expect(retainedPendingSizes()).toEqual([0])
   })

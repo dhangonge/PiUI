@@ -62,8 +62,7 @@ function getWorker(): Worker {
     workerReadyPromiseReject?.(error)
     pendingRequests.forEach(pending => pending.reject(error))
     pendingRequests.clear()
-    // Worker 实例整个丢弃，worker 侧的流状态随它一起消失；留下的 key 标记都是死引用
-    // （ref 拿到的 dispose 会因 worker 为 null 而空转），在这里一并清掉。
+    // 客户端将放弃这个实例；dispose 在 worker 为 null 时不能再清理标记。
     latestRequestByKey.clear()
     workerReady = null
     workerReadyPromiseResolve = null
@@ -171,8 +170,7 @@ async function workerHighlight(params: {
     try {
       w.postMessage({ type: 'highlight', id, ...params } satisfies WorkerRequest)
     } catch (error) {
-      // postMessage 同步抛错（如结构化克隆失败）时 Promise 会直接 reject，绕过上面的守卫；
-      // 请求从未进入 worker，所以 worker 侧没有该 key 的 tokenizer，pending 条目与 key 标记都该在这里清。
+      // 本次请求未发出，不会收到响应；旧流是否仍在 Worker 中不由此处判断。
       pendingRequests.delete(id)
       releaseLatestKey(params.key, id)
       reject(error)

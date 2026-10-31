@@ -2,16 +2,16 @@
  * 冻结的旧行为参考实现（H 独立验证用）。
  *
  * 来源：`940844c5a2d50fc516f218b1bf43ac92259c84bf`
- *      `packages/app/src/features/chat/processTimeline.ts`（318 行，逐字拷贝行为）
+ *      `packages/app/src/features/chat/processTimeline.ts`（318 行，逻辑冻结）
  *
  * 规则：
  * - 只拷贝算 expected 所必需的私有 helpers（itemRenderKey / assistantHasLiveWork /
- *   resolveTurnDurationMs）与两个导出函数，不 import 生产模块，避免「用新实现验证新实现」。
+ *   resolveTurnDurationMs）与三个导出函数，不 import 生产模块，避免「用新实现验证新实现」。
  * - 类型从 pi 域类型只读导入：类型是冻结的共享契约，行为才是本文件冻结的对象。
  * - 生产实现变动后不要同步本文件；差分失败说明行为变了，由测试暴露而不是抹平。
  * - 本文件只在测试内使用（vitest coverage 已排除 src/test/**）。
  *
- * 与旧文件的唯一差异是函数名加 `reference` 前缀，便于差分断言时区分。
+ * 已精简注释并重命名导出函数和类型；六个函数体经 AST 核验与旧文件一致。
  */
 import type { PiAssistantMessageItem, PiTimelineItem } from '../pi/domain/index.js'
 
