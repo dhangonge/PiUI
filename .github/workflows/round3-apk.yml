@@ -1,0 +1,100 @@
+name: round3 apk
+
+# 一次性诊断工作流：只存在于 fork 的分支上，用于产出一个可安装的测试 APK。
+# 与 android-release.yml 的区别：不读仓库 secrets（fork 没有），改用 CI 里现场
+# 生成的 debug keystore 签名；不发 release、不打 tag。
+on:
+  push:
+    branches: ['ci/apk']
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Drop Windows-only patch
+        run: rm -f patches/@lydell+node-pty-win32-x64+*.patch
+
+      - name: Install Android NDK
+        run: sdkmanager "ndk;29.0.14206865"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './packages/app/src-tauri -> target'
+          key: android-test-apk
+
+      - name: Gradle cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            packages/app/src-tauri/gen/android/.gradle
+          key: gradle-test-apk-${{ hashFiles('packages/app/src-tauri/gen/android/**/*.gradle*', 'packages/app/src-tauri/gen/android/**/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/prepare-tauri-mobile-resources.mjs
+
+      - name: Build Android APK (arm64)
+        working-directory: packages/app
+        run: npx tauri android build --apk --target aarch64
+
+      - name: Sign with ephemeral debug keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          UNSIGNED=$(find packages/app/src-tauri/gen/android/app/build/outputs/apk -name '*unsigned*.apk' -type f | head -1)
+          if [ -z "$UNSIGNED" ]; then
+            echo "no unsigned APK found" >&2
+            find packages/app/src-tauri/gen/android/app/build/outputs/apk -type f >&2
+            exit 1
+          fi
+          echo "unsigned: $UNSIGNED"
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/test.keystore" \
+            -storepass android -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=PiUI Test,O=PiUI,C=CN"
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          mkdir -p test-artifacts
+          ALIGNED="$RUNNER_TEMP/piui-aligned.apk"
+          "$BUILD_TOOLS/zipalign" -f -p 4 "$UNSIGNED" "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$RUNNER_TEMP/test.keystore" \
+            --ks-pass pass:android --ks-key-alias androiddebugkey \
+            --out "test-artifacts/piui-round3-arm64-test.apk" \
+            "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" verify --print-certs "test-artifacts/piui-round3-arm64-test.apk"
+          rm -f "$RUNNER_TEMP/test.keystore"
+          ls -la test-artifacts
+          echo "commit: $(git rev-parse HEAD)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: piui-round3-test-apk
+          path: test-artifacts/*.apk
+          if-no-files-found: error
