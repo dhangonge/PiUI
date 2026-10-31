@@ -196,26 +196,40 @@ export function buildProcessTimeline(
     current.assistants.push(item)
   }
 
-  const laterHasAssistant = (fromIndex: number) => {
-    for (let j = fromIndex + 1; j < turns.length; j++) {
-      if (turns[j].assistants.length > 0) return true
+  // 后缀聚合：回看一遍把「本轮是否有 live」「更晚是否还有 assistant / live」压成表。
+  // 原先每轮向后扫后缀：5000 个已结束回合会读 12,512,500 次 isStreaming；
+  // 现在每次构建只按回合数 + 助手数线性增长，且每个助手的 live 只判一次。
+  const turnCount = turns.length
+  /** turnHasLiveAssistant[i]：turns[i] 里是否有 streaming 助手 */
+  const turnHasLiveAssistant = new Array<boolean>(turnCount)
+  /** suffixHasLive[i] / suffixHasAssistant[i]：turns[i..] 的聚合（含 i 本身） */
+  const suffixHasLive = new Array<boolean>(turnCount + 1).fill(false)
+  const suffixHasAssistant = new Array<boolean>(turnCount + 1).fill(false)
+  for (let i = turnCount - 1; i >= 0; i--) {
+    const turnAssistants = turns[i].assistants
+    let live = false
+    for (const m of turnAssistants) {
+      if (assistantHasLiveWork(m)) {
+        live = true
+        break
+      }
     }
-    return false
+    turnHasLiveAssistant[i] = live
+    suffixHasLive[i] = live || suffixHasLive[i + 1]
+    suffixHasAssistant[i] = turnAssistants.length > 0 || suffixHasAssistant[i + 1]
   }
 
+  /** 更晚回合是否已有助手（被跳过的空回合要收壳） */
+  const laterHasAssistant = (fromIndex: number) => suffixHasAssistant[fromIndex + 1]
+
   /** 更晚回合是否已有 live 助手——SSE 挂 Working 的绝对条件 */
-  const laterHasLive = (fromIndex: number) => {
-    for (let j = fromIndex + 1; j < turns.length; j++) {
-      if (turns[j].assistants.some(assistantHasLiveWork)) return true
-    }
-    return false
-  }
+  const laterHasLive = (fromIndex: number) => suffixHasLive[fromIndex + 1]
 
   const isTurnSettled = (turn: TurnBag, index: number): boolean => {
     const assistants = turn.assistants
     // 后面 SSE live → 前面 Worked（须最先判断；前轮 completed 常晚到）
     if (laterHasLive(index)) return true
-    if (assistants.some(assistantHasLiveWork)) return false
+    if (turnHasLiveAssistant[index]) return false
     if (assistants.length === 0) {
       // 空回合：idle 结束；或后面已有 assistant（被跳过）
       return !sessionIsStreaming || laterHasAssistant(index)
@@ -224,8 +238,9 @@ export function buildProcessTimeline(
     // 只是同一回合「上一步已收尾、下一步还没到」的间隙（多步 agent 的常态），
     // 不能判成 Worked —— 否则壳会先收成「已处理」，等下一步内容到了再展开一次。
     // 等 idle 把 busy 摘掉，或下一轮 user 接手（index 不再是最后一个）才收。
-    if (sessionIsStreaming && index === turns.length - 1) return false
-    return assistants.every(m => !m.isStreaming)
+    if (sessionIsStreaming && index === turnCount - 1) return false
+    // 上面已排除本轮 live，这里恒为「无 live」；用聚合值代替再扫一遍 assistants
+    return !turnHasLiveAssistant[index]
   }
 
   const isTurnPending = (turn: TurnBag, index: number): boolean => {
