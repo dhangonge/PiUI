@@ -177,9 +177,9 @@ describe('buildAppCommandItems：原操作接线', () => {
     expect(deps.handleToggleRightPanel).toHaveBeenCalledTimes(1)
   })
 
-  it('focused pane 命令调用最新 controller，各方法只调一次', () => {
-    const deps = makeDeps()
-    const controller = deps.focusedController as PaneControllerState
+  it('focused pane 命令各动作打到当前 controller，各方法只调一次', () => {
+    const controller = makeController()
+    const deps = makeDeps({ focusedController: controller })
     const items = build(deps)
 
     itemOf(items, 'newSession').action()
@@ -201,7 +201,9 @@ describe('buildAppCommandItems：原操作接线', () => {
     expect(controller.archiveSession).toHaveBeenCalledTimes(1)
   })
 
-  it('controller 重建后旧条目不再打到旧对象（重建取最新）', () => {
+  it('controller 重建后：新生成的条目绑定新 controller，旧条目仍指向旧对象', () => {
+    // 命令表是快照：重建只会让「之后重新构建的」条目拿到新 controller，
+    // 已持有的旧条目不会自动跟随（它闭包住构建时的 controller）。
     const oldController = makeController({ paneId: 'pane-old' })
     const oldItems = build(makeDeps({ focusedController: oldController }))
     itemOf(oldItems, 'newSession').action()
@@ -212,6 +214,11 @@ describe('buildAppCommandItems：原操作接线', () => {
     itemOf(newItems, 'newSession').action()
     expect(newController.newSession).toHaveBeenCalledTimes(1)
     expect(oldController.newSession).toHaveBeenCalledTimes(1)
+
+    // 再按一次旧条目：仍然打旧 controller，不会「自动升级」到新的。
+    itemOf(oldItems, 'newSession').action()
+    expect(oldController.newSession).toHaveBeenCalledTimes(2)
+    expect(newController.newSession).toHaveBeenCalledTimes(1)
   })
 
   it('分屏 / 关闭 / 全屏动作按 paneLayout 与开关边界执行', () => {

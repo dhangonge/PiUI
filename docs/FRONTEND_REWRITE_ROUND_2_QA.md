@@ -8,7 +8,7 @@ C / D / E 的实现结论与最终 speedup 由主代理终稿记录，本文不�
 
 | 项                     | 结论                                                                                                                                                  | 证据层级                           |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| C：时间线聚合重构      | 与 `940844c5` 旧实现行为等价（16 条手写语料 + 200 条定种随机 + 60 条复用随机，全等价）                                                                | 模型（纯函数输入/输出）            |
+| C：时间线聚合重构      | 与 `940844c5` 旧实现行为等价（16 条手写语料 + 200 条定种随机 + 60 个种子里含 assistant 的复用对比，全等价）                                           | 模型（纯函数输入/输出）            |
 | 时间线测试自身         | 变异验证有牙齿：4 类语义改错各被 1–3 例捕获；1 类属语义等价变异，已排除                                                                               | 模型                               |
 | 命令面板抽取           | 22 条命令顺序 / 条件项 / when / 一次性 thunk 求值 / focused pane 取最新 controller 均保持                                                             | DOM（jsdom + spy，无真实服务）     |
 | D：一次性高亮 key 释放 | 工作树版本恢复「消费时点判 latest」语义；提交 `6032321d` 确实存在该时序差（已实证复现）。调用方影响：仅静态审查，未找到可见回归路径，**不是排除证明** | mockWorker（假 Worker + Map 探针） |
@@ -31,8 +31,11 @@ D 的 key 释放只证明「客户端 Map 里不再留 key」，不等于堆大�
 ### 3.1 冻结参考
 
 `packages/app/src/test/processTimelineReference.ts`（288 行）是 `940844c5a2d50fc516f218b1bf43ac92259c84bf` 上
-`packages/app/src/features/chat/processTimeline.ts` 的逐字拷贝，只把导出名加 `reference` 前缀，并保留三个必要私有
-helper（`itemRenderKey` / `assistantHasLiveWork` / `resolveTurnDurationMs`）。文件头写明来源 hash 与「不 import 生产模块、
+`packages/app/src/features/chat/processTimeline.ts` 的**逻辑冻结**：去掉注释、导出名加 `reference` 前缀、类型名加
+`Reference` 前缀，函数体逻辑不变（不是逐字拷贝原文）。导出 3 个函数（`referenceSameProcessTimelineItem` /
+`referenceReuseProcessTimelineItems` / `referenceBuildProcessTimeline`）+ 1 个类型 + 1 个来源常量，另有 3 个未导出私有
+helper（`itemRenderKey` / `assistantHasLiveWork` / `resolveTurnDurationMs`）。主代理已独立做 AST 核验：规范化导出名 /
+类型名后，6/6 函数体（3 个导出 + 3 个私有 helper）与 `940844c5` 一致。文件头写明来源 hash 与「不 import 生产模块、
 生产实现变化后不要同步本文件」——它是差分基准，不是第二份实现。
 
 参考自身有两条手算自检（不依赖任何生产代码）：纯 final 回合输出 `['user-1', 'process-shell:user-1']`；过程 + final 回合
@@ -40,20 +43,23 @@ helper（`itemRenderKey` / `assistantHasLiveWork` / `resolveTurnDurationMs`）�
 
 ### 3.2 语料与断言
 
-`packages/app/src/features/chat/processTimeline.compat.test.ts`（729 行，24 例）：
+`packages/app/src/features/chat/processTimeline.compat.test.ts`（745 行，24 例）：
 
 - 16 条手写确定性语料：纯 final 收壳、过程 + final、busy 多头助手、空 user 未就绪 / 已就绪、later-live 双轮、页首 assistant
   - `renderKey`、系统条目（`compaction` / `custom_message` 就地平铺）、工具结果时间晚于消息完成（耗时按工具结果 800ms）、
     `turnDurationMap` 回落（只命中前一条 300ms）、busy 多步 gap、idle 空回合不留壳、连发两轮只挂最早、流式纯 final、
     `turnDurationMap` 非正值被忽略（回落时间戳 200ms）、空回合后面已出现助手时收壳。
-- 每条语料三组断言：① 生产输出与冻结参考 `toStrictEqual`；② 与两个实现无关的手写 `expectedKeys` + 壳属性
+- 每条手写语料三组断言：① 生产输出与冻结参考 `toStrictEqual`；② 与两个实现无关的手写 `expectedKeys` + 壳属性
   （`userMessageId` / `isActive` / `durationMs` / `childScopes` / `finalEntryId`）；③ `structuredClone` 前后输入不变，
   且输出的 `item` / `children[].item` / `finalItem` 必须是输入里的**同一对象**（引用稳定契约）。
 - 200 条定种随机语料（`mulberry32`，seed 1–200）：用户 / 助手 / 系统条目混合，`renderKey`、`isStreaming`、
-  `turnDurationMap`（50% 概率 50–1050ms）、`isUserEntryReady`（半开集合）随机组合，逐条做同样的三组断言；断言消息里带
-  `seed` 与 `kind` 序列，失败可直接复现。
-- 60 条定种随机语料（seed 201–260）把末条助手改成流式，比较 `reuseProcessTimelineItems` 的「返回 previous 数组 /
-  返回 next 数组 / previous 每行是否被复用」三元签名在两个实现上一致，并比较整份结果深等价。
+  `turnDurationMap`（50% 概率 50–1050ms）、`isUserEntryReady`（半开集合）随机组合。随机语料只做三件事：旧 / 新深等价、
+  输入不被改写、输出复用输入 item 引用（**没有**手写 `expectedKeys` / 壳属性——随机生成器产不出可信的手算期望）。
+  断言消息带 `seed` 与 `kind` 序列，失败可直接复现。
+- 定种随机复用对比（seed 201–260）：把末条助手改成流式，比较 `reuseProcessTimelineItems` 的「返回 previous 数组 /
+  返回 next 数组 / previous 每行是否被复用」三元签名在两个实现上一致，并比较整份结果深等价。没有 assistant 的种子
+  无法构造「末条助手变流式」会被跳过，因此执行的是这 60 个种子里**含 assistant 的样例**，不是 60 条全部；
+  测试内用 `compared` 计数器固定实际比较次数（>0 且 ≤60）。
 - 1 例重复调用稳定性：同一输入调用两次输出相同且不污染输入。
 - 无任何 wall-clock 依赖（时间戳全部是语料里的常量，`turnDurationMap` 是手填数字）。
 
@@ -61,14 +67,19 @@ helper（`itemRenderKey` / `assistantHasLiveWork` / `resolveTurnDurationMs`）�
 
 每次都临时改参考实现、跑完立刻用备份还原，`git status` 确认工作树干净：
 
-| 变异                                            | 结果                                                               |
-| ----------------------------------------------- | ------------------------------------------------------------------ |
-| 去掉 `if (laterHasLive(index)) return true`     | 3 例失败                                                           |
-| 去掉「busy 且末回合」不收壳例外                 | 2 例失败                                                           |
-| `turnDurationMap` 判定 `mapped > 0` 改成 `>= 0` | 补语料前 0 例 → 补非正值语料后 1 例失败                            |
-| `laterHasAssistant` 扫描起点改错                | 补「空回合 + 后续助手」语料前 0 例 → 之后 1 例失败                 |
-| 空回合判定去掉 `laterHasAssistant`              | 同上，1 例失败                                                     |
-| `finalOutside` 去掉 `!turnIsActive`             | 0 例失败——该分支在 `turnIsActive` 为真时不可达，语义等价，不补断言 |
+| 变异                                            | 结果                                                                                                           |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| 去掉 `if (laterHasLive(index)) return true`     | 3 例失败                                                                                                       |
+| 去掉「busy 且末回合」不收壳例外                 | 2 例失败                                                                                                       |
+| `turnDurationMap` 判定 `mapped > 0` 改成 `>= 0` | 补语料前 0 例 → 补非正值语料后 1 例失败                                                                        |
+| `laterHasAssistant` 扫描起点改错                | 补「空回合 + 后续助手」语料前 0 例 → 之后 1 例失败                                                             |
+| 空回合判定去掉 `laterHasAssistant`              | 同上，1 例失败                                                                                                 |
+| `finalOutside` 去掉 `!turnIsActive`             | **5 例失败**（含 `streamingPureFinal` 手写 `finalEntryId:null`、两类 busy 语料、200 条随机差分、随机复用对比） |
+
+关于 `finalOutside` 那条：先前验证脚本的替换没真正落到代码，且没有断言替换次数，因此误判成「语义等价」。
+复测时先用 `str.count(old)` + `assert n == 1` 确认唯一命中，再用 `git diff --unified=0` 打印出变异后的那一行，
+然后才跑测试，得 5 例失败。原因是 busy 纯 final 时 `messageHasFinal` 为真，去掉 `!turnIsActive` 后
+`process-shell.finalItem` 会从 `undefined` 变成该 assistant。原结论作废。
 
 ### 3.4 与 C 改动的独立差分
 
@@ -77,31 +88,34 @@ C 的 `225ad2bc`（主分支记为 `fd8185f9`）只改 `processTimeline.ts` 的�
 随后 4 个文件 59 例全绿：`processTimeline.test.ts` 16、`processTimeline.compat.test.ts` 24、
 `processTimeline.scaling.test.ts` 4、`appCommandItems.test.ts` 15。
 
-H 的独立语料（16 + 200 + 60 条）与 C 自测的 300 组临时差分是两套独立证据：C 的语料按实现思路构造，
-H 的参考实现来自旧版本逐字拷贝，且额外校验输入引用不被破坏。
+H 的独立语料（16 条手写 + 200 条随机 + 60 个种子中含 assistant 的复用样例）与 C 自测的 300 组临时差分是两套独立证据：C 的语料按实现思路构造，
+H 的参考实现来自旧版本逻辑冻结（去注释 + 重命名，函数体不变），且额外校验输入引用不被破坏。
 
 ## 4. 任务二：命令面板契约
 
-`packages/app/src/components/appCommandItems.test.ts`（286 行，15 例）。被测表来自 `packages/app/src/components/appCommandItems.ts`
+`packages/app/src/components/appCommandItems.test.ts`（293 行，15 例）。被测表来自 `packages/app/src/components/appCommandItems.ts`
 的 `buildAppCommandItems(getDeps)`；主代理已用 AST 对比确认抽取只把 `capabilities.sessionArchive` 参数化，12 项 `useMemo`
 依赖保留。H 侧补的契约：
 
 - 22 条命令 id 与顺序；`sessionArchive=false` 时只摘掉 `archiveSession`，其余顺序不变；id 唯一且都有 label / action。
-- `getDeps` thunk 每次构建只求值一次（防止把 thunk 当渲染期函数调用）。
+- `getDeps` thunk 每次构建命令表时只求值一次（这**只**证明构建期求值次数，不证明「不会被渲染期调用」——
+  实际调用点在 `App` 的 `useMemo` 里，属主代理 AST 核验的抽取范围）。
 - 快捷键全部来自 `keybindingStore.getKey(action)`（抽查设置 / 侧栏 / 取消 / 焦点四个）。
 - `when` 条件：`cancelMessage` 随 focused controller 的 `isStreaming`；`closePane` / `togglePaneFullscreen` 随
   `paneLayout.isSplit`；`focusNextPane` / `focusPrevPane` 恒可见（`when` 为 undefined）。
-- 原操作接线：通用回调各一次；focused pane 的 8 个 controller 方法各一次；controller 重建后新条目打到新对象、
-  旧条目不再打到旧对象（取最新而非闭包里的旧 controller）；`splitPane` 方向参数 `horizontal` / `vertical`、
-  未分屏时不关面板 / 不全屏、`splitPaneEnabled=false` 时不分屏；终端命令只动本地 `layoutStore` 与 `piui:new-terminal`
-  事件；`focusInput` 聚焦 `[data-input-box] textarea`，无输入框时不抛错。
+- 原操作接线：通用回调各一次；focused pane 的 8 个 controller 方法各一次；controller 重建后**新构建的条目**绑定新
+  controller，而**已持有的旧条目仍指向旧对象**（命令表是快照，旧条目闭包住构建时的 controller，不会自动跟随）；
+  `splitPane` 方向参数 `horizontal` / `vertical`、未分屏时不关面板 / 不全屏、`splitPaneEnabled=false` 时不分屏；
+  终端命令只动本地 `layoutStore` 与 `piui:new-terminal` 事件；`focusInput` 聚焦 `[data-input-box] textarea`，
+  无输入框时不抛错。
 - 全程只 spy 本地 store 与派发本地事件，不触发服务、网络或设备。
 
 ## 5. 任务三：D 交付只读审查
 
 审查对象：`/home/zhangtung/.cache/piui-round2-1eUv5J/round2-highlight` 的
-`packages/app/src/lib/shikiWorkerClient.ts`（提交 `6032321d` + 工作树未提交修订 `a6b5e9f5`）、
-`packages/app/src/lib/shikiWorkerClient.test.ts`（`c6914c0a`）、
+`packages/app/src/lib/shikiWorkerClient.ts`（提交 `6032321d` + 审查时工作树未提交修订，文件内容 md5 前缀 `a6b5e9f5`
+——这是**文件摘要不是 git 提交**，`md5sum` 取前 8 位；D 后续仍在改动，本审查只对应这个快照）、
+`packages/app/src/lib/shikiWorkerClient.test.ts`（同为文件内容 md5 前缀 `c6914c0a`，非 commit）、
 `packages/app/src/components/CodeBlock.tsx` 与 `CodeBlock.subscription.test.tsx`。
 H 没有 cherry-pick D，也没有改 D 的任何文件；为跑测试把 D 的两份源码复制到 artifacts 下的临时工程
 （`node_modules` 软链 main，vite cacheDir 指到 artifacts），D 的 worktree 自始至终只有 D 自己的两个改动文件。
@@ -119,11 +133,11 @@ H 没有 cherry-pick D，也没有改 D 的任何文件；为跑测试把 D 的�
 
 实证方式：用同一份 D 的测试文件对三份 `shikiWorkerClient.ts` 分别跑（复制到 artifacts 临时工程，13 例）：
 
-| 被测实现                        | 结果                                                             |
-| ------------------------------- | ---------------------------------------------------------------- |
-| `940844c5` 基线                 | 9 失败 / 4 通过（失败的都是新契约的「不留 key」断言，符合预期）  |
-| `6032321d`（提交版）            | 11 通过 / **2 失败**：正是「消费前 dispose」「消费前新请求」两例 |
-| D 工作树 `a6b5e9f5`（当前修订） | **17 全通过**（含上述两例）                                      |
+| 被测实现                                 | 结果                                                             |
+| ---------------------------------------- | ---------------------------------------------------------------- |
+| `940844c5` 基线                          | 9 失败 / 4 通过（失败的都是新契约的「不留 key」断言，符合预期）  |
+| `6032321d`（提交版）                     | 11 通过 / **2 失败**：正是「消费前 dispose」「消费前新请求」两例 |
+| D 工作树修订（文件 md5 前缀 `a6b5e9f5`） | **17 全通过**（含上述两例）                                      |
 
 也就是说：差是真实的、可复现的，D 的两条新用例确实钉住了它；工作树把判定挪回消费时点后与基线一致。
 
@@ -225,15 +239,15 @@ npx eslint src/features/chat/processTimeline.compat.test.ts \
 
 ## 8. 计数与提交
 
-| 提交       | 内容                                                                  |
-| ---------- | --------------------------------------------------------------------- |
-| `4ce3b7cb` | 冻结旧时间线行为（参考实现 + 16 条语料）并补命令表契约                |
-| `7e47d016` | cherry-pick C 的 `225ad2bc`（仅 `processTimeline.ts` + scaling 测试） |
-| `21c5aff4` | 定种随机差分（200 + 60 条）与聚合边界语料                             |
+| 提交       | 内容                                                                      |
+| ---------- | ------------------------------------------------------------------------- |
+| `4ce3b7cb` | 冻结旧时间线行为（参考实现 + 16 条语料）并补命令表契约                    |
+| `7e47d016` | cherry-pick C 的 `225ad2bc`（仅 `processTimeline.ts` + scaling 测试）     |
+| `21c5aff4` | 定种随机差分（200 条 + 60 个种子中含 assistant 的复用样例）与聚合边界语料 |
 
 新增文件：`packages/app/src/test/processTimelineReference.ts` 288 行、
-`packages/app/src/features/chat/processTimeline.compat.test.ts` 729 行、
-`packages/app/src/components/appCommandItems.test.ts` 286 行（均 < 1000）。
+`packages/app/src/features/chat/processTimeline.compat.test.ts` 745 行、
+`packages/app/src/components/appCommandItems.test.ts` 293 行（均 < 1000）。
 
 测试计数（H 相关）：`processTimeline.test.ts` 16、`processTimeline.compat.test.ts` 24、
 `processTimeline.scaling.test.ts` 4、`appCommandItems.test.ts` 15，合计 59，全部通过。

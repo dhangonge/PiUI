@@ -25,7 +25,7 @@ import {
   rawEntry,
   toolResultFor,
 } from '../../test/chatTimelineFixtures'
-import type { PiAssistantMessageItem, PiTimelineItem } from '../../pi/domain/index.js'
+import type { PiAssistantMessageItem, PiCompactionItem, PiTimelineItem } from '../../pi/domain/index.js'
 
 const hasProcess = (item: PiAssistantMessageItem) =>
   item.blocks.some(b => b.type === 'toolCall' || b.type === 'thinking')
@@ -58,14 +58,16 @@ function withToolResult(item: PiAssistantMessageItem, call: ReturnType<typeof cr
   return { ...item, toolResults: { [call.id]: toolResultFor(call, at) } }
 }
 
-function compactionItem(id: string, timestamp: number): PiTimelineItem {
+function compactionItem(id: string, timestamp: number): PiCompactionItem {
   return {
     kind: 'compaction',
     entryId: id,
     timestamp,
-    summary: `${id}-summary`,
     rawEntry: rawEntry(id, timestamp),
-  } as unknown as PiTimelineItem
+    summary: `${id}-summary`,
+    tokensBefore: 12000,
+    firstKeptEntryId: `${id}-kept`,
+  }
 }
 
 function readySet(ids: string[]): (id: string) => boolean {
@@ -535,13 +537,20 @@ function signatureOf(
 }
 
 describe(`reuseProcessTimelineItems 兼容冻结基线 ${REFERENCE_SOURCE_COMMIT.slice(0, 8)}`, () => {
-  const settledItems = () => [
-    createUserItem('user-1', 1000),
-    createAssistantItem('assistant-1', [createToolCall('tool-1')], 1001, 1200),
-    createAssistantItem('assistant-2', [createToolCall('tool-2'), createTextBlock('done')], 1201, 1500),
-    createUserItem('user-2', 2000),
-    createAssistantItem('assistant-3', [createTextBlock('second')], 2001, 2100),
-  ]
+  const settled = () => {
+    const assistant3 = createAssistantItem('assistant-3', [createTextBlock('second')], 2001, 2100)
+    return {
+      assistant3,
+      items: [
+        createUserItem('user-1', 1000),
+        createAssistantItem('assistant-1', [createToolCall('tool-1')], 1001, 1200),
+        createAssistantItem('assistant-2', [createToolCall('tool-2'), createTextBlock('done')], 1201, 1500),
+        createUserItem('user-2', 2000),
+        assistant3,
+      ] satisfies PiTimelineItem[],
+    }
+  }
+  const settledItems = () => settled().items
   const options: BuildOptions = {
     turnDurationMap: new Map(),
     sessionIsStreaming: false,
@@ -575,8 +584,8 @@ describe(`reuseProcessTimelineItems 兼容冻结基线 ${REFERENCE_SOURCE_COMMIT
 
   it('流式只脏最后一行时，两个实现的复用位置一致', () => {
     const liveOptions: BuildOptions = { ...options, sessionIsStreaming: true }
-    const items = settledItems()
-    const liveItems = items.map((item, index) => (index === 4 ? streaming(item as PiAssistantMessageItem) : item))
+    const { items, assistant3 } = settled()
+    const liveItems = items.map(item => (item === assistant3 ? streaming(assistant3) : item))
 
     const previous = buildProcessTimeline(items, options)
     const next = buildProcessTimeline(liveItems, liveOptions)
@@ -704,13 +713,17 @@ describe('buildProcessTimeline 定种随机差分', () => {
   })
 
   it('流式把最后一条助手弄脏时，复用位置与旧实现一致', () => {
+    // 没有 assistant 的种子无法构造「末条助手变流式」，按定义跳过；
+    // 因此覆盖的是 201–260 中含 assistant 的子集，不是 60 条全部。
+    let compared = 0
     for (let seed = 201; seed <= 260; seed++) {
       const scenario = randomTimeline(seed)
-      const lastAssistant = [...scenario.items].reverse().find(item => item.kind === 'assistant_message')
-      if (!lastAssistant) continue
-      const dirtyItems = scenario.items.map(item =>
-        item === lastAssistant ? streaming(item as PiAssistantMessageItem) : item,
-      )
+      const lastIndex = scenario.items.findLastIndex(item => item.kind === 'assistant_message')
+      if (lastIndex === -1) continue
+      const lastItem = scenario.items[lastIndex]
+      if (lastItem?.kind !== 'assistant_message') continue
+      compared += 1
+      const dirtyItems = scenario.items.map(item => (item === lastItem ? streaming(lastItem) : item))
 
       const previous = buildProcessTimeline(scenario.items, scenario.options)
       const next = buildProcessTimeline(dirtyItems, scenario.options)
@@ -725,5 +738,8 @@ describe('buildProcessTimeline 定种随机差分', () => {
       )
       expect(productionResult, scenario.label).toStrictEqual(referenceResult)
     }
+    // 固定下实际比较数，避免文档把「60 个种子」误读成「60 条全部执行复用对比」。
+    expect(compared).toBeGreaterThan(0)
+    expect(compared).toBeLessThanOrEqual(60)
   })
 })
