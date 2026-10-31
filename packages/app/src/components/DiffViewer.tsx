@@ -43,6 +43,9 @@ import {
   type WordDiffSegment,
 } from './diffModel'
 
+/** 保持既有公开出口：LineType 原先由本文件导出，抽到 diffModel 后继续转出。 */
+export type { LineType } from './diffModel'
+
 // ============================================
 // 常量
 // ============================================
