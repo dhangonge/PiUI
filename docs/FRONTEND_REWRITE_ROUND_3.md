@@ -71,9 +71,29 @@
 
 这三处属于 CI 基础设施与测试夹具修正，没有改变产品行为；第 2、3 条在第三轮起点之前就已存在。
 
-### 3. 尚未验证（不预写通过）
+### 3. 真实浏览器动效采样（fork CI，可复现）
+
+jsdom 只能证明属性、时长和取消语义，插值是否真的发生必须回到浏览器。为此在 fork 分支 `ci/round3-browser` 上挂了一次性工作流 `.github/workflows/round3-browser.yml`：远端 `npm run build`，再用 Chromium 加载真实构建产物 + 临时 mock 服务，走 CDP 真指针点击（`clickCount: 1`，`event.detail > 0`）与真键盘事件，采样本轮的切换反馈和 Dialog 属性。工作流只存在于 fork 的诊断分支，不进产品代码。
+
+结果（`desktop 1100x800` 与 `mobile 412x915` 两档，均通过）：
+
+| 断言                                  | 实测                                                                                            |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 指针切 tab 产生且只产生一次反馈动画   | 1 次，目标是当前挂载的 panel（`isLivePanel: true`），没有重复 panel                             |
+| 反馈参数                              | `duration: 160`，`easing: cubic-bezier(0.23,1,0.32,1)`，帧 `[0.55, 1]`                          |
+| 静置后不残留半透明                    | `getComputedStyle(panel).opacity === '1'`                                                       |
+| 键盘切换（方向键）不加动效            | 0 次动画                                                                                        |
+| CI 的 `prefers-reduced-motion` 被识别 | `reduce` 命中，切换 0 次动画                                                                    |
+| 减少动态效果下的 Dialog               | `transition-property: opacity`、`0.12s`、`transform: none`                                      |
+| 常规 Dialog                           | `transition-property: opacity, transform`，`0.2s, 0.2s`，无 `all`                               |
+| 中断续接（不回跌倒 0.55）             | 把在跑动画暂停在 80/160ms → 可见透明度 `0.984692`；第二次动画起点 `0.984692`，第一条被 `cancel` |
+
+最后一行是这轮唯一有说服力的“手感”证据：它直接否掉了原来的实现（重播必然从 0.55 起），也证明 F 那版的修正真的在浏览器里生效，而不只是在 jsdom 的替身里成立。截图（`desktop/mobile-appearance[-reduced].png`）确认布局没有被动效改动。
+
+这次采样仍不做帧率/长任务判断：它证明插值发生、目标正确、可中断、可降级，不证明在低端 Android WebView 上仍是 60fps。
+
+### 4. 尚未验证（不预写通过）
 
 - 没有真机证据：IME、系统返回、安全区、玻璃效果降级、完整主题矩阵都未验。
-- 没有针对本轮新动效的浏览器观感/帧率证据：侧栏切换淡出只在 jsdom 里验过属性、时长与取消语义；OpenView/WebView 的实际插值、连续快点是否仍有亮度回跌、`prefers-reduced-motion` 的运行中翻转都未在真实浏览器采样。
 - Diff 只证明了调用次数（一次行级 diff、resize 不重跑行级 diff）与 936 组输入的输出等价，没有帧耗时或真机滚动证据。
 - 覆盖率数字是 CI 上的实测，不等于渲染性能；`1264` 是测试条数，不是速度。
