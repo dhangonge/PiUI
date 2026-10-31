@@ -29,19 +29,31 @@ class FakeWorker {
   onmessage: ((event: MessageEvent) => void) | null = null
   onerror: ((error: unknown) => void) | null = null
   requests: FakeRequest[] = []
+  /** 让下一次 highlight 的 postMessage 同步抛错（模拟结构化克隆失败） */
+  failNextHighlightPost: Error | null = null
 
   constructor() {
     FakeWorker.instances.push(this)
   }
 
   postMessage(request: FakeRequest) {
+    if (request.type === 'highlight' && this.failNextHighlightPost) {
+      const error = this.failNextHighlightPost
+      this.failNextHighlightPost = null
+      throw error
+    }
     this.requests.push(request)
+  }
+
+  emitError(error: unknown) {
+    this.onerror?.(error)
   }
 
   terminate() {}
 }
 
 const trackedMaps = new Set<Map<unknown, unknown>>()
+const trackedNumericMaps = new Set<Map<unknown, unknown>>()
 
 function retainedProbeKeys(): string[] {
   const keys = new Set<string>()
@@ -51,6 +63,14 @@ function retainedProbeKeys(): string[] {
     })
   })
   return [...keys].sort()
+}
+
+/**
+ * 客户端只有 pendingRequests 用数字键。请求结算后它必须为空，
+ * 否则就是没人认领的 pending 条目（即便 Promise 已经 reject）。
+ */
+function retainedPendingSizes(): number[] {
+  return [...trackedNumericMaps].map(map => map.size)
 }
 
 function lastHighlightRequest(worker: FakeWorker): FakeRequest {
@@ -130,8 +150,10 @@ beforeEach(() => {
   vi.resetModules()
   FakeWorker.instances = []
   trackedMaps.clear()
+  trackedNumericMaps.clear()
   Map.prototype.set = function trackedSet(this: Map<unknown, unknown>, key: unknown, value: unknown) {
     if (typeof key === 'string' && key.startsWith(KEY_PREFIX)) trackedMaps.add(this)
+    if (typeof key === 'number') trackedNumericMaps.add(this)
     return originalMapSet.call(this, key, value)
   } as typeof Map.prototype.set
   ;(globalThis as { Worker?: unknown }).Worker = FakeWorker
@@ -185,6 +207,43 @@ describe('shikiWorkerClient 一次性请求的 key 标记释放', () => {
     expect(result.status).toBe('fulfilled')
     if (result.status === 'fulfilled') expect(result.value.html).toBe('<pre>sample</pre>')
     expect(retainedProbeKeys()).toEqual([])
+  })
+
+  it('一次性 html 请求失败后不保留 key', async () => {
+    const client = await import('./shikiWorkerClient')
+    const worker = await boot(client)
+    const key = `${KEY_PREFIX}html-failure`
+
+    const outcome = trackOutcome(
+      client.highlightHtmlInWorker({ key, text: 'sample', language: 'text', theme: 'github-dark-default' }),
+    )
+    await flush()
+    const request = lastHighlightRequest(worker)
+    respond(worker, { type: 'error', id: request.id, key: request.key, message: 'boom' })
+
+    expect(rejectionMessage(await outcome)).toBe('boom')
+    expect(retainedProbeKeys()).toEqual([])
+  })
+
+  it('Worker onerror 结算所有在飞请求并清掉全部 key 标记', async () => {
+    const client = await import('./shikiWorkerClient')
+    const worker = await boot(client)
+    const streamKey = `${KEY_PREFIX}onerror-stream`
+    const oneShotKey = `${KEY_PREFIX}onerror-one-shot`
+
+    const stream = await startTokens(client, worker, streamKey)
+    respond(worker, highlightResponse(stream.request))
+    expect((await stream.outcome).status).toBe('fulfilled')
+    expect(retainedProbeKeys()).toEqual([streamKey])
+
+    const pending = await startTokens(client, worker, oneShotKey, { complete: true })
+    worker.onerror?.(new Error('worker died'))
+
+    expect(rejectionMessage(await pending.outcome)).toBe('worker died')
+    // onerror 后客户端丢弃整个 Worker 实例，worker 侧的 tokenizer 也随之消失，
+    // 所有 key 标记都成了死引用（新请求会懒建新 Worker），ref 拿到的 dispose 也已是空转。
+    expect(retainedProbeKeys()).toEqual([])
+    expect(retainedPendingSizes()).toEqual([0])
   })
 
   it('流式请求保留 key，直到调用方 dispose', async () => {
@@ -283,5 +342,130 @@ describe('shikiWorkerClient 一次性请求的 key 标记释放', () => {
 
     expect(rejectionMessage(await pending.outcome)).toBe('superseded')
     expect(retainedProbeKeys()).toEqual([])
+  })
+})
+
+describe('latest 判定发生在消费方 await 之后', () => {
+  it('响应到达后在消费前 dispose，仍判为 superseded', async () => {
+    const client = await import('./shikiWorkerClient')
+    const worker = await boot(client)
+    const key = `${KEY_PREFIX}dispose-before-consume`
+
+    const pending = await startTokens(client, worker, key, { complete: true })
+    // 同一个同步窗口：先让 worker 响应到达，再 dispose，最后才 await 消费。
+    respond(worker, highlightResponse(pending.request))
+    client.disposeShikiWorkerKey(key)
+
+    expect(rejectionMessage(await pending.outcome)).toBe('superseded')
+    expect(retainedProbeKeys()).toEqual([])
+  })
+
+  it('响应到达后在消费前启动新请求，旧响应仍判为 superseded 且新标记保留', async () => {
+    const client = await import('./shikiWorkerClient')
+    const worker = await boot(client)
+    const key = `${KEY_PREFIX}new-request-before-consume`
+
+    const older = await startTokens(client, worker, key, { complete: true, text: 'sample' })
+    // 新请求先进入队列（它的 latestRequestByKey.set 排在旧请求的消费回调之前），
+    // 旧响应随后到达：旧请求的判定必须看到新请求的标记。
+    const newerOutcome = trackOutcome(
+      client.highlightTokensInWorker({
+        key,
+        text: 'sample sample',
+        language: 'text',
+        theme: 'github-dark-default',
+        complete: true,
+      }),
+    )
+    respond(worker, highlightResponse(older.request))
+
+    expect(rejectionMessage(await older.outcome)).toBe('superseded')
+
+    await flush()
+    const newerRequest = lastHighlightRequest(worker)
+    expect(newerRequest.id).not.toBe(older.request.id)
+    expect(retainedProbeKeys()).toEqual([key])
+
+    respond(worker, highlightResponse(newerRequest))
+    expect((await newerOutcome).status).toBe('fulfilled')
+    expect(retainedProbeKeys()).toEqual([])
+  })
+})
+
+describe('postMessage 同步抛错（请求没进 worker）', () => {
+  it('一次性 token 请求 postMessage 抛错后 key 与 pending 都不残留', async () => {
+    const client = await import('./shikiWorkerClient')
+    const worker = await boot(client)
+    const key = `${KEY_PREFIX}post-throw-one-shot`
+    worker.failNextHighlightPost = new Error('clone failed')
+
+    const outcome = trackOutcome(
+      client.highlightTokensInWorker({
+        key,
+        text: 'sample',
+        language: 'text',
+        theme: 'github-dark-default',
+        complete: true,
+      }),
+    )
+
+    expect(rejectionMessage(await outcome)).toBe('clone failed')
+    expect(retainedProbeKeys()).toEqual([])
+    expect(retainedPendingSizes()).toEqual([0])
+  })
+
+  it('一次性 html 请求 postMessage 抛错后 key 与 pending 都不残留', async () => {
+    const client = await import('./shikiWorkerClient')
+    const worker = await boot(client)
+    const key = `${KEY_PREFIX}post-throw-html`
+    worker.failNextHighlightPost = new Error('clone failed')
+
+    const outcome = trackOutcome(
+      client.highlightHtmlInWorker({ key, text: 'sample', language: 'text', theme: 'github-dark-default' }),
+    )
+
+    expect(rejectionMessage(await outcome)).toBe('clone failed')
+    expect(retainedProbeKeys()).toEqual([])
+    expect(retainedPendingSizes()).toEqual([0])
+  })
+
+  it('流式请求 postMessage 抛错后不留挂着的 key', async () => {
+    const client = await import('./shikiWorkerClient')
+    const worker = await boot(client)
+    const key = `${KEY_PREFIX}post-throw-stream`
+    worker.failNextHighlightPost = new Error('clone failed')
+
+    const outcome = trackOutcome(
+      client.highlightTokensInWorker({ key, text: 'sample', language: 'text', theme: 'github-dark-default' }),
+    )
+
+    // 请求从未到达 worker，worker 侧不存在该 key 的 tokenizer，客户端标记也无需保留。
+    expect(rejectionMessage(await outcome)).toBe('clone failed')
+    expect(retainedProbeKeys()).toEqual([])
+    expect(retainedPendingSizes()).toEqual([0])
+  })
+
+  it('postMessage 抛错后同一 key 的下一个请求仍能正常完成并清理', async () => {
+    const client = await import('./shikiWorkerClient')
+    const worker = await boot(client)
+    const key = `${KEY_PREFIX}post-throw-recover`
+    worker.failNextHighlightPost = new Error('clone failed')
+    const failed = trackOutcome(
+      client.highlightTokensInWorker({
+        key,
+        text: 'sample',
+        language: 'text',
+        theme: 'github-dark-default',
+        complete: true,
+      }),
+    )
+    expect(rejectionMessage(await failed)).toBe('clone failed')
+
+    const { outcome, request } = await startTokens(client, worker, key, { complete: true })
+    respond(worker, highlightResponse(request))
+
+    expect((await outcome).status).toBe('fulfilled')
+    expect(retainedProbeKeys()).toEqual([])
+    expect(retainedPendingSizes()).toEqual([0])
   })
 })

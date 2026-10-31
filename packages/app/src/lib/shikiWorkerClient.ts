@@ -62,6 +62,9 @@ function getWorker(): Worker {
     workerReadyPromiseReject?.(error)
     pendingRequests.forEach(pending => pending.reject(error))
     pendingRequests.clear()
+    // Worker 实例整个丢弃，worker 侧的流状态随它一起消失；留下的 key 标记都是死引用
+    // （ref 拿到的 dispose 会因 worker 为 null 而空转），在这里一并清掉。
+    latestRequestByKey.clear()
     workerReady = null
     workerReadyPromiseResolve = null
     workerReadyPromiseReject = null
@@ -124,10 +127,21 @@ function splitTokensIntoLines(tokens: WorkerToken[]): HighlightTokens {
   return lines
 }
 
-type HighlightResult = {
-  response: Extract<WorkerResponse, { type: 'highlight' }>
-  /** 请求结算的这一刻，它是否仍是该 key 的 latest 请求 */
-  isLatest: boolean
+type HighlightResponse = Extract<WorkerResponse, { type: 'highlight' }>
+
+/**
+ * 一次性请求（完整 token / html）在 worker 侧不留流状态，客户端 key 标记也应随请求结算释放；
+ * 流式请求的 key 对应 worker 里的 tokenizer，必须由调用方 dispose 释放。
+ */
+function isOneShot(params: { mode: 'tokens' | 'html'; complete?: boolean }): boolean {
+  return params.complete === true || params.mode === 'html'
+}
+
+/** 只有仍是该 key 的 latest 请求才有权释放标记，旧请求不得抹掉新请求的标记。 */
+function releaseLatestKey(key: string, id: number): boolean {
+  if (latestRequestByKey.get(key) !== id) return false
+  latestRequestByKey.delete(key)
+  return true
 }
 
 async function workerHighlight(params: {
@@ -137,38 +151,32 @@ async function workerHighlight(params: {
   theme: BundledTheme
   mode: 'tokens' | 'html'
   complete?: boolean
-}): Promise<HighlightResult> {
+}): Promise<HighlightResponse> {
   await ensureShikiWorkerReady()
 
   const id = nextId++
   const w = getWorker()
-  // 一次性请求（完整 token / html）在 worker 侧不留流状态，客户端标记也用完即弃；
-  // 流式请求的 key 对应 worker 里的 tokenizer，必须由调用方 dispose 释放。
-  const oneShot = params.complete === true || params.mode === 'html'
+  const oneShot = isOneShot(params)
   latestRequestByKey.set(params.key, id)
 
-  return new Promise<HighlightResult>((resolve, reject) => {
-    // 终态清理：只有仍是该 key 的 latest 请求才有权释放标记。
-    // 旧请求的完成 / 失败不能抹掉新请求的标记，否则新响应会被误判为 superseded。
-    const releaseIfLatest = (): boolean => {
-      const isLatest = latestRequestByKey.get(params.key) === id
-      if (isLatest && oneShot) latestRequestByKey.delete(params.key)
-      return isLatest
-    }
-
+  return new Promise<HighlightResponse>((resolve, reject) => {
     pendingRequests.set(id, {
-      resolve: response => {
-        resolve({
-          response: response as Extract<WorkerResponse, { type: 'highlight' }>,
-          isLatest: releaseIfLatest(),
-        })
-      },
+      resolve: resolve as (response: WorkerResponse) => void,
+      // 失败没有消费方可以做判定，只能在这里按 requestId 守卫释放。
       reject: error => {
-        releaseIfLatest()
+        if (oneShot) releaseLatestKey(params.key, id)
         reject(error)
       },
     })
-    w.postMessage({ type: 'highlight', id, ...params } satisfies WorkerRequest)
+    try {
+      w.postMessage({ type: 'highlight', id, ...params } satisfies WorkerRequest)
+    } catch (error) {
+      // postMessage 同步抛错（如结构化克隆失败）时 Promise 会直接 reject，绕过上面的守卫；
+      // 请求从未进入 worker，所以 worker 侧没有该 key 的 tokenizer，pending 条目与 key 标记都该在这里清。
+      pendingRequests.delete(id)
+      releaseLatestKey(params.key, id)
+      reject(error)
+    }
   })
 }
 
@@ -179,12 +187,20 @@ export async function highlightTokensInWorker(params: {
   theme: BundledTheme
   complete?: boolean
 }): Promise<{ id: number; code: string; tokens: HighlightTokens }> {
-  const { response, isLatest } = await workerHighlight({ ...params, mode: 'tokens' })
-  if (!isLatest) throw new Error('superseded')
-  return {
-    id: response.id,
-    code: response.code,
-    tokens: splitTokensIntoLines([...response.stable, ...response.unstable]),
+  const oneShot = params.complete === true
+  const result = await workerHighlight({ ...params, mode: 'tokens' })
+  try {
+    // latest 判定留在消费时点（await 之后），与重构前一致：响应到达后、
+    // 消费前的 dispose 或新请求都算 superseded。
+    if (result.id !== latestRequestByKey.get(params.key)) throw new Error('superseded')
+    return {
+      id: result.id,
+      code: result.code,
+      tokens: splitTokensIntoLines([...result.stable, ...result.unstable]),
+    }
+  } finally {
+    // 一次性请求的标记在判定通过后才释放；superseded 时 Map 已指向别的请求，释放会自守卫为空操作。
+    if (oneShot) releaseLatestKey(params.key, result.id)
   }
 }
 
@@ -194,9 +210,13 @@ export async function highlightHtmlInWorker(params: {
   language: string
   theme: BundledTheme
 }): Promise<{ id: number; html: string }> {
-  const { response, isLatest } = await workerHighlight({ ...params, mode: 'html', complete: true })
-  if (!isLatest) throw new Error('superseded')
-  return { id: response.id, html: response.html ?? '' }
+  const result = await workerHighlight({ ...params, mode: 'html', complete: true })
+  try {
+    if (result.id !== latestRequestByKey.get(params.key)) throw new Error('superseded')
+    return { id: result.id, html: result.html ?? '' }
+  } finally {
+    releaseLatestKey(params.key, result.id)
+  }
 }
 
 export function disposeShikiWorkerKey(key: string) {
