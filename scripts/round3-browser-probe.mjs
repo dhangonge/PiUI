@@ -242,7 +242,7 @@ try {
       Element.prototype.animate = function (frames, options) {
         const animation = original.call(this, frames, options)
         if (this.getAttribute('role') === 'tabpanel') {
-          const row = { id: this.id, frames, options, cancelled: false, finished: false }
+          const row = { id: this.id, frames, options, stack: (new Error().stack || '').split('\n').slice(1, 6), cancelled: false, finished: false }
           window.__round3Animations.push(row)
           animation.addEventListener('cancel', () => (row.cancelled = true))
           animation.addEventListener('finish', () => (row.finished = true))
