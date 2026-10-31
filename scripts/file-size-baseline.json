@@ -11,7 +11,7 @@
   "packages/pi-worker/src/runtime/real-session.ts": 1379,
   "packages/app/src/store/layoutStore.ts": 1311,
   "packages/app/src/features/chat/ChatArea.tsx": 1309,
-  "packages/app/src/features/chat/sidebar/FolderRecentList.tsx": 1300,
+  "packages/app/src/features/chat/sidebar/FolderRecentList.tsx": 1273,
   "packages/app/src/features/chat/ChatArea.test.ts": 1214,
   "packages/app/src/components/Terminal.tsx": 1193,
   "packages/app/src/store/themeStore.ts": 1156,

@@ -18,14 +18,14 @@
 
 ## 项目文档
 
-| 文档 | 内容 |
-|---|---|
-| `docs/UI_SYNC_POLICY.md` | UI 同步规则、驳回项、原风格契约、测试要求 |
-| `docs/PIUI_MASTER_PLAN.md` | R0–R12 路线（注意：R6/R7/R9 标记滞后于代码） |
-| `docs/OCUI_ANDROID_SYNC.md` | v0.6.35→v0.6.47 同步的决策与验收记录 |
-| `docs/PLUGIN_HOST_P1.md` | 插件宿主 P1 交付与探针结果 |
-| `docs/PI_UI_INTEGRATION.md` | Pi 集成说明（版本号可能滞后） |
-| `docs/app-architecture.md` | app 侧架构 |
+| 文档                        | 内容                                         |
+| --------------------------- | -------------------------------------------- |
+| `docs/UI_SYNC_POLICY.md`    | UI 同步规则、驳回项、原风格契约、测试要求    |
+| `docs/PIUI_MASTER_PLAN.md`  | R0–R12 路线（注意：R6/R7/R9 标记滞后于代码） |
+| `docs/OCUI_ANDROID_SYNC.md` | v0.6.35→v0.6.47 同步的决策与验收记录         |
+| `docs/PLUGIN_HOST_P1.md`    | 插件宿主 P1 交付与探针结果                   |
+| `docs/PI_UI_INTEGRATION.md` | Pi 集成说明（版本号可能滞后）                |
+| `docs/app-architecture.md`  | app 侧架构                                   |
 
 分析文档在仓库外：`/home/zhangtung/项目/PiUI-个人配置适配阶段分析.md`、`PiUI-架构分析.md`、`PiUI-插件适配审计.md`。
 

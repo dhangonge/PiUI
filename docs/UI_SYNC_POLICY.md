@@ -14,7 +14,7 @@
 
 1. OCUI 有等价 UI **且** Pi 侧有对应数据来源
    → **同步 OCUI 设计**：布局、交互结构、展开/折叠语义、视觉层次按 OCUI 来；数据接入换成 Pi 的原生通道。
-   → 不是把 OpenCode 的模块搬回来。同 `docs/OCUI_ANDROID_SYNC.md` 的立场：*Changes are adapted by behavior, not copied over the Pi-native implementation.*
+   → 不是把 OpenCode 的模块搬回来。同 `docs/OCUI_ANDROID_SYNC.md` 的立场：_Changes are adapted by behavior, not copied over the Pi-native implementation._
 
 2. OCUI 有 UI 但 Pi 侧无对应概念（OpenCode 独有）
    → **不移植**。按 `PiUI-OCUI-0.7-port-plan.md` 的 D 档排除，不在 PiUI 里造一个没有数据源的壳。
@@ -26,12 +26,12 @@
 
 ## 参考源
 
-| 用途 | 位置 |
-|---|---|
-| OCUI 上游源码 | `/home/zhangtung/项目/opencodeui-upstream/`（对应版本见 `PiUI-OCUI-0.7-port-plan.md` 头部） |
-| 三方差异判定 | `/home/zhangtung/项目/ocui-3way.sh`、`ocui-scan.sh` |
-| 移植计划与分档 | `/home/zhangtung/项目/PiUI-OCUI-0.7-port-plan.md`（A/B/C/D 档 + 9 个批次） |
-| 上一次同步的决策记录 | `docs/OCUI_ANDROID_SYNC.md`（含 Coverage decisions 表） |
+| 用途                 | 位置                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------- |
+| OCUI 上游源码        | `/home/zhangtung/项目/opencodeui-upstream/`（对应版本见 `PiUI-OCUI-0.7-port-plan.md` 头部） |
+| 三方差异判定         | `/home/zhangtung/项目/ocui-3way.sh`、`ocui-scan.sh`                                         |
+| 移植计划与分档       | `/home/zhangtung/项目/PiUI-OCUI-0.7-port-plan.md`（A/B/C/D 档 + 9 个批次）                  |
+| 上一次同步的决策记录 | `docs/OCUI_ANDROID_SYNC.md`（含 Coverage decisions 表）                                     |
 
 移植计划里的分类标签含义：`PURE-UI` = 纯界面可直接同步；`DEP-API` = 依赖后端接口，需先落 API；`TRANSPORT` = 传输层，只取不碰；A 档干净直接取、B 档低接线、C 档中接线、D 档明确不取。
 
@@ -72,11 +72,11 @@ feat(app): extension widget mirror panel              [判据3: OCUI 无对应�
 
 ## 已判定的条目
 
-| 界面 | 判据 | 结论 |
-|---|---|---|
-| subagent（`Agent` / `StopAgent` / `MessageAgent` / `AgentStatus` 卡片） | 1 | 同步 OCUI `TaskRenderer` 的子会话流 + 停止；数据源换成 Pi `subagents:child:*` 事件 + 子会话消息 RPC |
-| `rpiv-todo` 任务卡片 | 1 | 已同步（`TodoRenderer.tsx`），缺原生交互 |
-| `rpiv-ask-user-question` | 1 | 已同步（`QuestionRenderer.tsx`），缺原生复选框/多题回顾 |
-| extension widget 镜像 | 3 | 原风格（`41e2d011` 的快照镜像路径） |
-| Pi packages / trust / provider / resources 管理页 | 3 | 原风格自研 |
-| OpenCode config editor / WSL / PermissionDialog | 2 | 不移植 |
+| 界面                                                                    | 判据 | 结论                                                                                                |
+| ----------------------------------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------- |
+| subagent（`Agent` / `StopAgent` / `MessageAgent` / `AgentStatus` 卡片） | 1    | 同步 OCUI `TaskRenderer` 的子会话流 + 停止；数据源换成 Pi `subagents:child:*` 事件 + 子会话消息 RPC |
+| `rpiv-todo` 任务卡片                                                    | 1    | 已同步（`TodoRenderer.tsx`），缺原生交互                                                            |
+| `rpiv-ask-user-question`                                                | 1    | 已同步（`QuestionRenderer.tsx`），缺原生复选框/多题回顾                                             |
+| extension widget 镜像                                                   | 3    | 原风格（`41e2d011` 的快照镜像路径）                                                                 |
+| Pi packages / trust / provider / resources 管理页                       | 3    | 原风格自研                                                                                          |
+| OpenCode config editor / WSL / PermissionDialog                         | 2    | 不移植                                                                                              |

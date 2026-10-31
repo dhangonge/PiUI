@@ -24,7 +24,9 @@ describe('sessionChildrenExpansionStore', () => {
 
   it('每次变更推进版本号并通知订阅者', () => {
     const seen: number[] = []
-    const unsubscribe = sessionChildrenExpansionStore.subscribe(() => seen.push(sessionChildrenExpansionStore.getVersion()))
+    const unsubscribe = sessionChildrenExpansionStore.subscribe(() =>
+      seen.push(sessionChildrenExpansionStore.getVersion()),
+    )
 
     const before = sessionChildrenExpansionStore.getVersion()
     sessionChildrenExpansionStore.toggle('a')
