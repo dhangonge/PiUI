@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef } from 'react'
 import type { ReactElement, RefObject } from 'react'
 import type { Api, Model } from '@earendil-works/pi-ai'
 import type { FileCapabilities } from '../../../types/ui'
@@ -107,11 +107,14 @@ export function usePiComposerBindings({
     }
   }, [dialogCollapsed, collapsedDialogTitle, collapsedDialogQueueLength, expandCollapsedDialog])
 
-  // latest-handler ref：渲染期不写 ref，统一在提交后的 effect 同步最新实现
+  // latest-handler ref：渲染期不写 ref，用 layout effect 在本次提交的 paint 前同步。
+  // 用 `useLayoutEffect` + `[onCommand]` 而非 passive effect：passive 在 paint 之后
+  // 才跑，同一次提交里更早的 layout effect / 子组件 passive effect 会读到旧 handler。
+  // 依赖 `onCommand` 即够——它由 PiChatPane 的 useCallback 产出，闭包一变引用就变。
   const commandRef = useRef(onCommand)
-  useEffect(() => {
+  useLayoutEffect(() => {
     commandRef.current = onCommand
-  })
+  }, [onCommand])
   const command = useCallback((value: string) => commandRef.current(value), [])
 
   const cycleModel = useCallback(
