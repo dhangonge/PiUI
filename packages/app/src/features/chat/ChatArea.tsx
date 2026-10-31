@@ -25,9 +25,7 @@ import type { Virtualizer as CoreVirtualizer } from '@tanstack/virtual-core'
 import { useTranslation } from 'react-i18next'
 import { MessageRenderer, ProcessCollapseBlock, assistantHasFinalContent, assistantHasProcessContent } from '../message'
 import { MessageErrorView } from '../message/parts'
-import { SpinnerIcon, ArrowDownIcon, ArrowUpIcon, PencilIcon, TrashIcon } from '../../components/Icons'
-import { CopyButton } from '../../components/ui'
-import { useInputCapabilities } from '../../hooks/useInputCapabilities'
+import { SpinnerIcon } from '../../components/Icons'
 import type { MessageError } from '../../types/message'
 import type { PiTimelineItem } from '../../pi/domain/index.js'
 import { RetryStatusInline, type RetryStatusInlineData } from './RetryStatusInline'
@@ -48,52 +46,17 @@ import { useAutoScroll } from './virtual/useAutoScroll'
 import { resolveAtBottom, type AtBottomThresholds } from './virtual/atBottomHysteresis'
 import { useEmptyWorkingShellGate } from './virtual/useEmptyWorkingShellGate'
 import { perfMark, perfRecordRender, isPerfEnabled } from '../../utils/perf'
+import { bottomSpacerHeight, estimateTimelineItemSize, sameMap, sameSet, sessionCacheKey } from './chatAreaSizing'
+import { QueuedUserMessageQueue } from './QueuedUserMessageQueue'
 
-const ROW_ESTIMATE = 60
-/** 过程壳 header 行高（Working / Worked 一行） */
-const PROCESS_SHELL_HEADER = 36
 /** 用户入场生长结束后，空 Working 壳再等多久（有 assistant 则立刻挂，不等） */
 const EMPTY_WORKING_SHELL_EXTRA_DELAY_MS = 500
-const DEFAULT_BOTTOM_SPACER = 256
 const SESSION_CACHE_LIMIT = 16
 /** 加载历史的指示器最小时长（ms）：本地快速加载时避免一闪而过 */
 const MIN_LOADING_MS = 300
 
-/** 内容等价判断：流式 chunk 只换数组引用时，复用旧 Map/Set 引用，
- *  否则 VirtualRow 的 memo 比较（含这三个引用）会被击穿，历史行跟着重渲染。 */
-function sameMap<K, V>(a: Map<K, V>, b: Map<K, V>): boolean {
-  if (a.size !== b.size) return false
-  for (const [key, value] of a) {
-    if (b.get(key) !== value) return false
-  }
-  return true
-}
-
-function sameSet<T>(a: Set<T>, b: Set<T>): boolean {
-  if (a.size !== b.size) return false
-  for (const value of a) {
-    if (!b.has(value)) return false
-  }
-  return true
-}
-
-const bottomSpacerHeight = (bottomPadding: number) => (bottomPadding > 0 ? bottomPadding + 48 : DEFAULT_BOTTOM_SPACER)
-
-function estimateTimelineItemSize(item: ProcessTimelineItem | undefined): number {
-  if (!item) return ROW_ESTIMATE
-  if (item.kind === 'message') return ROW_ESTIMATE
-  // 进行中默认展开：header + 壳内消息（空回合至少占 header）
-  if (item.isActive) {
-    const body = Math.max(item.children.length, 1) * ROW_ESTIMATE
-    return PROCESS_SHELL_HEADER + body
-  }
-  // 结束后默认折叠：只估 header + 壳外 final，避免刷新时 120→36 的假高度再回弹
-  return PROCESS_SHELL_HEADER + (item.finalItem ? ROW_ESTIMATE : 0)
-}
-
-function sessionCacheKey(sessionId: string, processCollapseEnabled: boolean): string {
-  return `${sessionId}:${processCollapseEnabled ? 'process' : 'flat'}`
-}
+// 队列气泡（QueuedUserMessageQueue）已抽到同目录模块，此处 re-export 保持既有导入路径。
+export { QueuedUserMessageQueue }
 
 // ─── 接口定义（保持不变） ───────────────────────────────────────
 
@@ -188,101 +151,6 @@ const MessageBody = memo(function MessageBody({
         </div>
       </div>
     </div>
-  )
-})
-
-export const QueuedUserMessageQueue = memo(function QueuedUserMessageQueue({
-  kind,
-  items,
-  maxWidthClass,
-  paddingClass,
-  onBackToInput,
-  onMoveMode,
-  onClear,
-}: {
-  kind: 'current' | 'next'
-  items: readonly string[]
-  maxWidthClass: string
-  paddingClass: string
-  /** 修改该条（pi 不支持队列内修改：清除后回填输入框，编辑后重发） */
-  onBackToInput?: (queueKind: 'steering' | 'followUp', index: number) => void | Promise<void>
-  /** 切换该条队列模式（steer ↔ followUp） */
-  onMoveMode?: (queueKind: 'steering' | 'followUp', index: number) => void | Promise<void>
-  /** 直接清除该条 */
-  onClear?: (queueKind: 'steering' | 'followUp', index: number) => void | Promise<void>
-}) {
-  const { t } = useTranslation('chat')
-  const { preferTouchUi } = useInputCapabilities()
-  if (items.length === 0) return null
-
-  const queueKind = kind === 'current' ? 'steering' : 'followUp'
-  const moveTitle = t(kind === 'current' ? 'chatArea.moveQueueToNext' : 'chatArea.moveQueueToCurrent')
-  const label = t(kind === 'current' ? 'chatArea.currentTurnQueue' : 'chatArea.nextTurnQueue', {
-    count: items.length,
-  })
-  // 对齐用户消息 action bar：PC 悬浮显示、触控恒显示
-  const actionBarClass = preferTouchUi
-    ? 'flex items-center gap-0.5 transition-opacity'
-    : 'flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity'
-  const actionBtnClass = 'p-1.5 rounded-md text-text-400 hover:text-text-200 hover:bg-bg-200/50 transition-colors'
-  return (
-    <section
-      data-message-queue={kind}
-      aria-label={label}
-      className={`w-full ${maxWidthClass} mx-auto ${paddingClass} pt-3 pb-2`}
-    >
-      <div className="flex items-center gap-3 pb-3 text-[length:var(--fs-sm)] text-text-500" role="status">
-        <span className="h-px flex-1 bg-border-200" aria-hidden="true" />
-        <span className="shrink-0">{label}</span>
-        <span className="h-px flex-1 bg-border-200" aria-hidden="true" />
-      </div>
-      <div className="flex flex-col items-end gap-2">
-        {items.map((text, index) => (
-          <div key={`${index}:${text}`} className="group/msg flex flex-col items-end gap-1 max-w-[85%]">
-            {/* 气泡：仅文本（对齐用户消息布局） */}
-            <div className="whitespace-pre-wrap break-words rounded-2xl border border-dashed border-border-200 bg-bg-300/60 px-4 py-2.5 text-[length:var(--fs-base)] leading-relaxed text-text-200">
-              {text}
-            </div>
-            {/* 操作行：气泡下方（对齐用户消息 action bar） */}
-            {(onBackToInput || onMoveMode || onClear) && (
-              <div className={`px-1 ${actionBarClass}`}>
-                <CopyButton text={text} position="static" />
-                {onClear && (
-                  <button
-                    type="button"
-                    onClick={() => void onClear(queueKind, index)}
-                    title={t('chatArea.clearQueueItem')}
-                    className={actionBtnClass}
-                  >
-                    <TrashIcon />
-                  </button>
-                )}
-                {onMoveMode && (
-                  <button
-                    type="button"
-                    onClick={() => void onMoveMode(queueKind, index)}
-                    title={moveTitle}
-                    className={actionBtnClass}
-                  >
-                    {kind === 'current' ? <ArrowDownIcon /> : <ArrowUpIcon />}
-                  </button>
-                )}
-                {onBackToInput && (
-                  <button
-                    type="button"
-                    onClick={() => void onBackToInput(queueKind, index)}
-                    title={t('chatArea.editQueueItem')}
-                    className={actionBtnClass}
-                  >
-                    <PencilIcon />
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </section>
   )
 })
 
