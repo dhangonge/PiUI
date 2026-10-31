@@ -262,13 +262,38 @@ export function computeWordDiff(
 
 // ============================================
 // 行级 diff
+//
+// 行级 diff 只做一次：paired（左右配对）与 unified（单列）从同一份
+// DiffLineModel 派生，拖拽 resize 只影响词级标记，不会重跑 diffLines。
 // ============================================
 
-export function computePairedLines(before: string, after: string, skipWordDiff: boolean): PairedLine[] {
-  const changes = diffLines(before, after)
+export type DiffLineChange = ReturnType<typeof diffLines>[number]
+
+/** 一次 diffLines 的结果 + 两侧按行切分后的数组 */
+export interface DiffLineModel {
+  changes: DiffLineChange[]
+  beforeLines: string[]
+  afterLines: string[]
+}
+
+/** 行级 diff 的唯一入口：一次 diffLines，一次 split */
+export function computeLineDiff(before: string, after: string): DiffLineModel {
+  return {
+    changes: diffLines(before, after),
+    beforeLines: before.split('\n'),
+    afterLines: after.split('\n'),
+  }
+}
+
+export interface BuildPairedLinesOptions {
+  /** 是否计算词级 diff，默认 true；拖拽 resize 期间传 false */
+  wordDiff?: boolean
+}
+
+export function buildPairedLines(model: DiffLineModel, options: BuildPairedLinesOptions = {}): PairedLine[] {
+  const skipWordDiff = options.wordDiff === false
+  const { changes, beforeLines, afterLines } = model
   const result: PairedLine[] = []
-  const beforeLines = before.split('\n')
-  const afterLines = after.split('\n')
 
   let oldIdx = 0,
     newIdx = 0,
@@ -348,11 +373,9 @@ export function computePairedLines(before: string, after: string, skipWordDiff: 
   return result
 }
 
-export function computeUnifiedLines(before: string, after: string): UnifiedLine[] {
-  const changes = diffLines(before, after)
+export function buildUnifiedLines(model: DiffLineModel): UnifiedLine[] {
+  const { changes, beforeLines, afterLines } = model
   const result: UnifiedLine[] = []
-  const beforeLines = before.split('\n')
-  const afterLines = after.split('\n')
 
   let oldIdx = 0,
     newIdx = 0
@@ -385,4 +408,16 @@ export function computeUnifiedLines(before: string, after: string): UnifiedLine[
   }
 
   return result
+}
+
+/**
+ * 旧签名便捷入口（before/after 直接给）：内部只做一次行级 diff。
+ * 保留它便于按输入直接对照/回归，不必自己拼 DiffLineModel。
+ */
+export function computePairedLines(before: string, after: string, skipWordDiff = false): PairedLine[] {
+  return buildPairedLines(computeLineDiff(before, after), { wordDiff: !skipWordDiff })
+}
+
+export function computeUnifiedLines(before: string, after: string): UnifiedLine[] {
+  return buildUnifiedLines(computeLineDiff(before, after))
 }

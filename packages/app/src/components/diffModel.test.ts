@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   EXPANSION_LINE_COUNT,
+  buildPairedLines,
+  buildUnifiedLines,
+  computeLineDiff,
   collapseContextPaired,
   collapseContextUnified,
   computePairedLines,
@@ -221,5 +224,49 @@ describe('diffModel 上下文折叠', () => {
     const both = expandRegion(up, 7, 'both')
     expect(both.get(7)).toEqual({ fromStart: EXPANSION_LINE_COUNT * 2, fromEnd: EXPANSION_LINE_COUNT })
     expect(up.get(7)).toEqual({ fromStart: EXPANSION_LINE_COUNT, fromEnd: 0 })
+  })
+})
+
+describe('diffModel 行级模型复用', () => {
+  const before = 'const a = 1\nkeep\nconst b = 2'
+  const after = 'const a = 1\nkeep\nconst c = 2'
+
+  it('computeLineDiff 一次给出 changes 与两侧切行', () => {
+    const model = computeLineDiff(before, after)
+    expect(model.beforeLines).toEqual(['const a = 1', 'keep', 'const b = 2'])
+    expect(model.afterLines).toEqual(['const a = 1', 'keep', 'const c = 2'])
+    expect(model.changes.map(change => [change.count, Boolean(change.added), Boolean(change.removed)])).toEqual([
+      [2, false, false],
+      [1, false, true],
+      [1, true, false],
+    ])
+  })
+
+  it('paired 与 unified 从同一模型派生，输出与旧签名入口一致', () => {
+    const model = computeLineDiff(before, after)
+    expect(buildPairedLines(model)).toEqual(computePairedLines(before, after))
+    expect(buildUnifiedLines(model)).toEqual(computeUnifiedLines(before, after))
+    // 同一模型可以重复派生（paired + unified 共享），且不被修改
+    expect(buildPairedLines(model)).toEqual(buildPairedLines(model))
+    expect(model.beforeLines).toEqual(['const a = 1', 'keep', 'const b = 2'])
+  })
+
+  it('wordDiff=false 只丢词级标记，行级内容不变', () => {
+    const model = computeLineDiff(before, after)
+    const withWordDiff = buildPairedLines(model)
+    const withoutWordDiff = buildPairedLines(model, { wordDiff: false })
+    expect(withWordDiff[2].left.wordDiffSegments).toHaveLength(3)
+    expect(withoutWordDiff[2].left.wordDiffSegments).toBeUndefined()
+    expect(withoutWordDiff).toEqual(computePairedLines(before, after, true))
+    expect(withoutWordDiff.map(row => [row.left.type, row.left.content, row.right.type, row.right.content])).toEqual(
+      withWordDiff.map(row => [row.left.type, row.left.content, row.right.type, row.right.content]),
+    )
+  })
+
+  it('空输入的模型派生为空行数组', () => {
+    const model = computeLineDiff('', '')
+    expect(model.changes).toEqual([])
+    expect(buildPairedLines(model)).toEqual([])
+    expect(buildUnifiedLines(model)).toEqual([])
   })
 })

@@ -27,10 +27,11 @@ import type { DiffStyle } from '../store/themeStore'
 import { getLineCount, getLineNumberColumnWidth } from '../utils/lineNumberUtils'
 import { useUiState } from '../utils/uiDisclosureState'
 import {
+  buildPairedLines,
+  buildUnifiedLines,
   collapseContextPaired,
   collapseContextUnified,
-  computePairedLines,
-  computeUnifiedLines,
+  computeLineDiff,
   expandRegion,
   isCollapsed,
   type DiffLine,
@@ -406,11 +407,14 @@ export function useDiffViewerData(
     enabled: shouldHighlight,
   })
   const skipWordDiff = isResizing
+  // 行级 diff 只算一次：paired 与 unified 共享同一份 changes，
+  // resize 只让 paired 重建词级标记，不会重跑 diffLines。
+  const lineModel = useMemo(() => (enabled ? computeLineDiff(before, after) : null), [before, after, enabled])
   const pairedLines = useMemo(
-    () => (enabled ? computePairedLines(before, after, skipWordDiff) : []),
-    [before, after, enabled, skipWordDiff],
+    () => (lineModel ? buildPairedLines(lineModel, { wordDiff: !skipWordDiff }) : []),
+    [lineModel, skipWordDiff],
   )
-  const unifiedLines = useMemo(() => (enabled ? computeUnifiedLines(before, after) : []), [before, after, enabled])
+  const unifiedLines = useMemo(() => (lineModel ? buildUnifiedLines(lineModel) : []), [lineModel])
   const lineNumberWidth = useDiffLineNumberWidth(enabled ? before : '', enabled ? after : '')
 
   return useMemo(
