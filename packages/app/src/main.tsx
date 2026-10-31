@@ -10,7 +10,6 @@ import { themeStore } from './store/themeStore'
 import { applyUrlTokenParam } from './store/serverStore'
 import { isTauri, isTauriMobile } from './utils/tauri'
 import { logError } from './utils/errorHandling'
-import { attachScrollActivity } from './utils/scrollActivity'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { serviceStore } from './store/serviceStore'
 
@@ -57,10 +56,6 @@ if (document.readyState === 'loading') {
   // DOM 已就绪（defer script 或者 module）
   requestAnimationFrame(initOverlayScrollbars)
 }
-
-// 全局「正在滚动」信号：滚动期间把毛玻璃退成实色，避免叠加层在滚动时
-// 因 backdrop-filter 背板重采样而整层重绘（见 utils/scrollActivity.ts）。
-attachScrollActivity()
 
 const isNativeTauri = isTauri()
 
