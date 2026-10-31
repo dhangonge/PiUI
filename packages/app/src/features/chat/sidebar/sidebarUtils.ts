@@ -18,3 +18,15 @@ export function formatNotificationTime(ts: number): string {
   if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`
   return `${Math.floor(diff / 3600_000)}h ago`
 }
+
+/** Shift 连选：按锚点与目标的可见顺序取闭区间，任一端不在当前可见列表里就不选 */
+export function getSelectionRange(visibleIds: string[], anchorId: string, targetId: string) {
+  const startIndex = visibleIds.indexOf(anchorId)
+  const endIndex = visibleIds.indexOf(targetId)
+
+  if (startIndex === -1 || endIndex === -1) return null
+
+  const from = Math.min(startIndex, endIndex)
+  const to = Math.max(startIndex, endIndex)
+  return visibleIds.slice(from, to + 1)
+}

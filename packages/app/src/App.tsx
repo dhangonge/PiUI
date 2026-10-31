@@ -5,6 +5,7 @@ import { Sidebar } from './features/chat'
 import { PiChatPane } from './features/pi-chat/PiChatPane'
 import { SplitContainer } from './features/chat/SplitContainer'
 import type { CommandItem } from './components/CommandPalette'
+import { buildAppCommandItems } from './components/appCommandItems'
 import { ToastContainer } from './components/ToastContainer'
 import { RightPanel } from './components/RightPanel'
 import { BottomPanel } from './components/BottomPanel'
@@ -13,7 +14,6 @@ import { useDirectory, useGlobalEvents, useGlobalKeybindings, useRouter } from '
 import { useViewportHeight } from './hooks/useViewportHeight'
 import { useWakeLock } from './hooks/useWakeLock'
 import type { KeybindingHandlers } from './hooks/useKeybindings'
-import { keybindingStore } from './store/keybindingStore'
 import {
   layoutStore,
   paneLayoutStore,
@@ -707,225 +707,39 @@ function App() {
 
   useGlobalKeybindings(keybindingHandlers)
 
-  const commands = useMemo<CommandItem[]>(() => {
-    const getShortcut = (action: string) =>
-      keybindingStore.getKey(action as import('./store/keybindingStore').KeybindingAction)
-
-    return [
-      {
-        id: 'openSettings',
-        label: t('commands:openSettings'),
-        description: t('commands:openSettingsDesc'),
-        category: t('commands:categories.general'),
-        shortcut: getShortcut('openSettings'),
-        action: openSettings,
-      },
-      {
-        id: 'openProject',
-        label: t('commands:openProject'),
-        description: t('commands:openProjectDesc'),
-        category: t('commands:categories.general'),
-        shortcut: getShortcut('openProject'),
-        action: openProject,
-      },
-      {
-        id: 'openSettingsShortcuts',
-        label: t('commands:openShortcutsSettings'),
-        description: t('commands:openShortcutsSettingsDesc'),
-        category: t('commands:categories.general'),
-        action: () => {
-          openSettingsTab('keybindings')
+  const commands = useMemo<CommandItem[]>(
+    () =>
+      buildAppCommandItems(() => ({
+        t,
+        openSettings,
+        openProject,
+        openSettingsTab,
+        handleToggleSidebar,
+        handleToggleRightPanel,
+        focusedController,
+        paneLayout: {
+          focusedPaneId: paneLayout.focusedPaneId,
+          isSplit: paneLayout.isSplit,
         },
-      },
-      {
-        id: 'toggleSidebar',
-        label: t('commands:toggleSidebar'),
-        description: t('commands:toggleSidebarDesc'),
-        category: t('commands:categories.general'),
-        shortcut: getShortcut('toggleSidebar'),
-        action: handleToggleSidebar,
-      },
-      {
-        id: 'toggleRightPanel',
-        label: t('commands:toggleRightPanel'),
-        description: t('commands:toggleRightPanelDesc'),
-        category: t('commands:categories.general'),
-        shortcut: getShortcut('toggleRightPanel'),
-        action: handleToggleRightPanel,
-      },
-      {
-        id: 'focusInput',
-        label: t('commands:focusInput'),
-        description: t('commands:focusInputDesc'),
-        category: t('commands:categories.general'),
-        shortcut: getShortcut('focusInput'),
-        action: () => {
-          const input = document.querySelector<HTMLTextAreaElement>('[data-input-box] textarea')
-          input?.focus()
-        },
-      },
-      {
-        id: 'newSession',
-        label: t('commands:newSession'),
-        description: t('commands:newSessionDesc'),
-        category: t('commands:categories.session'),
-        shortcut: getShortcut('newSession'),
-        action: () => focusedController?.newSession(),
-      },
-      ...(capabilities.sessionArchive
-        ? [
-            {
-              id: 'archiveSession',
-              label: t('commands:archiveSession'),
-              description: t('commands:archiveSessionDesc'),
-              category: t('commands:categories.session'),
-              shortcut: getShortcut('archiveSession'),
-              action: () => focusedController?.archiveSession(),
-            },
-          ]
-        : []),
-      {
-        id: 'previousSession',
-        label: t('commands:previousSession'),
-        description: t('commands:previousSessionDesc'),
-        category: t('commands:categories.session'),
-        shortcut: getShortcut('previousSession'),
-        action: () => focusedController?.previousSession(),
-      },
-      {
-        id: 'nextSession',
-        label: t('commands:nextSession'),
-        description: t('commands:nextSessionDesc'),
-        category: t('commands:categories.session'),
-        shortcut: getShortcut('nextSession'),
-        action: () => focusedController?.nextSession(),
-      },
-      {
-        id: 'toggleTerminal',
-        label: t('commands:toggleTerminal'),
-        description: t('commands:toggleTerminalDesc'),
-        category: t('commands:categories.terminal'),
-        shortcut: getShortcut('toggleTerminal'),
-        action: () => layoutStore.toggleBottomPanel(),
-      },
-      {
-        id: 'newTerminal',
-        label: t('commands:newTerminal'),
-        description: t('commands:newTerminalDesc'),
-        category: t('commands:categories.terminal'),
-        shortcut: getShortcut('newTerminal'),
-        action: () => window.dispatchEvent(new Event('piui:new-terminal')),
-      },
-      {
-        id: 'selectModel',
-        label: t('commands:selectModel'),
-        description: t('commands:selectModelDesc'),
-        category: t('commands:categories.model'),
-        shortcut: getShortcut('selectModel'),
-        action: () => focusedController?.openModelSelector(),
-      },
-      {
-        id: 'toggleAgent',
-        label: t('commands:toggleAgent'),
-        description: t('commands:toggleAgentDesc'),
-        category: t('commands:categories.model'),
-        shortcut: getShortcut('toggleAgent'),
-        action: () => focusedController?.toggleAgent(),
-      },
-      {
-        id: 'copyLastResponse',
-        label: t('commands:copyLastResponse'),
-        description: t('commands:copyLastResponseDesc'),
-        category: t('commands:categories.message'),
-        shortcut: getShortcut('copyLastResponse'),
-        action: () => focusedController?.copyLastResponse(),
-      },
-      {
-        id: 'cancelMessage',
-        label: t('commands:cancelMessage'),
-        description: t('commands:cancelMessageDesc'),
-        category: t('commands:categories.message'),
-        shortcut: getShortcut('cancelMessage'),
-        action: () => focusedController?.cancelMessage(),
-        when: () => !!focusedController?.isStreaming,
-      },
-      // Pane
-      {
-        id: 'focusNextPane',
-        label: t('commands:focusNextPane'),
-        description: t('commands:focusNextPaneDesc'),
-        category: t('commands:categories.pane'),
-        shortcut: getShortcut('focusNextPane'),
-        action: () => paneLayoutStore.focusNextPane(),
-      },
-      {
-        id: 'focusPrevPane',
-        label: t('commands:focusPrevPane'),
-        description: t('commands:focusPrevPaneDesc'),
-        category: t('commands:categories.pane'),
-        shortcut: getShortcut('focusPrevPane'),
-        action: () => paneLayoutStore.focusPrevPane(),
-      },
-      {
-        id: 'splitRight',
-        label: t('commands:splitRight'),
-        description: t('commands:splitRightDesc'),
-        category: t('commands:categories.pane'),
-        shortcut: getShortcut('splitRight'),
-        action: () => {
-          const pid = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
-          if (pid && splitPaneEnabled) paneLayoutStore.splitPane(pid, 'horizontal')
-        },
-      },
-      {
-        id: 'splitDown',
-        label: t('commands:splitDown'),
-        description: t('commands:splitDownDesc'),
-        category: t('commands:categories.pane'),
-        shortcut: getShortcut('splitDown'),
-        action: () => {
-          const pid = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
-          if (pid && splitPaneEnabled) paneLayoutStore.splitPane(pid, 'vertical')
-        },
-      },
-      {
-        id: 'closePane',
-        label: t('commands:closePane'),
-        description: t('commands:closePaneDesc'),
-        category: t('commands:categories.pane'),
-        shortcut: getShortcut('closePane'),
-        action: () => {
-          const pid = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
-          if (pid && paneLayout.isSplit) paneLayoutStore.closePane(pid)
-        },
-        when: () => paneLayout.isSplit,
-      },
-      {
-        id: 'togglePaneFullscreen',
-        label: t('commands:togglePaneFullscreen'),
-        description: t('commands:togglePaneFullscreenDesc'),
-        category: t('commands:categories.pane'),
-        shortcut: getShortcut('togglePaneFullscreen'),
-        action: () => {
-          if (paneLayout.isSplit) handleToggleFocusedPaneFullscreen()
-        },
-        when: () => paneLayout.isSplit,
-      },
-    ]
-  }, [
-    t,
-    openSettings,
-    openProject,
-    openSettingsTab,
-    handleToggleSidebar,
-    handleToggleRightPanel,
-    focusedController,
-    paneLayout.focusedPaneId,
-    paneLayout.isSplit,
-    splitPaneEnabled,
-    handleToggleFocusedPaneFullscreen,
-    capabilities.sessionArchive,
-  ])
+        splitPaneEnabled,
+        handleToggleFocusedPaneFullscreen,
+        sessionArchive: capabilities.sessionArchive,
+      })),
+    [
+      t,
+      openSettings,
+      openProject,
+      openSettingsTab,
+      handleToggleSidebar,
+      handleToggleRightPanel,
+      focusedController,
+      paneLayout.focusedPaneId,
+      paneLayout.isSplit,
+      splitPaneEnabled,
+      handleToggleFocusedPaneFullscreen,
+      capabilities.sessionArchive,
+    ],
+  )
 
   return (
     <div className="relative flex h-full flex-col bg-bg-100 overflow-hidden">

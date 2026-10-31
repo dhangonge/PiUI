@@ -6,13 +6,13 @@ import { MultiServerFolderList } from './MultiServerFolderList'
 import { useMultiServerStore } from '../../../store/multiServerStore'
 import { serverStore } from '../../../store/serverStore'
 import { sessionKeyToServerId } from '../../../utils/sessionKey'
-import { getProjectGroupIdentity } from './projectGrouping'
+import { findProjectGroupForDirectory, getProjectGroupIdentity, type ProjectItem } from './projectGrouping'
 import { groupSubagentSessions } from '../../../pi/subagentSessionGrouping'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { ActiveSessionItem } from './ActiveSessionItem'
 import { NotificationItem } from './NotificationItem'
 import { SidebarFooter } from './SidebarFooter'
-import { getParentPath } from './sidebarUtils'
+import { getParentPath, getSelectionRange } from './sidebarUtils'
 import {
   SidebarIcon,
   FolderIcon,
@@ -59,46 +59,6 @@ interface SidePanelProps {
   onToggleSidebar: () => void
   contextLimit?: number
   onOpenSettings?: () => void
-}
-
-interface ProjectItem {
-  id: string
-  path: string
-  name: string
-  canReorder?: boolean
-  memberDirectories?: string[]
-  reorderPath?: string
-  workspaceDirectories?: string[]
-  sectionKind?: 'project' | 'workspace'
-}
-
-function getSelectionRange(visibleIds: string[], anchorId: string, targetId: string) {
-  const startIndex = visibleIds.indexOf(anchorId)
-  const endIndex = visibleIds.indexOf(targetId)
-
-  if (startIndex === -1 || endIndex === -1) return null
-
-  const from = Math.min(startIndex, endIndex)
-  const to = Math.max(startIndex, endIndex)
-  return visibleIds.slice(from, to + 1)
-}
-
-function findProjectGroupForDirectory(projects: ProjectItem[], directory: string) {
-  return projects.find(project => {
-    if (isSameDirectory(project.id, directory) || isSameDirectory(project.path, directory)) {
-      return true
-    }
-
-    if (project.workspaceDirectories?.some(workspace => isSameDirectory(workspace, directory))) {
-      return true
-    }
-
-    if (project.memberDirectories?.some(memberDirectory => isSameDirectory(memberDirectory, directory))) {
-      return true
-    }
-
-    return false
-  })
 }
 
 export function SidePanel({
