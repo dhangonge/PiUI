@@ -263,22 +263,22 @@ try {
     await capture(`${label}-appearance`)
     const appearance = await state()
     assert.equal(appearance.opacity, '1')
-    const pointerAnimations = await evaluate('window.__round3Animations')
-    const panelCount = await evaluate('document.querySelectorAll(\'[role="tabpanel"]\').length')
-    console.log(
-      `${label} diagnostic`,
-      JSON.stringify({
-        panelCount,
-        rows: pointerAnimations.map(row => ({ id: row.id, frames: row.frames, options: row.options })),
-      }),
+    const pointerAnimations = await evaluate(
+      `window.__round3Animations.map(row => ({
+        id: row.id,
+        frames: row.frames,
+        options: row.options,
+        isLivePanel: row.node === document.querySelector('[role="tabpanel"]'),
+      }))`,
     )
-    assert.ok(pointerAnimations.length >= 1, `${label} pointer produces a tab fade`)
-    for (const row of pointerAnimations) assert.equal(row.options.duration, 160, `${label} fade duration`)
+    assert.equal(pointerAnimations.length, 1, `${label} pointer produces exactly one tab fade`)
+    assert.equal(pointerAnimations[0].options.duration, 160, `${label} fade duration`)
     assert.deepEqual(
-      pointerAnimations.at(-1).frames.map(frame => frame.opacity),
+      pointerAnimations[0].frames.map(frame => frame.opacity),
       [0.55, 1],
-      `${label} last fade restarts from 0.55`,
+      `${label} fade starts at 0.55 and reaches opaque`,
     )
+    assert.equal(pointerAnimations[0].isLivePanel, true, `${label} fade target is the live panel`)
 
     await evaluate(`window.__round3Animations=[]; document.querySelector('#settings-tab-appearance').focus()`)
     await key('ArrowLeft', 'ArrowLeft', 37)
