@@ -41,3 +41,39 @@
 ## 执行证据
 
 待实现及集成后填写，不预写通过。
+
+本轮证据分三层，边界各自单列：本地静态检查、远端完整 validate/tauri、以及尚未完成的真机与浏览器观感。
+
+### 1. 本地集成与静态检查
+
+- 集成 11 个提交（G 4 个、A 1 个、F 2 个、H 3 个，H 的 diff 依赖复用 G 的同名提交），另加行数登记同步 1 个。
+- `npm run check:size` 677 文件通过，登记 13 个待拆文件；`DiffViewer.tsx` 1997→1655。`check:docs` OK（SDK 1.4.0、app 0.6.21 五处清单一致）。全仓 `prettier . --check` 通过。
+- TypeScript LSP 对 8 个生产改动文件 0 诊断；对 `DiffViewer.compat.test.tsx` 只剩既有的“可转默认导入”提示，不是错误。
+- 组装顺序按 H 声明的依赖：先 G 的模型抽取与复用，再 H 的兼容测试；A、F 与它们无文件交集。
+
+### 2. 远端完整验证（fork CI，可复现）
+
+本地不做编译。验证方式：把集成分支推到我账号下 `dhangonge/PiUI` 的同名副本，用仓库自带 `.github/workflows/ci.yml` 的 `validate ubuntu` / `validate windows` / `tauri check` 三个 job 跑。分支 `rewrite/round3-integration`，草稿 PR 仅用于触发 `pull_request`；没有触碰上游主干，也没有触发 release 工作流（它只在 tag `v*` 或手动 dispatch 时运行）。
+
+结果（首轮红、修正后全绿）：
+
+| job                                          | 结果 | 关键输出                                                                                                                                                                                               |
+| -------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| validate ubuntu（含 app 覆盖率与两个 smoke） | 通过 | `doc consistency OK`、`file size OK: 677 files`、coverage `17/17`、`27/27`、`28/28` 文件被度量、app `178 files / 1264 tests passed`、`PASS timeline order/expansion smoke`、9 条 `PASS:` 安卓 UI smoke |
+| validate windows                             | 通过 | 同一套 `npm run validate` 全绿                                                                                                                                                                         |
+| tauri check                                  | 通过 | `cargo clippy --all-targets -- -D warnings` + `cargo test --lib`                                                                                                                                       |
+
+同一 CI 通道暴露并修掉的三处问题，都不是第三轮界面代码引入的：
+
+1. **类型错误（本轮引入，真缺陷）**：`DiffViewer.compat.test.tsx` 手写 `ChangeObject` 时只填了 `value`/单个标记，而该版本 `diff` 的 `ChangeObject` 要求 `added`、`removed`、`count` 必填。已改为三字段齐全，断言不变。
+2. **覆盖率门禁在 CI 假失败（既有缺陷）**：`scripts/node-coverage.mjs` 只认 spec 报告器的 `ℹ ` 行前缀，而 Node 22 在非 TTY（CI）下默认用 tap（`# ` 前缀），于是判成“所有文件没被测试加载”。本机 Node 26 默认 spec，所以本地一直看不出来。已显式传 `--test-reporter=spec`，输出版本无关。
+3. **Windows 格式门禁必失败（既有缺陷）**：仓库没有 `.gitattributes`，Windows runner 的 `core.autocrlf=true` 把检出写成 CRLF，`prettier . --check`（`endOfLine` 默认 lf）报 778 个文件。已加 `* text=auto eol=lf`，只影响检出与后续提交的换行归一。
+
+这三处属于 CI 基础设施与测试夹具修正，没有改变产品行为；第 2、3 条在第三轮起点之前就已存在。
+
+### 3. 尚未验证（不预写通过）
+
+- 没有真机证据：IME、系统返回、安全区、玻璃效果降级、完整主题矩阵都未验。
+- 没有针对本轮新动效的浏览器观感/帧率证据：侧栏切换淡出只在 jsdom 里验过属性、时长与取消语义；OpenView/WebView 的实际插值、连续快点是否仍有亮度回跌、`prefers-reduced-motion` 的运行中翻转都未在真实浏览器采样。
+- Diff 只证明了调用次数（一次行级 diff、resize 不重跑行级 diff）与 936 组输入的输出等价，没有帧耗时或真机滚动证据。
+- 覆盖率数字是 CI 上的实测，不等于渲染性能；`1264` 是测试条数，不是速度。
