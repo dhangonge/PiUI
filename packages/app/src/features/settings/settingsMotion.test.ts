@@ -52,6 +52,8 @@ interface FakeAnimation {
   animation: Animation
   cancel: ReturnType<typeof vi.fn>
   finishPlayback: () => void
+  /** 只改状态、不触发 onfinish：模拟「已结束但没走到回调」的边界 */
+  markFinishedSilently: () => void
 }
 
 /**
@@ -79,6 +81,9 @@ function createFakeAnimation(): FakeAnimation {
       fake.playState = 'finished'
       fake.onfinish?.()
     },
+    markFinishedSilently: () => {
+      fake.playState = 'finished'
+    },
   }
 }
 
@@ -104,6 +109,21 @@ function createPanel(): HTMLElement {
   const element = document.createElement('div')
   document.body.appendChild(element)
   return element
+}
+
+/**
+ * 只替身这一个元素的 computed opacity。
+ * React 与 testing-library 自己也会问 getComputedStyle，把整个 window 都换成假值
+ * 会污染它们；jsdom 默认对任何元素都回 '1'，所以「没测量」和「测得 1」必须能区分。
+ */
+function stubComputedOpacity(element: HTMLElement, opacity: string) {
+  const original = window.getComputedStyle.bind(window)
+  const spy = vi
+    .spyOn(window, 'getComputedStyle')
+    .mockImplementation((target, pseudo) =>
+      target === element ? ({ opacity } as CSSStyleDeclaration) : original(target, pseudo),
+    )
+  return { spy, panelReads: () => spy.mock.calls.filter(([target]) => target === element).length }
 }
 
 describe('settings motion spec', () => {
@@ -157,6 +177,7 @@ describe('useSettingsTabFade', () => {
     changeListeners.clear()
     document.body.innerHTML = ''
     window.matchMedia = originalMatchMedia
+    vi.restoreAllMocks()
   })
 
   it('fades the existing panel with the named duration, curve and properties', () => {
@@ -186,6 +207,81 @@ describe('useSettingsTabFade', () => {
     expect(calls).toHaveLength(2)
     expect(calls[0].fake.cancel).toHaveBeenCalledTimes(1)
     expect(calls[1].fake.cancel).not.toHaveBeenCalled()
+  })
+
+  // 反证：中断时如果图省事从规格起点 0.55 重播，这里会拿到 0.55 而不是测得的 0.82
+  it('resumes from the visible opacity instead of dropping back to the spec start', () => {
+    const panel = createPanel()
+    const calls = installAnimate(panel)
+    const computed = stubComputedOpacity(panel, '0.82')
+    const { result } = renderHook(() => useSettingsTabFade({ current: panel }))
+
+    act(() => result.current.flashTabContent())
+    // 首次没有可续接的进度：仍是规格起点，且不测量
+    expect(calls[0].keyframes).toEqual([{ opacity: SETTINGS_TAB_FEEDBACK_FROM_OPACITY }, { opacity: 1 }])
+    expect(computed.panelReads()).toBe(0)
+
+    act(() => result.current.flashTabContent())
+
+    expect(calls[1].keyframes).toEqual([{ opacity: 0.82 }, { opacity: 1 }])
+    expect(calls[1].keyframes[0]).not.toEqual({ opacity: SETTINGS_TAB_FEEDBACK_FROM_OPACITY })
+    // 一次点击最多一次样式读，不轮询
+    expect(computed.panelReads()).toBe(1)
+  })
+
+  it('does not treat a fade that already finished as active', () => {
+    const panel = createPanel()
+    const calls = installAnimate(panel)
+    const computed = stubComputedOpacity(panel, '0.82')
+    const { result } = renderHook(() => useSettingsTabFade({ current: panel }))
+
+    act(() => result.current.flashTabContent())
+    act(() => calls[0].fake.finishPlayback())
+    act(() => result.current.flashTabContent())
+
+    expect(computed.panelReads()).toBe(0)
+    expect(calls[1].keyframes).toEqual([{ opacity: SETTINGS_TAB_FEEDBACK_FROM_OPACITY }, { opacity: 1 }])
+  })
+
+  // onfinish 没走到（例如被外部 finish）也不能把已结束的动画当成还在跑
+  it('refuses to resume from an animation whose state says finished', () => {
+    const panel = createPanel()
+    const calls = installAnimate(panel)
+    const computed = stubComputedOpacity(panel, '0.82')
+    const { result } = renderHook(() => useSettingsTabFade({ current: panel }))
+
+    act(() => result.current.flashTabContent())
+    act(() => calls[0].fake.markFinishedSilently())
+    act(() => result.current.flashTabContent())
+
+    expect(computed.panelReads()).toBe(0)
+    expect(calls[1].keyframes).toEqual([{ opacity: SETTINGS_TAB_FEEDBACK_FROM_OPACITY }, { opacity: 1 }])
+  })
+
+  it('does not resume from a fade that was already cancelled', () => {
+    const panel = createPanel()
+    const calls = installAnimate(panel)
+    const computed = stubComputedOpacity(panel, '0.82')
+    const { result } = renderHook(() => useSettingsTabFade({ current: panel }))
+
+    act(() => result.current.flashTabContent())
+    act(() => result.current.cancelTabFeedback())
+    act(() => result.current.flashTabContent())
+
+    expect(computed.panelReads()).toBe(0)
+    expect(calls[1].keyframes).toEqual([{ opacity: SETTINGS_TAB_FEEDBACK_FROM_OPACITY }, { opacity: 1 }])
+  })
+
+  it('falls back to the spec start when the WebView reports no usable opacity', () => {
+    const panel = createPanel()
+    const calls = installAnimate(panel)
+    stubComputedOpacity(panel, '')
+    const { result } = renderHook(() => useSettingsTabFade({ current: panel }))
+
+    act(() => result.current.flashTabContent())
+    act(() => result.current.flashTabContent())
+
+    expect(calls[1].keyframes).toEqual([{ opacity: SETTINGS_TAB_FEEDBACK_FROM_OPACITY }, { opacity: 1 }])
   })
 
   it('does not keep cancelling an animation that already finished', () => {
@@ -232,15 +328,17 @@ describe('useSettingsTabFade', () => {
   it('cancels a running fade the moment reduced motion turns on', () => {
     const panel = createPanel()
     const calls = installAnimate(panel)
+    const computed = stubComputedOpacity(panel, '0.82')
     const { result } = renderHook(() => useSettingsTabFade({ current: panel }))
 
     act(() => result.current.flashTabContent())
     setReducedMotion(true)
     expect(calls[0].fake.cancel).toHaveBeenCalledTimes(1)
 
-    // 之后的切换不再起动画
+    // 之后的切换不再起动画，也不为「续接」去测量：内容直接显示
     act(() => result.current.flashTabContent())
     expect(calls).toHaveLength(1)
+    expect(computed.panelReads()).toBe(0)
   })
 
   it('cancels the fade on unmount', () => {

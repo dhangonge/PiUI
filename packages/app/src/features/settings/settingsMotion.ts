@@ -49,14 +49,38 @@ export interface SettingsTabFade {
 }
 
 /**
+ * 动画是否还在推进。`finished` / `idle` 都是「已结束或已取消」，
+ * 这两种状态下元素已经是静止态的实色，不能拿它去续接。
+ */
+function isRunning(animation: Animation | null): boolean {
+  if (!animation) return false
+  return animation.playState === 'running' || animation.playState === 'paused'
+}
+
+/**
+ * 读一次当前可见不透明度。
+ * 读不到（老 WebView 返回空串、异常值）时返回 null，由调用方回落到规格起点，
+ * 不把一个不可信的值当成真实进度。
+ */
+function readVisibleOpacity(element: HTMLElement): number | null {
+  const raw = window.getComputedStyle(element).opacity
+  if (typeof raw !== 'string' || raw === '') return null
+  const value = Number.parseFloat(raw)
+  if (!Number.isFinite(value)) return null
+  return Math.min(1, Math.max(0, value))
+}
+
+/**
  * useSettingsTabFade — 设置 tab 内容切换的轻量 opacity 反馈。
  *
  * 约定：
  *   - 只动画既有的 tabpanel 元素，不加布局 wrapper、不留两份页面
  *   - 不延迟 setTab / 滚动 / focus：调用方先改状态，这里只负责视觉
- *   - 快速切换先取消上一条，从半透明重新开始，不排队
- *     （代价是连续快点时亮度会回跌一档；这是「又换了一次」的反馈，不是排队动画）
- *   - 运行中打开「减少动态效果」立刻取消，内容直接显示
+ *   - 中断从当前状态继续：上一条还在跑时先读一次当前可见不透明度，再 cancel，
+ *     从那个值淡回 1（不跌回起点）；已结束 / 已取消的不算 active，回到规格起点
+ *   - 每次点击至多一次样式读，不轮询、不用 rAF 采样
+ *   - 不排队：新的一次直接接管上一条
+ *   - 运行中打开「减少动态效果」立刻取消，内容直接显示（不读值、不起动画）
  *   - 老 WebView 没有 WAAPI 时直接返回，内容照常显示
  *
  * 注意：本 hook 保证的是属性 / 时长 / 取消语义。jsdom 的 WAAPI 替身不产生真实帧，
@@ -84,12 +108,19 @@ export function useSettingsTabFade(panelRef: RefObject<HTMLElement | null>): Set
   const flashTabContent = useCallback(() => {
     const element = panelRef.current
     if (!element) return
-    cancelTabFeedback()
-    if (reducedRef.current) return
-    // 不支持 WAAPI 的 WebView：内容直接显示，不降级成 JS 逐帧
-    if (typeof element.animate !== 'function') return
 
-    const animation = element.animate([{ opacity: SETTINGS_TAB_FEEDBACK_FROM_OPACITY }, { opacity: 1 }], {
+    // 减少动态效果 / 没有 WAAPI：只需要让内容立刻回到实色，不读值不起动画
+    if (reducedRef.current || typeof element.animate !== 'function') {
+      cancelTabFeedback()
+      return
+    }
+
+    // 中断从当前状态继续：先读再 cancel（cancel 会立刻回到静止态，读晚就拿不到进度）。
+    // 只在动画真的还在跑时读，已结束 / 已取消的按规格起点重新开始。
+    const resumeFrom = isRunning(animationRef.current) ? readVisibleOpacity(element) : null
+    cancelTabFeedback()
+
+    const animation = element.animate([{ opacity: resumeFrom ?? SETTINGS_TAB_FEEDBACK_FROM_OPACITY }, { opacity: 1 }], {
       duration: SETTINGS_TAB_FEEDBACK_MS,
       easing: SETTINGS_EASE_OUT,
     })
