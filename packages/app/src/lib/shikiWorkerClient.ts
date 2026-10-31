@@ -124,6 +124,12 @@ function splitTokensIntoLines(tokens: WorkerToken[]): HighlightTokens {
   return lines
 }
 
+type HighlightResult = {
+  response: Extract<WorkerResponse, { type: 'highlight' }>
+  /** 请求结算的这一刻，它是否仍是该 key 的 latest 请求 */
+  isLatest: boolean
+}
+
 async function workerHighlight(params: {
   key: string
   text: string
@@ -131,17 +137,36 @@ async function workerHighlight(params: {
   theme: BundledTheme
   mode: 'tokens' | 'html'
   complete?: boolean
-}): Promise<Extract<WorkerResponse, { type: 'highlight' }>> {
+}): Promise<HighlightResult> {
   await ensureShikiWorkerReady()
 
   const id = nextId++
   const w = getWorker()
+  // 一次性请求（完整 token / html）在 worker 侧不留流状态，客户端标记也用完即弃；
+  // 流式请求的 key 对应 worker 里的 tokenizer，必须由调用方 dispose 释放。
+  const oneShot = params.complete === true || params.mode === 'html'
   latestRequestByKey.set(params.key, id)
 
-  return new Promise<Extract<WorkerResponse, { type: 'highlight' }>>((resolve, reject) => {
+  return new Promise<HighlightResult>((resolve, reject) => {
+    // 终态清理：只有仍是该 key 的 latest 请求才有权释放标记。
+    // 旧请求的完成 / 失败不能抹掉新请求的标记，否则新响应会被误判为 superseded。
+    const releaseIfLatest = (): boolean => {
+      const isLatest = latestRequestByKey.get(params.key) === id
+      if (isLatest && oneShot) latestRequestByKey.delete(params.key)
+      return isLatest
+    }
+
     pendingRequests.set(id, {
-      resolve: resolve as (response: WorkerResponse) => void,
-      reject,
+      resolve: response => {
+        resolve({
+          response: response as Extract<WorkerResponse, { type: 'highlight' }>,
+          isLatest: releaseIfLatest(),
+        })
+      },
+      reject: error => {
+        releaseIfLatest()
+        reject(error)
+      },
     })
     w.postMessage({ type: 'highlight', id, ...params } satisfies WorkerRequest)
   })
@@ -154,12 +179,12 @@ export async function highlightTokensInWorker(params: {
   theme: BundledTheme
   complete?: boolean
 }): Promise<{ id: number; code: string; tokens: HighlightTokens }> {
-  const result = await workerHighlight({ ...params, mode: 'tokens' })
-  if (result.id !== latestRequestByKey.get(params.key)) throw new Error('superseded')
+  const { response, isLatest } = await workerHighlight({ ...params, mode: 'tokens' })
+  if (!isLatest) throw new Error('superseded')
   return {
-    id: result.id,
-    code: result.code,
-    tokens: splitTokensIntoLines([...result.stable, ...result.unstable]),
+    id: response.id,
+    code: response.code,
+    tokens: splitTokensIntoLines([...response.stable, ...response.unstable]),
   }
 }
 
@@ -169,9 +194,9 @@ export async function highlightHtmlInWorker(params: {
   language: string
   theme: BundledTheme
 }): Promise<{ id: number; html: string }> {
-  const result = await workerHighlight({ ...params, mode: 'html', complete: true })
-  if (result.id !== latestRequestByKey.get(params.key)) throw new Error('superseded')
-  return { id: result.id, html: result.html ?? '' }
+  const { response, isLatest } = await workerHighlight({ ...params, mode: 'html', complete: true })
+  if (!isLatest) throw new Error('superseded')
+  return { id: response.id, html: response.html ?? '' }
 }
 
 export function disposeShikiWorkerKey(key: string) {

@@ -17,6 +17,12 @@ import { useInView } from '../hooks/useInView'
 /** Languages that carry no useful information — hide the label */
 const HIDDEN_LANGS = new Set(['text', 'plain', 'txt', 'plaintext'])
 
+/**
+ * 只订阅换行开关：整份主题快照作快照会让字号、预设、自定义 CSS 等无关设置
+ * 也重渲染每个代码块。语法主题由 useSyntaxHighlight 自己的窄订阅负责。
+ */
+const selectCodeWordWrap = () => themeStore.getSnapshot().codeWordWrap
+
 const TokenSpan = memo(
   function TokenSpan({ token }: { token: HighlightTokens[number][number] }) {
     return <span style={token.color ? { color: token.color } : undefined}>{token.content}</span>
@@ -137,7 +143,7 @@ export const CodeBlock = memo(function CodeBlock({
   streamingHighlight = false,
   headerActions,
 }: CodeBlockProps) {
-  const { codeWordWrap } = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot)
+  const codeWordWrap = useSyncExternalStore(themeStore.subscribe, selectCodeWordWrap)
   const { preferTouchUi } = useInputCapabilities()
   const resolvedWordWrap = wordwrap ?? codeWordWrap
   const isReasoning = variant === 'reasoning'
