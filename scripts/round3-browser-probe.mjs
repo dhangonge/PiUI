@@ -236,16 +236,17 @@ try {
     await evaluate(`window.dispatchEvent(new CustomEvent('titlebar:open-settings'))`)
     await waitFor(() => evaluate('!!document.querySelector("#settings-tab-appearance")'), `${label} settings mount`)
     await settle()
+    // 装一次包装器：同一 document 内重复安装会嵌套，把一次调用记成多条。
     await evaluate(`(() => {
       window.__round3Animations = []
+      if (window.__round3ProbeInstalled) return
+      window.__round3ProbeInstalled = true
       const original = Element.prototype.animate
       Element.prototype.animate = function (frames, options) {
         const animation = original.call(this, frames, options)
         if (this.getAttribute('role') === 'tabpanel') {
-          const row = { id: this.id, frames, options, stack: (new Error().stack || '').split(String.fromCharCode(10)).slice(1, 6), cancelled: false, finished: false }
+          const row = { node: this, id: this.id, frames, options }
           window.__round3Animations.push(row)
-          animation.addEventListener('cancel', () => (row.cancelled = true))
-          animation.addEventListener('finish', () => (row.finished = true))
         }
         return animation
       }
@@ -323,7 +324,7 @@ try {
       height,
       settledDialog,
       appearance,
-      pointerAnimations: pointerAnimations.map(row => ({ id: row.id, frames: row.frames, options: row.options })),
+      pointerAnimations,
       keyboardState,
       keyboardAnimations,
       reducedDialog,
