@@ -245,8 +245,10 @@ try {
       Element.prototype.animate = function (frames, options) {
         const animation = original.call(this, frames, options)
         if (this.getAttribute('role') === 'tabpanel') {
-          const row = { node: this, id: this.id, frames, options }
+          const row = { node: this, id: this.id, frames, options, animation, cancelled: false, finished: false }
           window.__round3Animations.push(row)
+          animation.addEventListener('cancel', () => (row.cancelled = true))
+          animation.addEventListener('finish', () => (row.finished = true))
         }
         return animation
       }
@@ -289,6 +291,40 @@ try {
     const keyboardAnimations = await evaluate('window.__round3Animations')
     assert.deepEqual(keyboardAnimations, [], `${label} keyboard switch must not animate`)
 
+    // 中断续接：把在跑的反馈暂停在 80/160ms（曲线中点附近，约 0.97 透明），
+    // 再从页面内派发一次带 detail 的真实点击语义，检查第二次动画的起点
+    // 等于当前可见透明度而不是规格起点 0.55（即不出现亮度回跌）。
+    await evaluate('window.__round3Animations=[]')
+    await pointer('#settings-tab-appearance')
+    await waitFor(() => evaluate('!!document.querySelector("#settings-panel-appearance")'), `${label} fade start`)
+    const interrupt = await evaluate(`(() => {
+      const row = window.__round3Animations.at(-1)
+      row.animation.pause()
+      row.animation.currentTime = 80
+      const panel = document.querySelector('[role="tabpanel"]')
+      const visible = getComputedStyle(panel).opacity
+      panel
+        .ownerDocument
+        .querySelector('#settings-tab-workspace')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
+      return { visible, count: window.__round3Animations.length }
+    })()`)
+    await waitFor(() => evaluate('!!document.querySelector("#settings-panel-workspace")'), `${label} resume target tab`)
+    await settle(300)
+    const interruptRows = await evaluate(
+      `window.__round3Animations.map(row => ({ frames: row.frames, options: row.options, cancelled: row.cancelled }))`,
+    )
+    assert.equal(interruptRows.length, 2, `${label} interrupt produces a second animation`)
+    assert.equal(interruptRows[0].cancelled, true, `${label} interrupted animation is cancelled`)
+    assert.ok(
+      interruptRows[1].frames[0].opacity > 0.55,
+      `${label} resumed fade must not restart from 0.55 (got ${interruptRows[1].frames[0].opacity})`,
+    )
+    assert.ok(
+      Math.abs(interruptRows[1].frames[0].opacity - Number(interrupt.visible)) < 0.02,
+      `${label} resumed fade starts at the visible opacity (${interrupt.visible} vs ${interruptRows[1].frames[0].opacity})`,
+    )
+
     await call('Emulation.setEmulatedMedia', {
       features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
     })
@@ -327,6 +363,7 @@ try {
       pointerAnimations,
       keyboardState,
       keyboardAnimations,
+      interrupt: { visible: interrupt.visible, rows: interruptRows },
       reducedDialog,
       reducedState,
       reducedAnimations,
