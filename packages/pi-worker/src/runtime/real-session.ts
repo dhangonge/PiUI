@@ -1,14 +1,11 @@
 import { constants, copyFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs'
-import { realpath } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type {
   AgentSessionRuntime,
   CreateAgentSessionRuntimeFactory,
   EventBus,
-  LoadExtensionsResult,
   ModelRuntime,
-  ProjectTrustContext,
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
 import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot, SessionActivityStatus } from '@piui/protocol'
@@ -21,30 +18,44 @@ import {
   setSubagentParentAnchor,
 } from './subagent-sessions.js'
 import { configuredSessionDir, normalizeCwd, resolveUserPath } from './catalog.js'
-import { ExtensionUiBridge } from './extension-ui-bridge.js'
+import { forwardChildSessionEvents } from './child-session-events.js'
+import { createDefaultRuntime } from './default-runtime.js'
 import { extensionActionError } from './extension-diagnostics.js'
+import { extensionBindings, type ExtensionHostActions } from './extension-host.js'
+import { ExtensionUiBridge } from './extension-ui-bridge.js'
+import {
+  nextLiveMessageCheckpoint,
+  provisionalLiveMessageCheckpoint,
+  shouldClearPersistedLiveMessage,
+  type LiveMessageCheckpoint,
+} from './live-message.js'
+import { assertSessionFileInside, pathKey, stripDuplicatePartial, toJson, toJsonObject } from './native-json.js'
 import {
   entriesPageFromEntries,
   imageAttachmentFromEntry,
   sessionHeadFromParts,
   type BranchCheckpoint,
   type EntriesPage,
-  type LiveMessage,
   type SessionHead,
 } from './pagination.js'
+import { verifySdkSessionContract } from './sdk-contract.js'
+import {
+  activityStatus,
+  initialSessionShadow,
+  resetSessionShadow,
+  trackSessionShadow,
+  withBranchSummaryFinished,
+  withBranchSummaryRunning,
+  type SessionShadow,
+} from './session-shadow.js'
 import type { PiEventMeta, SessionRuntime, Unsubscribe } from '../runtime.js'
 
-export interface ExtensionHostActions {
-  reserveReplacement(request: {
-    reservationId: string
-    sourceSessionId: string
-    operation: 'new' | 'fork' | 'switch'
-    targetSessionFile?: string
-  }): Promise<void>
-  commitReplacement(reservationId: string, replacement: JsonObject): Promise<void>
-  abortReplacement(reservationId: string): Promise<void>
-  requestShutdown(sessionId: string): void
-}
+// 契约门禁、子代理公告、JSON 归一与扩展宿主动作下沉到独立模块，
+// 这里保持原有公开出口不变（其余包按这些名字引用）。
+export { verifySdkSessionContract } from './sdk-contract.js'
+export { forwardChildSessionEvents, toChildSessionEvent, type ChildSessionPhase } from './child-session-events.js'
+export { stripDuplicatePartial } from './native-json.js'
+export type { ExtensionHostActions } from './extension-host.js'
 
 export interface RealPiSessionOpenOptions {
   agentDir?: string
@@ -53,271 +64,6 @@ export interface RealPiSessionOpenOptions {
   hostActions?: ExtensionHostActions
   /** 进程级共享 ModelRuntime：多个会话 runtime 共享同一个模型/认证实例 */
   modelRuntime?: ModelRuntime
-}
-
-interface LiveMessageCheckpoint {
-  value: LiveMessage
-  messageIdentity: unknown
-  entriesBeforeEnd: number
-  provisional: boolean
-}
-
-function unsupportedExtensionHostAction(action: string): never {
-  throw Object.assign(new Error(`Extension command context ${action} requires a coordinated PiUI host`), {
-    code: 'CAPABILITY_DISABLED',
-  })
-}
-
-function extensionBindings(
-  bridge: ExtensionUiBridge,
-  runtime: AgentSessionRuntime,
-  navigateTree: RealPiSession['navigateTree'],
-  reload: RealPiSession['reload'],
-  hostActions?: ExtensionHostActions,
-) {
-  const reportFailure = bridge.captureFailureReporter()
-  return {
-    mode: 'rpc' as const,
-    uiContext: bridge.context,
-    commandContextActions: {
-      waitForIdle: () => runtime.session.waitForIdle(),
-      newSession: (options?: Parameters<AgentSessionRuntime['newSession']>[0]) =>
-        runExtensionReplacement(runtime, hostActions, 'new', undefined, () => runtime.newSession(options)),
-      fork: (entryId: string, options?: Parameters<AgentSessionRuntime['fork']>[1]) =>
-        runExtensionReplacement(runtime, hostActions, 'fork', undefined, () => runtime.fork(entryId, options)),
-      navigateTree: async (
-        entryId: string,
-        options?: {
-          summarize?: boolean
-          customInstructions?: string
-          replaceInstructions?: boolean
-          label?: string
-        },
-      ) => {
-        const result = await navigateTree(entryId, options)
-        return { cancelled: result.cancelled === true }
-      },
-      switchSession: (sessionPath: string, options?: Parameters<AgentSessionRuntime['switchSession']>[1]) =>
-        runExtensionReplacement(runtime, hostActions, 'switch', sessionPath, () =>
-          runtime.switchSession(sessionPath, options),
-        ),
-      reload,
-    },
-    abortHandler: () => {
-      void runtime.session.abort().catch(() => reportFailure('runtime', 'abort'))
-    },
-    shutdownHandler: () =>
-      hostActions
-        ? hostActions.requestShutdown(runtime.session.sessionManager.getSessionId())
-        : unsupportedExtensionHostAction('shutdown'),
-  }
-}
-
-async function runExtensionReplacement(
-  runtime: AgentSessionRuntime,
-  hostActions: ExtensionHostActions | undefined,
-  operation: 'new' | 'fork' | 'switch',
-  targetSessionFile: string | undefined,
-  replace: () => Promise<{ cancelled: boolean }>,
-): Promise<{ cancelled: boolean }> {
-  if (!hostActions) return unsupportedExtensionHostAction(operation)
-  const sourceSessionId = runtime.session.sessionManager.getSessionId()
-  if (operation === 'switch' && targetSessionFile) {
-    await assertSessionFileInside(runtime.session.sessionManager.getSessionDir(), resolveUserPath(targetSessionFile))
-  }
-  const reservationId = randomUUID()
-  await hostActions.reserveReplacement({ reservationId, sourceSessionId, operation, targetSessionFile })
-  try {
-    const result = await replace()
-    if (result.cancelled) {
-      await hostActions.abortReplacement(reservationId)
-      return result
-    }
-    const replacement: JsonObject = {
-      operation,
-      sourceSessionId,
-      targetSessionId: runtime.session.sessionManager.getSessionId(),
-      targetSessionFile: runtime.session.sessionManager.getSessionFile() ?? null,
-      targetCwd: runtime.session.sessionManager.getCwd(),
-      cancelled: false,
-    }
-    await hostActions.commitReplacement(reservationId, replacement)
-    return result
-  } catch (error) {
-    await hostActions.abortReplacement(reservationId).catch(() => undefined)
-    throw error
-  }
-}
-
-/**
- * 会话实例契约门禁：PiUI 委托到的 Pi SDK 会话/运行时方法必须存在。
- * 按 SDK 版本缓存（同版本只验一次）；缺方法 → PI_SDK_INCOMPATIBLE 响亮失败，
- * 在开会话时暴露详情，而不是等用户发消息才在运行时炸。
- */
-let verifiedSessionContractSdkVersion: string | undefined
-
-export function verifySdkSessionContract(runtime: AgentSessionRuntime, version = getLoadedSdk().version): void {
-  if (verifiedSessionContractSdkVersion === version) return
-  const missing: string[] = []
-  const session = runtime.session as unknown as Record<string, unknown>
-  for (const method of [
-    'subscribe',
-    'bindExtensions',
-    'waitForIdle',
-    'prompt',
-    'steer',
-    'followUp',
-    'sendUserMessage',
-    'clearQueue',
-    'abort',
-    'setSessionName',
-    'cycleModel',
-    'setScopedModels',
-    'setThinkingLevel',
-    'cycleThinkingLevel',
-    'setSteeringMode',
-    'setFollowUpMode',
-    'compact',
-    'abortBranchSummary',
-    'abortRetry',
-    'setAutoCompactionEnabled',
-    'setAutoRetryEnabled',
-    'recordBashResult',
-    'executeBash',
-    'abortBash',
-    'getAllTools',
-    'setActiveToolsByName',
-    'navigateTree',
-    'sendCustomMessage',
-    'exportToHtml',
-    'exportToJsonl',
-    'reload',
-  ] as const) {
-    if (typeof session[method] !== 'function') missing.push(`session.${method}`)
-  }
-  for (const method of [
-    'newSession',
-    'switchSession',
-    'fork',
-    'importFromJsonl',
-    'dispose',
-    'setBeforeSessionInvalidate',
-    'setRebindSession',
-  ] as const) {
-    if (typeof (runtime as unknown as Record<string, unknown>)[method] !== 'function') missing.push(`runtime.${method}`)
-  }
-  const manager = runtime.session.sessionManager as unknown as Record<string, unknown> | undefined
-  for (const method of [
-    'getSessionId',
-    'getSessionFile',
-    'getCwd',
-    'getEntries',
-    'getTree',
-    'getEntry',
-    'getSessionName',
-    'getSessionDir',
-    'appendLabelChange',
-    'appendCustomEntry',
-    'getLeafId',
-  ] as const) {
-    if (!manager || typeof manager[method] !== 'function') missing.push(`sessionManager.${method}`)
-  }
-  const loader = runtime.session.resourceLoader as unknown as Record<string, unknown> | undefined
-  for (const method of ['getThemes', 'getSkills', 'getExtensions'] as const) {
-    if (!loader || typeof loader[method] !== 'function') missing.push(`resourceLoader.${method}`)
-  }
-  if (missing.length > 0) {
-    throw Object.assign(new Error(`Pi SDK ${version} session contract is incompatible:\n- ${missing.join('\n- ')}`), {
-      code: 'PI_SDK_INCOMPATIBLE',
-    })
-  }
-  verifiedSessionContractSdkVersion = version
-}
-
-/**
- * 子代理会话公告的三个约定频道（顺序即生命周期），payload 由插件定义：
- * `{ sessionId, parentSessionId? }`。改名或加字段都会破坏
- * subagent-integration 约定。
- */
-type ChildSessionPhase = 'created' | 'bound' | 'disposed'
-
-const CHILD_SESSION_CHANNELS = [
-  ['subagents:child:session-created', 'created'],
-  ['subagents:child:bound', 'bound'],
-  ['subagents:child:disposed', 'disposed'],
-] as const
-
-/**
- * 把插件的子代理会话公告规整成宿主可用的事件。
- *
- * 约定不可改：频道名与字段由 subagent-integration 规定，payload 只有
- * { sessionId, parentSessionId? }。没有 sessionId 的公告直接丢弃（无法定位）。
- */
-export function toChildSessionEvent(payload: unknown, phase: ChildSessionPhase): JsonObject | undefined {
-  const record = isJsonObject(payload) ? payload : undefined
-  const sessionId = typeof record?.sessionId === 'string' ? record.sessionId : undefined
-  if (!sessionId) return undefined
-  return {
-    phase,
-    sessionId,
-    parentSessionId: typeof record?.parentSessionId === 'string' ? record.parentSessionId : null,
-  }
-}
-
-/** 订阅三个生命周期频道；返回全部退订函数 */
-export function forwardChildSessionEvents(bus: EventBus, emit: (event: JsonObject) => void): Array<() => void> {
-  return CHILD_SESSION_CHANNELS.map(([channel, phase]) =>
-    bus.on(channel, payload => {
-      const event = toChildSessionEvent(payload, phase)
-      if (event) emit(event)
-    }),
-  )
-}
-
-const createDefaultRuntime =
-  (modelRuntime?: ModelRuntime, eventBus?: EventBus): CreateAgentSessionRuntimeFactory =>
-  async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
-    const { SettingsManager, createAgentSessionServices, createAgentSessionFromServices } = getLoadedSdk().sdk
-    const globalSettings = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
-    const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
-    const services = await createAgentSessionServices({
-      cwd,
-      agentDir,
-      settingsManager,
-      // 共享 ModelRuntime：同一进程内所有会话复用同一个模型/认证实例
-      // （SDK 原生支持，见 createAgentSessionServices 的 modelRuntime 参数）。
-      modelRuntime,
-      // 插件通过 pi.events 广播（子代理公告走这条总线）。显式传入可以让
-      // worker 自己也订阅，否则每个 resource loader 会各建一条私有总线。
-      ...(eventBus ? { resourceLoaderOptions: { eventBus } } : {}),
-      resourceLoaderReloadOptions: {
-        resolveProjectTrust: async ({ extensionsResult }) =>
-          resolveProjectTrustFromExtensions(cwd, agentDir, extensionsResult, globalSettings.getDefaultProjectTrust()),
-      },
-    })
-    return {
-      ...(await createAgentSessionFromServices({
-        services,
-        sessionManager,
-        sessionStartEvent,
-      })),
-      services,
-      diagnostics: services.diagnostics,
-    }
-  }
-
-function projectTrustContextForRpc(cwd: string): ProjectTrustContext {
-  return {
-    cwd,
-    mode: 'rpc',
-    hasUI: false,
-    ui: {
-      select: async () => undefined,
-      confirm: async () => false,
-      input: async () => undefined,
-      notify: () => {},
-    },
-  }
 }
 
 export class RealPiSession implements SessionRuntime {
@@ -337,9 +83,7 @@ export class RealPiSession implements SessionRuntime {
   private eventEpoch = randomUUID()
   private eventSequence = 0
   private liveMessage?: LiveMessageCheckpoint
-  private isCompactingFlag = false
-  private retryShadow: JsonObject = { phase: 'idle' }
-  private compactionShadow: JsonObject = { autoEnabled: true, operation: { type: 'none' } }
+  private shadow: SessionShadow = initialSessionShadow()
 
   private constructor(
     runtime: AgentSessionRuntime,
@@ -483,150 +227,42 @@ export class RealPiSession implements SessionRuntime {
    */
   private emitActivityIfChanged(): void {
     const session = this.runtime.session
-    const streaming = Boolean(session.isStreaming)
-    const retrying = Boolean(session.isRetrying)
-    const compacting = Boolean(session.isCompacting) || this.isCompactingFlag
+    const flags = {
+      streaming: Boolean(session.isStreaming),
+      retrying: Boolean(session.isRetrying),
+      compacting: Boolean(session.isCompacting) || this.shadow.isCompacting,
+    }
     if (
-      streaming === this.lastActivity.streaming &&
-      retrying === this.lastActivity.retrying &&
-      compacting === this.lastActivity.compacting
+      flags.streaming === this.lastActivity.streaming &&
+      flags.retrying === this.lastActivity.retrying &&
+      flags.compacting === this.lastActivity.compacting
     )
       return
-    this.lastActivity = { streaming, retrying, compacting }
+    this.lastActivity = flags
 
-    let status: SessionActivityStatus | null = null
-    if (retrying) {
-      const nextAtIso = typeof this.retryShadow.nextAttemptAt === 'string' ? this.retryShadow.nextAttemptAt : undefined
-      const nextAt = nextAtIso ? Date.parse(nextAtIso) : 0
-      status = {
-        type: 'retry',
-        attempt:
-          typeof this.retryShadow.attempt === 'number' ? this.retryShadow.attempt : Number(session.retryAttempt ?? 1),
-        message: typeof this.retryShadow.errorMessage === 'string' ? this.retryShadow.errorMessage : '',
-        next: Number.isFinite(nextAt) ? nextAt : 0,
-      }
-    } else if (streaming) {
-      status = { type: 'busy' }
-    } else if (compacting) {
-      // 压缩中没有 LLM 流，但会话确实在干活——让宿主把它标为工作中
-      status = { type: 'compacting' }
-    }
+    const status = activityStatus(flags, this.shadow, session.retryAttempt)
     for (const listener of this.activityListeners) listener(status)
   }
 
   private lastActivity = { streaming: false, retrying: false, compacting: false }
 
+  /** 每帧把原生事件累积进影子状态（自动压缩/重试/压缩操作的可读视图） */
   private trackShadowState(event: { type: string; [key: string]: unknown }): void {
     const session = this.runtime.session
-    if (event.type === 'compaction_start') {
-      this.isCompactingFlag = true
-      this.compactionShadow = {
-        autoEnabled: session.autoCompactionEnabled,
-        operation: {
-          type: 'compaction',
-          phase: 'running',
-          reason: toJson(event.reason) ?? null,
-        },
-        lastAborted: null,
-        lastError: null,
-        lastNotice: null,
-      }
-    } else if (event.type === 'compaction_end') {
-      this.isCompactingFlag = false
-      this.compactionShadow = {
-        ...this.compactionShadow,
-        autoEnabled: session.autoCompactionEnabled,
-        operation: { type: 'none' },
-        lastResult: toJson(event.result) ?? this.compactionShadow.lastResult ?? null,
-        lastAborted: Boolean(event.aborted),
-        lastError: toJson(event.errorMessage) ?? null,
-      }
-    } else if (event.type === 'auto_retry_start') {
-      this.retryShadow = {
-        phase: 'waiting',
-        autoEnabled: session.autoRetryEnabled,
-        attempt: Number(event.attempt),
-        maxAttempts: Number(event.maxAttempts),
-        delayMs: Number(event.delayMs),
-        nextAttemptAt: new Date(Date.now() + Number(event.delayMs)).toISOString(),
-        errorMessage: toJson(event.errorMessage) ?? null,
-      }
-    } else if (event.type === 'agent_start' && this.retryShadow.phase === 'waiting') {
-      this.retryShadow = {
-        phase: 'running',
-        autoEnabled: session.autoRetryEnabled,
-        attempt: this.retryShadow.attempt ?? 0,
-        maxAttempts: this.retryShadow.maxAttempts ?? 0,
-      }
-    } else if (event.type === 'agent_start' && this.retryShadow.phase === 'finished') {
-      this.retryShadow = { phase: 'idle', autoEnabled: session.autoRetryEnabled }
-    } else if (event.type === 'auto_retry_end') {
-      this.retryShadow = {
-        phase: 'finished',
-        autoEnabled: session.autoRetryEnabled,
-        success: Boolean(event.success),
-        attempt: Number(event.attempt),
-        finalError: toJson(event.finalError) ?? null,
-      }
-    } else if (event.type === 'summarization_retry_scheduled') {
-      const operation = isJsonObject(this.compactionShadow.operation) ? this.compactionShadow.operation : undefined
-      if (operation && operation.type !== 'none') {
-        this.compactionShadow = {
-          ...this.compactionShadow,
-          operation: {
-            ...operation,
-            phase: 'retrying',
-            attempt: Number(event.attempt),
-            maxAttempts: Number(event.maxAttempts),
-            delayMs: Number(event.delayMs),
-            errorMessage: toJson(event.errorMessage) ?? null,
-          },
-        }
-      }
-    } else if (event.type === 'summarization_retry_attempt_start') {
-      const operation = isJsonObject(this.compactionShadow.operation) ? this.compactionShadow.operation : undefined
-      if (operation && operation.type !== 'none') {
-        this.compactionShadow = {
-          ...this.compactionShadow,
-          operation: { ...operation, phase: 'running' },
-        }
-      }
-    }
+    this.shadow = trackSessionShadow(this.shadow, event, {
+      autoCompactionEnabled: session.autoCompactionEnabled,
+      autoRetryEnabled: session.autoRetryEnabled,
+    })
   }
 
   private captureEvent(event: { type: string; message?: unknown }, nativeEvent: JsonObject): PiEventMeta {
     const position = { epoch: this.eventEpoch, sequence: ++this.eventSequence }
-    const nativeMessage = isJsonObject(nativeEvent.message) ? nativeEvent.message : undefined
-    const nativeRole = nativeMessage?.role
-    const current = this.liveMessage
-    const trackedMessage = nativeRole === 'user' || nativeRole === 'assistant' || nativeRole === 'toolResult'
-    if (
-      trackedMessage &&
-      (event.type === 'message_start' || event.type === 'message_update' || event.type === 'message_end')
-    ) {
-      const isStart = event.type === 'message_start'
-      const currentMessage = current && isJsonObject(current.value.message) ? current.value.message : undefined
-      const currentRole = currentMessage?.role
-      const reusedCheckpoint =
-        current &&
-        currentRole === nativeRole &&
-        current.value.phase === 'streaming' &&
-        (current.provisional || !isStart)
-      this.liveMessage = {
-        value: {
-          id: reusedCheckpoint ? current.value.id : randomUUID(),
-          revision: reusedCheckpoint ? current.value.revision + 1 : 1,
-          phase: event.type === 'message_end' ? 'persisting' : 'streaming',
-          message: nativeMessage ?? null,
-        },
-        messageIdentity: event.message,
-        entriesBeforeEnd:
-          event.type === 'message_end'
-            ? this.runtime.session.sessionManager.getEntries().length
-            : (current?.entriesBeforeEnd ?? this.runtime.session.sessionManager.getEntries().length),
-        provisional: false,
-      }
-    }
+    this.liveMessage = nextLiveMessageCheckpoint(
+      this.liveMessage,
+      event,
+      nativeEvent,
+      this.runtime.session.sessionManager.getEntries().length,
+    )
     return {
       ...position,
       liveMessage: this.liveMessage
@@ -635,44 +271,20 @@ export class RealPiSession implements SessionRuntime {
     }
   }
 
+  /** 采样会话同步状态里的 streamingMessage（扩展拦下 message_start 时的兜底） */
   private syncLiveMessageFromAgentState(): void {
-    const messageIdentity = this.runtime.session.agent.state.streamingMessage
-    const message = toJson(messageIdentity)
-    const role = isJsonObject(message) ? message.role : undefined
-    if (
-      !messageIdentity ||
-      !isJsonObject(message) ||
-      (role !== 'user' && role !== 'assistant' && role !== 'toolResult')
+    this.liveMessage = provisionalLiveMessageCheckpoint(
+      this.liveMessage,
+      this.runtime.session.agent.state.streamingMessage,
+      this.runtime.session.sessionManager.getEntries().length,
     )
-      return
-    const current = this.liveMessage
-    if (current?.value.phase === 'persisting') return
-    const currentMessage = current && isJsonObject(current.value.message) ? current.value.message : undefined
-    const currentRole = currentMessage?.role
-    const reusedCheckpoint =
-      current && currentRole === role && current.value.phase === 'streaming' ? current : undefined
-    if (reusedCheckpoint && JSON.stringify(reusedCheckpoint.value.message) === JSON.stringify(message)) return
-    this.liveMessage = {
-      value: {
-        id: reusedCheckpoint?.value.id ?? randomUUID(),
-        revision: reusedCheckpoint ? reusedCheckpoint.value.revision + 1 : 1,
-        phase: 'streaming',
-        message,
-      },
-      messageIdentity,
-      entriesBeforeEnd: this.runtime.session.sessionManager.getEntries().length,
-      provisional: true,
-    }
   }
 
   private clearPersistedLiveMessage(): void {
     const checkpoint = this.liveMessage
-    if (!checkpoint || checkpoint.value.phase !== 'persisting') return
-    const persisted = this.runtime.session.sessionManager
-      .getEntries()
-      .slice(checkpoint.entriesBeforeEnd)
-      .some(entry => entry.type === 'message' && entry.message === checkpoint.messageIdentity)
-    if (persisted && this.liveMessage?.value.id === checkpoint.value.id) this.liveMessage = undefined
+    if (!checkpoint) return
+    if (!shouldClearPersistedLiveMessage(checkpoint, this.runtime.session.sessionManager.getEntries())) return
+    if (this.liveMessage?.value.id === checkpoint.value.id) this.liveMessage = undefined
   }
 
   private detachSessionSubscriptions(): void {
@@ -683,12 +295,10 @@ export class RealPiSession implements SessionRuntime {
   }
 
   private resetSessionShadowState(): void {
-    this.isCompactingFlag = false
-    this.retryShadow = { phase: 'idle', autoEnabled: this.runtime.session.autoRetryEnabled }
-    this.compactionShadow = {
-      autoEnabled: this.runtime.session.autoCompactionEnabled,
-      operation: { type: 'none' },
-    }
+    this.shadow = resetSessionShadow({
+      autoCompactionEnabled: this.runtime.session.autoCompactionEnabled,
+      autoRetryEnabled: this.runtime.session.autoRetryEnabled,
+    })
     this.eventEpoch = randomUUID()
     this.eventSequence = 0
     this.liveMessage = undefined
@@ -874,7 +484,7 @@ export class RealPiSession implements SessionRuntime {
       model: toJson(session.model) ?? null,
       thinkingLevel: String(session.thinkingLevel ?? 'off'),
       isStreaming: Boolean(session.isStreaming),
-      isCompacting: this.isCompactingFlag || Boolean(session.isCompacting),
+      isCompacting: this.shadow.isCompacting || Boolean(session.isCompacting),
       steeringMode: String(session.steeringMode),
       followUpMode: String(session.followUpMode),
       autoCompactionEnabled: Boolean(session.autoCompactionEnabled),
@@ -907,8 +517,8 @@ export class RealPiSession implements SessionRuntime {
       scopedModels: toJson(session.scopedModels) ?? [],
       contextUsage: toJson(contextUsage) ?? null,
       sessionStats: toJson(stats) ?? null,
-      retry: this.retryShadow,
-      compaction: this.compactionShadow,
+      retry: this.shadow.retry,
+      compaction: this.shadow.compaction,
       head: this.getHead(),
     }) as JsonObject
   }
@@ -1334,21 +944,12 @@ export class RealPiSession implements SessionRuntime {
       label?: string
     } = {},
   ): Promise<JsonObject> {
-    if (options.summarize) {
-      this.isCompactingFlag = true
-      this.compactionShadow = {
-        ...this.compactionShadow,
-        operation: { type: 'branchSummary', phase: 'running', targetEntryId: entryId },
-      }
-    }
+    if (options.summarize) this.shadow = withBranchSummaryRunning(this.shadow, entryId)
     let result: Awaited<ReturnType<AgentSessionRuntime['session']['navigateTree']>>
     try {
       result = await this.runtime.session.navigateTree(entryId, options)
     } finally {
-      if (options.summarize) {
-        this.isCompactingFlag = false
-        this.compactionShadow = { ...this.compactionShadow, operation: { type: 'none' } }
-      }
+      if (options.summarize) this.shadow = withBranchSummaryFinished(this.shadow)
     }
     if (!result.cancelled) this.emitHeadIfChanged()
     return {
@@ -1429,82 +1030,4 @@ export class RealPiSession implements SessionRuntime {
     this.resourceListeners.clear()
     await this.runtime.dispose()
   }
-}
-
-/**
- * message_update 帧里 `message` 和 `assistantMessageEvent.partial` 是同一份累积
- * 消息的两个副本（客户端只读 `message`），出站前删掉副本，单帧字节量约减半。
- * 只对 JSON 往返后的副本生效——原始 SDK 对象不能改。
- */
-export function stripDuplicatePartial(nativeEvent: JsonObject): void {
-  if (nativeEvent.type !== 'message_update') return
-  const assistantEvent = nativeEvent.assistantMessageEvent
-  if (isJsonObject(assistantEvent)) delete assistantEvent.partial
-}
-
-function toJson(value: unknown): JsonValue | undefined {
-  if (value === undefined) return undefined
-  return JSON.parse(
-    JSON.stringify(value, (_key, item) => {
-      if (typeof item === 'bigint') return item.toString()
-      if (typeof item === 'function' || typeof item === 'symbol') return undefined
-      if (item instanceof Error) return { name: item.name, message: item.message, stack: item.stack }
-      return item
-    }),
-  ) as JsonValue
-}
-
-function toJsonObject(value: unknown): JsonObject {
-  const json = toJson(value)
-  if (!isJsonObject(json)) {
-    throw Object.assign(new Error('Pi native data is not a JSON object'), { code: 'NATIVE_DATA_NOT_JSON' })
-  }
-  return json
-}
-
-function pathKey(value: string): string {
-  const resolved = path.resolve(value)
-  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
-}
-
-async function assertSessionFileInside(rootPath: string, sessionFile: string): Promise<void> {
-  const root = await realpath(path.resolve(rootPath))
-  const target = await realpath(path.resolve(sessionFile))
-  const rootKey = process.platform === 'win32' ? root.toLowerCase() : root
-  const targetKey = process.platform === 'win32' ? target.toLowerCase() : target
-  if (targetKey !== rootKey && !targetKey.startsWith(rootKey + path.sep)) {
-    throw Object.assign(new Error('Pi session file is outside the session directory'), {
-      code: 'PATH_OUTSIDE_WORKSPACE',
-    })
-  }
-}
-
-async function resolveProjectTrustFromExtensions(
-  cwd: string,
-  agentDir: string,
-  extensionsResult: LoadExtensionsResult,
-  defaultDecision: 'always' | 'never' | 'ask',
-): Promise<boolean> {
-  const { ProjectTrustStore, hasTrustRequiringProjectResources } = getLoadedSdk().sdk
-  if (!hasTrustRequiringProjectResources(cwd)) return true
-
-  const trustStore = new ProjectTrustStore(agentDir)
-  const context = projectTrustContextForRpc(cwd)
-  for (const extension of extensionsResult.extensions) {
-    const handlers = extension.handlers.get('project_trust') ?? []
-    for (const handler of handlers) {
-      const result = (await handler({ type: 'project_trust', cwd }, context)) as {
-        trusted: 'yes' | 'no' | 'undecided'
-        remember?: boolean
-      }
-      if (result.trusted === 'undecided') continue
-      const trusted = result.trusted === 'yes'
-      if (result.remember === true) trustStore.set(cwd, trusted)
-      return trusted
-    }
-  }
-
-  const stored = trustStore.get(cwd)
-  if (stored !== null) return stored
-  return defaultDecision === 'always'
 }
