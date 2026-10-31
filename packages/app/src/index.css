@@ -1319,18 +1319,25 @@ body {
   display: none;
 }
 
+/* 卡片必须自成一个合成层。
+ * 它和输入区在同一个由 [data-composer-dock] transform 建立的层里：
+ * 那一层因为玻璃面板/胶囊淡入而重绘时，Android WebView 会把卡片的底色与边框
+ * 丢一帧，卡片文字仍然叠在聊天正文上（真机 WebView 155 上稳定复现）。
+ * translateZ(0) 让卡片独立成层后，点击、滚动都不再出现该丢帧；
+ * contain:paint 和关闭 backdrop-filter 都不能消除，所以不是模糊或遮罩问题。 */
 .todo-widget {
+  transform: translateZ(0);
   animation: todo-widget-enter 180ms ease-out;
 }
 
 @keyframes todo-widget-enter {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translate3d(0, 8px, 0);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
   }
 }
 
