@@ -2,18 +2,16 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { JsonObject, JsonValue, ToolDescriptor } from '@piui/protocol'
 import type { SessionEntry } from '../pi/domain'
-import {
-  CheckIcon,
-  CloseIcon,
-  GitBranchIcon,
-  PencilIcon,
-  ReturnIcon,
-  StopIcon,
-  TrashIcon,
-  UploadIcon,
-} from './Icons'
+import { CheckIcon, CloseIcon, GitBranchIcon, PencilIcon, ReturnIcon, StopIcon, TrashIcon, UploadIcon } from './Icons'
 import { IconButton } from './ui/IconButton'
-import { SegmentedControl, SettingField, SettingRow, SettingsDisclosure, SettingsSection, Toggle } from '../features/settings/components/SettingsUI'
+import {
+  SegmentedControl,
+  SettingField,
+  SettingRow,
+  SettingsDisclosure,
+  SettingsSection,
+  Toggle,
+} from '../features/settings/components/SettingsUI'
 import { usePiCapabilities } from '../pi/capabilities'
 import { stashForkText } from '../pi/pendingForkText'
 import {
@@ -148,7 +146,10 @@ export const SessionTreePanel = memo(function SessionTreePanel({
   const retry = useMemo(() => record(state?.retry) as RetryView, [state])
   const queue = useMemo(() => record(state?.queue) as QueueView, [state])
   const activeTools = useMemo(
-    () => (Array.isArray(state?.activeTools) ? state.activeTools.filter((name): name is string => typeof name === 'string') : []),
+    () =>
+      Array.isArray(state?.activeTools)
+        ? state.activeTools.filter((name): name is string => typeof name === 'string')
+        : [],
     [state],
   )
   const head = useMemo(() => record(state?.head), [state])
@@ -182,7 +183,9 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     setNativeTree([])
     setDetailOpen(false)
     resetSplitHeight()
-    const timer = window.setTimeout(() => { void loadNativeTree() }, 0)
+    const timer = window.setTimeout(() => {
+      void loadNativeTree()
+    }, 0)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadNativeTree, mode])
@@ -208,9 +211,15 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     if (mode !== 'controls') return
     let cancelled = false
     void loadPiSessionTools(sessionId)
-      .then(descriptors => { if (!cancelled) setTools(descriptors) })
-      .catch(() => { if (!cancelled) setTools([]) })
-    return () => { cancelled = true }
+      .then(descriptors => {
+        if (!cancelled) setTools(descriptors)
+      })
+      .catch(() => {
+        if (!cancelled) setTools([])
+      })
+    return () => {
+      cancelled = true
+    }
   }, [mode, sessionId, state])
 
   const treeGraph = useMemo(
@@ -233,25 +242,27 @@ export const SessionTreePanel = memo(function SessionTreePanel({
   const [replaceNavigationInstructions, setReplaceNavigationInstructions] = useState(false)
   const [navigationLabel, setNavigationLabel] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const selectedNode = useMemo(
-    () => findSessionTreeNode(nativeTree, selectedEntryId),
-    [nativeTree, selectedEntryId],
-  )
+  const selectedNode = useMemo(() => findSessionTreeNode(nativeTree, selectedEntryId), [nativeTree, selectedEntryId])
   const selectedEntry = selectedNode?.entry
   const selectedEntryType = typeof selectedEntry?.type === 'string' ? selectedEntry.type : 'unknown'
   const selectedPreview = selectedEntry
     ? sessionTreeEntryPreview(selectedEntry, type => t(`sessionTree.entryTypes.${type}`))
     : ''
-  const selectedMessage = selectedEntryType === 'message' && selectedEntry?.message &&
-    typeof selectedEntry.message === 'object' && !Array.isArray(selectedEntry.message)
-    ? selectedEntry.message as NativeEntry
-    : undefined
+  const selectedMessage =
+    selectedEntryType === 'message' &&
+    selectedEntry?.message &&
+    typeof selectedEntry.message === 'object' &&
+    !Array.isArray(selectedEntry.message)
+      ? (selectedEntry.message as NativeEntry)
+      : undefined
   const selectedRole = typeof selectedMessage?.role === 'string' ? selectedMessage.role : undefined
   const selectedIsLeaf = treeGraph.nodes.some(node => node.id === selectedEntryId && node.data.currentLeaf)
   const selectedDetailItems = useMemo(
     () =>
       selectPiTimelineItems({
-        items: (selectedEntryId ? treeGraph.detailEntriesById.get(selectedEntryId) ?? [] : []) as unknown as SessionEntry[],
+        items: (selectedEntryId
+          ? (treeGraph.detailEntriesById.get(selectedEntryId) ?? [])
+          : []) as unknown as SessionEntry[],
       } as unknown as PiBranchPage),
     [selectedEntryId, treeGraph],
   )
@@ -270,21 +281,24 @@ export const SessionTreePanel = memo(function SessionTreePanel({
     [onNavigateSession],
   )
 
-  const runEntryCommand = useCallback(async (entryId: string, command: () => Promise<void>) => {
-    setPendingEntryId(entryId)
-    setError(null)
-    try {
-      await command()
-      // 树操作（navigate/fork/label）完成后主动刷新运行时状态并重载树，
-      // 不能干等 head 指纹变化——这些操作不一定会推状态事件
-      void refreshPiSessionState(sessionId).catch(() => undefined)
-      void loadNativeTree()
-    } catch (commandError) {
-      setError(commandError instanceof Error ? commandError.message : t('sessionTree.failed'))
-    } finally {
-      setPendingEntryId(null)
-    }
-  }, [loadNativeTree, sessionId, t])
+  const runEntryCommand = useCallback(
+    async (entryId: string, command: () => Promise<void>) => {
+      setPendingEntryId(entryId)
+      setError(null)
+      try {
+        await command()
+        // 树操作（navigate/fork/label）完成后主动刷新运行时状态并重载树，
+        // 不能干等 head 指纹变化——这些操作不一定会推状态事件
+        void refreshPiSessionState(sessionId).catch(() => undefined)
+        void loadNativeTree()
+      } catch (commandError) {
+        setError(commandError instanceof Error ? commandError.message : t('sessionTree.failed'))
+      } finally {
+        setPendingEntryId(null)
+      }
+    },
+    [loadNativeTree, sessionId, t],
+  )
 
   const handleNavigate = useCallback(
     (entryId: string) => {
@@ -312,35 +326,45 @@ export const SessionTreePanel = memo(function SessionTreePanel({
         await commitRedoPlan(sessionId, checkpoints)
       })
     },
-    [capabilities.sessionNavigate, nativeTree, leafId, navigationInstructions, navigationLabel, replaceNavigationInstructions, runEntryCommand, sessionId, summarizeNavigation],
+    [
+      capabilities.sessionNavigate,
+      nativeTree,
+      leafId,
+      navigationInstructions,
+      navigationLabel,
+      replaceNavigationInstructions,
+      runEntryCommand,
+      sessionId,
+      summarizeNavigation,
+    ],
   )
 
-  const runRuntimeCommand = useCallback(async (
-    operation: string,
-    command: () => Promise<void>,
-    refreshState = true,
-  ) => {
-    setRuntimePending(operation)
-    setError(null)
-    try {
-      await command()
-      if (refreshState) void refreshPiSessionState(sessionId).catch(() => undefined)
-      // 压缩等运行时操作也会往树里写入新条目
-      void loadNativeTree()
-    } catch (commandError) {
-      setError(commandError instanceof Error ? commandError.message : t('sessionTree.failed'))
-    } finally {
-      setRuntimePending(null)
-    }
-  }, [loadNativeTree, sessionId, t])
+  const runRuntimeCommand = useCallback(
+    async (operation: string, command: () => Promise<void>, refreshState = true) => {
+      setRuntimePending(operation)
+      setError(null)
+      try {
+        await command()
+        if (refreshState) void refreshPiSessionState(sessionId).catch(() => undefined)
+        // 压缩等运行时操作也会往树里写入新条目
+        void loadNativeTree()
+      } catch (commandError) {
+        setError(commandError instanceof Error ? commandError.message : t('sessionTree.failed'))
+      } finally {
+        setRuntimePending(null)
+      }
+    },
+    [loadNativeTree, sessionId, t],
+  )
 
-  const handleToggleTool = useCallback((toolName: string, enabled: boolean) => {
-    if (!capabilities.toolsManage) return
-    const next = enabled
-      ? [...new Set([...activeTools, toolName])]
-      : activeTools.filter(name => name !== toolName)
-    void runRuntimeCommand('tools', () => setPiActiveTools(sessionId, next))
-  }, [activeTools, capabilities.toolsManage, runRuntimeCommand, sessionId])
+  const handleToggleTool = useCallback(
+    (toolName: string, enabled: boolean) => {
+      if (!capabilities.toolsManage) return
+      const next = enabled ? [...new Set([...activeTools, toolName])] : activeTools.filter(name => name !== toolName)
+      void runRuntimeCommand('tools', () => setPiActiveTools(sessionId, next))
+    },
+    [activeTools, capabilities.toolsManage, runRuntimeCommand, sessionId],
+  )
 
   const handleFork = useCallback(
     (entryId: string) => {
@@ -352,7 +376,12 @@ export const SessionTreePanel = memo(function SessionTreePanel({
         const text = Array.isArray(content)
           ? content
               .filter((block): block is { type: 'text'; text: string } =>
-                Boolean(block && typeof block === 'object' && (block as { type?: unknown }).type === 'text' && typeof (block as { text?: unknown }).text === 'string'),
+                Boolean(
+                  block &&
+                  typeof block === 'object' &&
+                  (block as { type?: unknown }).type === 'text' &&
+                  typeof (block as { text?: unknown }).text === 'string',
+                ),
               )
               .map(block => block.text)
               .join('\n')
@@ -364,13 +393,27 @@ export const SessionTreePanel = memo(function SessionTreePanel({
       void runEntryCommand(entryId, async () => {
         // pi TUI parity：fork 从该用户消息之前分叉，消息文本带回输入框改写重发
         const result = await forkPiSession(sessionId, entryId, 'before')
-        if (!result.cancelled && result.targetSessionId && typeof result.selectedText === 'string' && result.selectedText.trim()) {
+        if (
+          !result.cancelled &&
+          result.targetSessionId &&
+          typeof result.selectedText === 'string' &&
+          result.selectedText.trim()
+        ) {
           stashForkText(result.targetSessionId, result.selectedText)
         }
         applyReplacement(result)
       })
     },
-    [applyReplacement, capabilities.fork, runEntryCommand, sessionId, treeGraph, selectedEntryId, selectedMessage, onNewChat],
+    [
+      applyReplacement,
+      capabilities.fork,
+      runEntryCommand,
+      sessionId,
+      treeGraph,
+      selectedEntryId,
+      selectedMessage,
+      onNewChat,
+    ],
   )
 
   const handleStartLabel = useCallback((entryId: string, label?: string) => {
@@ -426,267 +469,267 @@ export const SessionTreePanel = memo(function SessionTreePanel({
             </div>
           ) : null}
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-      {state && (capabilities.compactionManage || capabilities.retryManage) ? (
-        <SettingsSection title={t('sessionTree.runtimeControls')} description={t('sessionTree.runtimeControlsHint')}>
-          {capabilities.compactionManage ? (
-            <SettingRow
-              label={t('sessionTree.autoCompaction')}
-              description={t('sessionTree.autoCompactionHint')}
-            >
-              <Toggle
-                enabled={compaction.autoEnabled === true}
-                disabled={runtimePending !== null}
-                onChange={() => void runRuntimeCommand(
-                  'auto-compaction',
-                  () => setPiAutoCompaction(sessionId, compaction.autoEnabled !== true),
-                )}
-              />
-            </SettingRow>
-          ) : null}
-          {capabilities.retryManage ? (
-            <SettingRow
-              label={t('sessionTree.autoRetry')}
-              description={t('sessionTree.autoRetryHint')}
-            >
-              <Toggle
-                enabled={retry.autoEnabled === true}
-                disabled={runtimePending !== null}
-                onChange={() => void runRuntimeCommand(
-                  'auto-retry',
-                  () => setPiAutoRetry(sessionId, retry.autoEnabled !== true),
-                )}
-              />
-            </SettingRow>
-          ) : null}
-          {capabilities.compactionManage ? (
-            <SettingField
-              label={t('sessionTree.compact')}
-              description={t('sessionTree.compactHint')}
-            >
-              <form
-                className="flex items-center gap-2"
-                onSubmit={event => {
-                  event.preventDefault()
-                  void runRuntimeCommand('compact', () => compactPiSession(
-                    sessionId,
-                    compactInstructions.trim() || undefined,
-                  ).then(() => undefined))
-                }}
+            {state && (capabilities.compactionManage || capabilities.retryManage) ? (
+              <SettingsSection
+                title={t('sessionTree.runtimeControls')}
+                description={t('sessionTree.runtimeControlsHint')}
               >
-                <input
-                  value={compactInstructions}
-                  onChange={event => setCompactInstructions(event.target.value)}
-                  aria-label={t('sessionTree.compactInstructions')}
-                  placeholder={t('sessionTree.compactInstructions')}
-                  autoComplete="off"
-                  className="h-8 min-w-0 flex-1 rounded-md border border-border-200 bg-transparent px-2.5 text-[length:var(--fs-sm)] text-text-100 placeholder:text-text-400 outline-none transition-colors hover:border-border-300 focus-visible:border-accent-main-100"
-                />
-                {compactionOperation === 'none' ? (
-                  <button
-                    type="submit"
-                    disabled={runtimePending !== null}
-                    className="h-8 shrink-0 rounded-md bg-bg-200 px-3 text-[length:var(--fs-sm)] font-medium text-text-200 transition-colors hover:bg-bg-300 hover:text-text-100 disabled:opacity-40"
+                {capabilities.compactionManage ? (
+                  <SettingRow label={t('sessionTree.autoCompaction')} description={t('sessionTree.autoCompactionHint')}>
+                    <Toggle
+                      enabled={compaction.autoEnabled === true}
+                      disabled={runtimePending !== null}
+                      onChange={() =>
+                        void runRuntimeCommand('auto-compaction', () =>
+                          setPiAutoCompaction(sessionId, compaction.autoEnabled !== true),
+                        )
+                      }
+                    />
+                  </SettingRow>
+                ) : null}
+                {capabilities.retryManage ? (
+                  <SettingRow label={t('sessionTree.autoRetry')} description={t('sessionTree.autoRetryHint')}>
+                    <Toggle
+                      enabled={retry.autoEnabled === true}
+                      disabled={runtimePending !== null}
+                      onChange={() =>
+                        void runRuntimeCommand('auto-retry', () =>
+                          setPiAutoRetry(sessionId, retry.autoEnabled !== true),
+                        )
+                      }
+                    />
+                  </SettingRow>
+                ) : null}
+                {capabilities.compactionManage ? (
+                  <SettingField label={t('sessionTree.compact')} description={t('sessionTree.compactHint')}>
+                    <form
+                      className="flex items-center gap-2"
+                      onSubmit={event => {
+                        event.preventDefault()
+                        void runRuntimeCommand('compact', () =>
+                          compactPiSession(sessionId, compactInstructions.trim() || undefined).then(() => undefined),
+                        )
+                      }}
+                    >
+                      <input
+                        value={compactInstructions}
+                        onChange={event => setCompactInstructions(event.target.value)}
+                        aria-label={t('sessionTree.compactInstructions')}
+                        placeholder={t('sessionTree.compactInstructions')}
+                        autoComplete="off"
+                        className="h-8 min-w-0 flex-1 rounded-md border border-border-200 bg-transparent px-2.5 text-[length:var(--fs-sm)] text-text-100 placeholder:text-text-400 outline-none transition-colors hover:border-border-300 focus-visible:border-accent-main-100"
+                      />
+                      {compactionOperation === 'none' ? (
+                        <button
+                          type="submit"
+                          disabled={runtimePending !== null}
+                          className="h-8 shrink-0 rounded-md bg-bg-200 px-3 text-[length:var(--fs-sm)] font-medium text-text-200 transition-colors hover:bg-bg-300 hover:text-text-100 disabled:opacity-40"
+                        >
+                          {t('sessionTree.compactNow')}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={runtimePending !== null}
+                          onClick={() =>
+                            void runRuntimeCommand('abort-summary', () =>
+                              compactionOperation === 'branchSummary'
+                                ? abortPiBranchSummary(sessionId)
+                                : abortPiCompaction(sessionId),
+                            )
+                          }
+                          className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-danger-100/30 bg-danger-100/10 px-3 text-[length:var(--fs-sm)] font-medium text-danger-100 transition-colors hover:bg-danger-100/15 disabled:opacity-40"
+                        >
+                          <StopIcon size={12} />
+                          {t('sessionTree.stopSummary')}
+                        </button>
+                      )}
+                    </form>
+                  </SettingField>
+                ) : null}
+                {retryPhase === 'waiting' || retryPhase === 'running' ? (
+                  <SettingRow
+                    label={t('sessionTree.stopRetry', {
+                      attempt: retry.attempt,
+                      max: retry.maxAttempts,
+                    })}
+                    description={
+                      retryPhase === 'waiting'
+                        ? t('sessionTree.retryWaiting', {
+                            attempt: retry.attempt,
+                            max: retry.maxAttempts,
+                            delay: retry.delayMs,
+                            error: retry.errorMessage,
+                          })
+                        : undefined
+                    }
                   >
-                    {t('sessionTree.compactNow')}
-                  </button>
-                ) : (
+                    <button
+                      type="button"
+                      className="flex h-7 items-center gap-1.5 rounded-md border border-danger-100/30 bg-danger-100/10 px-2.5 text-[length:var(--fs-sm)] text-danger-100 transition-colors hover:bg-danger-100/15"
+                      onClick={() => void runRuntimeCommand('abort-retry', () => abortPiRetry(sessionId))}
+                    >
+                      <StopIcon size={12} />
+                      {t('sessionTree.stop')}
+                    </button>
+                  </SettingRow>
+                ) : null}
+                {compactionOperation === 'none' &&
+                (compaction.lastNotice ||
+                  compaction.lastError ||
+                  compaction.lastResult ||
+                  retryPhase === 'finished') ? (
+                  <div className="text-[length:var(--fs-xs)] leading-relaxed">
+                    {compaction.lastNotice ? (
+                      <p className="text-text-400">{compaction.lastNotice}</p>
+                    ) : compaction.lastError ? (
+                      <p className="text-danger-100">{compaction.lastError}</p>
+                    ) : compaction.lastResult ? (
+                      <p className="truncate text-text-400" title={compaction.lastResult.summary}>
+                        {t('sessionTree.compactionResult', {
+                          before: compaction.lastResult.tokensBefore,
+                          after: compaction.lastResult.estimatedTokensAfter ?? '?',
+                        })}
+                      </p>
+                    ) : null}
+                    {retryPhase === 'finished' ? (
+                      <p className={retry.success ? 'text-text-400' : 'text-danger-100'}>
+                        {retry.success
+                          ? t('sessionTree.retrySucceeded', { attempt: retry.attempt })
+                          : (retry.finalError ?? t('sessionTree.retryFailed'))}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </SettingsSection>
+            ) : null}
+
+            {state && capabilities.queueManage ? (
+              <SettingsSection
+                title={t('sessionTree.queue')}
+                description={t('sessionTree.queueHint')}
+                actions={
                   <button
                     type="button"
-                    disabled={runtimePending !== null}
-                    onClick={() => void runRuntimeCommand(
-                      'abort-summary',
-                      () => compactionOperation === 'branchSummary'
-                        ? abortPiBranchSummary(sessionId)
-                        : abortPiCompaction(sessionId),
-                    )}
-                    className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-danger-100/30 bg-danger-100/10 px-3 text-[length:var(--fs-sm)] font-medium text-danger-100 transition-colors hover:bg-danger-100/15 disabled:opacity-40"
+                    disabled={runtimePending !== null || queuedCount === 0}
+                    onClick={() =>
+                      void runRuntimeCommand('clear-queue', () => clearPiQueue(sessionId).then(() => undefined))
+                    }
+                    className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[length:var(--fs-sm)] text-text-400 transition-colors hover:bg-bg-200/60 hover:text-text-100 disabled:opacity-40"
                   >
-                    <StopIcon size={12} />
-                    {t('sessionTree.stopSummary')}
+                    <TrashIcon size={13} />
+                    {t('sessionTree.clearQueue')}
+                    {queuedCount > 0 ? ` (${queuedCount})` : ''}
                   </button>
-                )}
-              </form>
-            </SettingField>
-          ) : null}
-          {retryPhase === 'waiting' || retryPhase === 'running' ? (
-            <SettingRow
-              label={t('sessionTree.stopRetry', {
-                attempt: retry.attempt,
-                max: retry.maxAttempts,
-              })}
-              description={retryPhase === 'waiting'
-                ? t('sessionTree.retryWaiting', {
-                    attempt: retry.attempt,
-                    max: retry.maxAttempts,
-                    delay: retry.delayMs,
-                    error: retry.errorMessage,
-                  })
-                : undefined}
-            >
-              <button
-                type="button"
-                className="flex h-7 items-center gap-1.5 rounded-md border border-danger-100/30 bg-danger-100/10 px-2.5 text-[length:var(--fs-sm)] text-danger-100 transition-colors hover:bg-danger-100/15"
-                onClick={() => void runRuntimeCommand('abort-retry', () => abortPiRetry(sessionId))}
+                }
               >
-                <StopIcon size={12} />
-                {t('sessionTree.stop')}
-              </button>
-            </SettingRow>
-          ) : null}
-          {compactionOperation === 'none' &&
-          (compaction.lastNotice ||
-            compaction.lastError ||
-            compaction.lastResult ||
-            retryPhase === 'finished') ? (
-            <div className="text-[length:var(--fs-xs)] leading-relaxed">
-              {compaction.lastNotice ? (
-                <p className="text-text-400">{compaction.lastNotice}</p>
-              ) : compaction.lastError ? (
-                <p className="text-danger-100">{compaction.lastError}</p>
-              ) : compaction.lastResult ? (
-                <p className="truncate text-text-400" title={compaction.lastResult.summary}>
-                  {t('sessionTree.compactionResult', {
-                    before: compaction.lastResult.tokensBefore,
-                    after: compaction.lastResult.estimatedTokensAfter ?? '?',
-                  })}
-                </p>
-              ) : null}
-              {retryPhase === 'finished' ? (
-                <p className={retry.success ? 'text-text-400' : 'text-danger-100'}>
-                  {retry.success
-                    ? t('sessionTree.retrySucceeded', { attempt: retry.attempt })
-                    : retry.finalError ?? t('sessionTree.retryFailed')}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-        </SettingsSection>
-      ) : null}
+                <SettingField label={t('sessionTree.steering')} description={t('sessionTree.steeringHint')}>
+                  <div className="w-56 max-w-full">
+                    <SegmentedControl
+                      value={queue.steeringMode ?? 'all'}
+                      options={[
+                        { value: 'one-at-a-time' as const, label: t('sessionTree.oneAtATime') },
+                        { value: 'all' as const, label: t('sessionTree.allAtOnce') },
+                      ]}
+                      onChange={value => {
+                        if (runtimePending !== null) return false
+                        void runRuntimeCommand('queue-mode', () => setPiSteeringMode(sessionId, value))
+                      }}
+                    />
+                  </div>
+                </SettingField>
+                <SettingField label={t('sessionTree.followUp')} description={t('sessionTree.followUpHint')}>
+                  <div className="w-56 max-w-full">
+                    <SegmentedControl
+                      value={queue.followUpMode ?? 'all'}
+                      options={[
+                        { value: 'one-at-a-time' as const, label: t('sessionTree.oneAtATime') },
+                        { value: 'all' as const, label: t('sessionTree.allAtOnce') },
+                      ]}
+                      onChange={value => {
+                        if (runtimePending !== null) return false
+                        void runRuntimeCommand('queue-mode', () => setPiFollowUpMode(sessionId, value))
+                      }}
+                    />
+                  </div>
+                </SettingField>
+              </SettingsSection>
+            ) : null}
 
-      {state && capabilities.queueManage ? (
-        <SettingsSection
-          title={t('sessionTree.queue')}
-          description={t('sessionTree.queueHint')}
-          actions={(
-            <button
-              type="button"
-              disabled={runtimePending !== null || queuedCount === 0}
-              onClick={() => void runRuntimeCommand('clear-queue', () => clearPiQueue(sessionId).then(() => undefined))}
-              className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[length:var(--fs-sm)] text-text-400 transition-colors hover:bg-bg-200/60 hover:text-text-100 disabled:opacity-40"
-            >
-              <TrashIcon size={13} />
-              {t('sessionTree.clearQueue')}
-              {queuedCount > 0 ? ` (${queuedCount})` : ''}
-            </button>
-          )}
-        >
-          <SettingField label={t('sessionTree.steering')} description={t('sessionTree.steeringHint')}>
-            <div className="w-56 max-w-full">
-              <SegmentedControl
-                value={queue.steeringMode ?? 'all'}
-                options={[
-                  { value: 'one-at-a-time' as const, label: t('sessionTree.oneAtATime') },
-                  { value: 'all' as const, label: t('sessionTree.allAtOnce') },
-                ]}
-                onChange={value => {
-                  if (runtimePending !== null) return false
-                  void runRuntimeCommand('queue-mode', () => setPiSteeringMode(sessionId, value))
-                }}
-              />
-            </div>
-          </SettingField>
-          <SettingField label={t('sessionTree.followUp')} description={t('sessionTree.followUpHint')}>
-            <div className="w-56 max-w-full">
-              <SegmentedControl
-                value={queue.followUpMode ?? 'all'}
-                options={[
-                  { value: 'one-at-a-time' as const, label: t('sessionTree.oneAtATime') },
-                  { value: 'all' as const, label: t('sessionTree.allAtOnce') },
-                ]}
-                onChange={value => {
-                  if (runtimePending !== null) return false
-                  void runRuntimeCommand('queue-mode', () => setPiFollowUpMode(sessionId, value))
-                }}
-              />
-            </div>
-          </SettingField>
-        </SettingsSection>
-      ) : null}
-
-      {state && capabilities.toolsManage ? (
-        <SettingsSection
-          title={t('sessionTree.tools')}
-          description={t('sessionTree.toolsHint')}
-          actions={(
-            <span className="text-[length:var(--fs-xs)] text-text-400">
-              {t('sessionTree.activeTools', { active: activeToolCount, total: totalToolCount })}
-            </span>
-          )}
-        >
-          {tools.map(tool => (
-            <SettingRow
-              key={tool.name}
-              label={tool.name}
-              description={tool.description || undefined}
-              disabled={runtimePending !== null}
-            >
-              <Toggle
-                enabled={activeTools.includes(tool.name)}
-                disabled={runtimePending !== null}
-                onChange={() => handleToggleTool(
-                  tool.name,
-                  !activeTools.includes(tool.name),
-                )}
-              />
-            </SettingRow>
-          ))}
-        </SettingsSection>
-      ) : null}
-
-      {capabilities.sessionImport ? (
-        <SettingsSection title={t('sessionTree.importTitle')} description={t('sessionTree.importHint')}>
-          <form
-            className="flex flex-col gap-2.5"
-            onSubmit={event => {
-              event.preventDefault()
-              handleImport()
-            }}
-          >
-            <input
-              value={importPath}
-              onChange={event => setImportPath(event.target.value)}
-              aria-label={t('sessionTree.importPath')}
-              placeholder={t('sessionTree.importPath')}
-              autoComplete="off"
-              className="h-8 min-w-0 rounded-md border border-border-200 bg-transparent px-2.5 text-[length:var(--fs-sm)] text-text-100 placeholder:text-text-400 outline-none transition-colors hover:border-border-300 focus-visible:border-accent-main-100"
-            />
-            <input
-              value={importCwd}
-              onChange={event => setImportCwd(event.target.value)}
-              aria-label={t('sessionTree.importCwd')}
-              placeholder={t('sessionTree.importCwd')}
-              autoComplete="off"
-              className="h-8 min-w-0 rounded-md border border-border-200 bg-transparent px-2.5 text-[length:var(--fs-sm)] text-text-100 placeholder:text-text-400 outline-none transition-colors hover:border-border-300 focus-visible:border-accent-main-100"
-            />
-            <div>
-              <button
-                type="submit"
-                disabled={!importPath.trim() || pendingEntryId !== null}
-                className="flex h-8 items-center gap-2 rounded-md bg-bg-200 px-3 text-[length:var(--fs-sm)] font-medium text-text-200 transition-colors hover:bg-bg-300 hover:text-text-100 disabled:opacity-40"
+            {state && capabilities.toolsManage ? (
+              <SettingsSection
+                title={t('sessionTree.tools')}
+                description={t('sessionTree.toolsHint')}
+                actions={
+                  <span className="text-[length:var(--fs-xs)] text-text-400">
+                    {t('sessionTree.activeTools', { active: activeToolCount, total: totalToolCount })}
+                  </span>
+                }
               >
-                <UploadIcon size={14} />
-                {t('sessionTree.runImport')}
-              </button>
-            </div>
-          </form>
-        </SettingsSection>
-      ) : null}
+                {tools.map(tool => (
+                  <SettingRow
+                    key={tool.name}
+                    label={tool.name}
+                    description={tool.description || undefined}
+                    disabled={runtimePending !== null}
+                  >
+                    <Toggle
+                      enabled={activeTools.includes(tool.name)}
+                      disabled={runtimePending !== null}
+                      onChange={() => handleToggleTool(tool.name, !activeTools.includes(tool.name))}
+                    />
+                  </SettingRow>
+                ))}
+              </SettingsSection>
+            ) : null}
+
+            {capabilities.sessionImport ? (
+              <SettingsSection title={t('sessionTree.importTitle')} description={t('sessionTree.importHint')}>
+                <form
+                  className="flex flex-col gap-2.5"
+                  onSubmit={event => {
+                    event.preventDefault()
+                    handleImport()
+                  }}
+                >
+                  <input
+                    value={importPath}
+                    onChange={event => setImportPath(event.target.value)}
+                    aria-label={t('sessionTree.importPath')}
+                    placeholder={t('sessionTree.importPath')}
+                    autoComplete="off"
+                    className="h-8 min-w-0 rounded-md border border-border-200 bg-transparent px-2.5 text-[length:var(--fs-sm)] text-text-100 placeholder:text-text-400 outline-none transition-colors hover:border-border-300 focus-visible:border-accent-main-100"
+                  />
+                  <input
+                    value={importCwd}
+                    onChange={event => setImportCwd(event.target.value)}
+                    aria-label={t('sessionTree.importCwd')}
+                    placeholder={t('sessionTree.importCwd')}
+                    autoComplete="off"
+                    className="h-8 min-w-0 rounded-md border border-border-200 bg-transparent px-2.5 text-[length:var(--fs-sm)] text-text-100 placeholder:text-text-400 outline-none transition-colors hover:border-border-300 focus-visible:border-accent-main-100"
+                  />
+                  <div>
+                    <button
+                      type="submit"
+                      disabled={!importPath.trim() || pendingEntryId !== null}
+                      className="flex h-8 items-center gap-2 rounded-md bg-bg-200 px-3 text-[length:var(--fs-sm)] font-medium text-text-200 transition-colors hover:bg-bg-300 hover:text-text-100 disabled:opacity-40"
+                    >
+                      <UploadIcon size={14} />
+                      {t('sessionTree.runImport')}
+                    </button>
+                  </div>
+                </form>
+              </SettingsSection>
+            ) : null}
           </div>
         </section>
       ) : null}
 
       {error ? (
-        <div role="alert" className="shrink-0 border-b border-danger-100/30 px-3 py-2 text-[length:var(--fs-xs)] text-danger-100">
+        <div
+          role="alert"
+          className="shrink-0 border-b border-danger-100/30 px-3 py-2 text-[length:var(--fs-xs)] text-danger-100"
+        >
           {error}
         </div>
       ) : null}
@@ -695,11 +738,13 @@ export const SessionTreePanel = memo(function SessionTreePanel({
         <div
           ref={canvasRef}
           className="shrink-0 overflow-hidden"
-          style={{
-            '--session-tree-canvas-height': canvasHeight !== null ? `${canvasHeight}px` : '55%',
-            height: detailOpen && selectedNode ? 'var(--session-tree-canvas-height)' : '100%',
-            minHeight: detailOpen && selectedNode ? 180 : undefined,
-          } as React.CSSProperties}
+          style={
+            {
+              '--session-tree-canvas-height': canvasHeight !== null ? `${canvasHeight}px` : '55%',
+              height: detailOpen && selectedNode ? 'var(--session-tree-canvas-height)' : '100%',
+              minHeight: detailOpen && selectedNode ? 180 : undefined,
+            } as React.CSSProperties
+          }
         >
           <SessionTreeCanvas
             sessionId={sessionId}
@@ -708,7 +753,10 @@ export const SessionTreePanel = memo(function SessionTreePanel({
             pendingEntryId={pendingEntryId}
             loading={nativeLoading}
             error={nativeLoadError}
-            onSelectEntry={id => { setSelectedEntryId(id); setDetailOpen(true) }}
+            onSelectEntry={id => {
+              setSelectedEntryId(id)
+              setDetailOpen(true)
+            }}
           />
         </div>
 
@@ -728,16 +776,34 @@ export const SessionTreePanel = memo(function SessionTreePanel({
               onPointerDown={handleResizeStart}
               onTouchStart={handleTouchResizeStart}
               onKeyDown={event => {
-                if (event.key === 'ArrowUp') { event.preventDefault(); adjustSplitHeight(-24) }
-                if (event.key === 'ArrowDown') { event.preventDefault(); adjustSplitHeight(24) }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  adjustSplitHeight(-24)
+                }
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  adjustSplitHeight(24)
+                }
               }}
             >
-              <span className={`h-1 w-8 rounded-full transition-colors ${isResizing ? 'bg-accent-main-100' : 'bg-border-200 group-hover/sep:bg-border-300'}`} aria-hidden="true" />
+              <span
+                className={`h-1 w-8 rounded-full transition-colors ${isResizing ? 'bg-accent-main-100' : 'bg-border-200 group-hover/sep:bg-border-300'}`}
+                aria-hidden="true"
+              />
             </div>
-            <section className="flex min-h-0 flex-1 flex-col bg-bg-100" style={{ minHeight: 160 }} aria-label={t('sessionTree.selectedEntry')}>
+            <section
+              className="flex min-h-0 flex-1 flex-col bg-bg-100"
+              style={{ minHeight: 160 }}
+              aria-label={t('sessionTree.selectedEntry')}
+            >
               <div className="flex min-h-9 shrink-0 items-center gap-2 px-4">
                 <span className="min-w-0 truncate text-[length:var(--fs-sm)] font-medium text-text-100">
-                  {selectedNode.label || t(selectedRole ? `sessionTree.roles.${selectedRole === 'toolResult' ? 'tool' : selectedRole}` : `sessionTree.entryTypes.${selectedEntryType}`)}
+                  {selectedNode.label ||
+                    t(
+                      selectedRole
+                        ? `sessionTree.roles.${selectedRole === 'toolResult' ? 'tool' : selectedRole}`
+                        : `sessionTree.entryTypes.${selectedEntryType}`,
+                    )}
                 </span>
                 {selectedIsLeaf ? (
                   <span className="shrink-0 rounded bg-accent-main-100/12 px-1.5 py-0.5 text-[length:var(--fs-xs)] font-medium text-accent-main-100">
@@ -784,7 +850,15 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                       <span className="mx-0.5 h-4 w-px bg-border-200/50" aria-hidden="true" />
                     </>
                   ) : null}
-                  <IconButton aria-label={t('sessionTree.closeDetail')} title={t('sessionTree.closeDetail')} size="sm" onClick={() => { setDetailOpen(false); resetSplitHeight() }}>
+                  <IconButton
+                    aria-label={t('sessionTree.closeDetail')}
+                    title={t('sessionTree.closeDetail')}
+                    size="sm"
+                    onClick={() => {
+                      setDetailOpen(false)
+                      resetSplitHeight()
+                    }}
+                  >
                     <CloseIcon size={12} />
                   </IconButton>
                 </div>
@@ -833,10 +907,20 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                       autoComplete="off"
                       className="h-8 min-w-0 flex-1 rounded-md border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100 focus-visible:border-accent-main-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-main-100"
                     />
-                    <IconButton aria-label={t('common:save')} title={t('common:save')} size="sm" onClick={() => handleSubmitLabel(selectedEntryId)}>
+                    <IconButton
+                      aria-label={t('common:save')}
+                      title={t('common:save')}
+                      size="sm"
+                      onClick={() => handleSubmitLabel(selectedEntryId)}
+                    >
                       <CheckIcon size={13} />
                     </IconButton>
-                    <IconButton aria-label={t('sessionTree.cancel')} title={t('sessionTree.cancel')} size="sm" onClick={() => setEditingEntryId(null)}>
+                    <IconButton
+                      aria-label={t('sessionTree.cancel')}
+                      title={t('sessionTree.cancel')}
+                      size="sm"
+                      onClick={() => setEditingEntryId(null)}
+                    >
                       <CloseIcon size={13} />
                     </IconButton>
                   </div>
@@ -846,7 +930,12 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                       <SettingsDisclosure title={t('sessionTree.navigationOptions')} className="w-full">
                         <div className="space-y-2 text-[length:var(--fs-xs)] text-text-300">
                           <label className="flex items-center gap-2">
-                            <input type="checkbox" className="size-3.5 accent-accent-main-100" checked={summarizeNavigation} onChange={event => setSummarizeNavigation(event.target.checked)} />
+                            <input
+                              type="checkbox"
+                              className="size-3.5 accent-accent-main-100"
+                              checked={summarizeNavigation}
+                              onChange={event => setSummarizeNavigation(event.target.checked)}
+                            />
                             {t('sessionTree.summarizeNavigation')}
                           </label>
                           {summarizeNavigation ? (
@@ -868,7 +957,12 @@ export const SessionTreePanel = memo(function SessionTreePanel({
                                 onChange={event => setNavigationLabel(event.target.value)}
                               />
                               <label className="flex items-center gap-2">
-                                <input type="checkbox" className="size-3.5 accent-accent-main-100" checked={replaceNavigationInstructions} onChange={event => setReplaceNavigationInstructions(event.target.checked)} />
+                                <input
+                                  type="checkbox"
+                                  className="size-3.5 accent-accent-main-100"
+                                  checked={replaceNavigationInstructions}
+                                  onChange={event => setReplaceNavigationInstructions(event.target.checked)}
+                                />
                                 {t('sessionTree.replaceDefaultInstructions')}
                               </label>
                             </>

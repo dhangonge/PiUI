@@ -48,14 +48,26 @@ describe('PiResourceManagement', () => {
       eventHandlers: ['message_end'],
     })
     promptsMock.mockReset().mockResolvedValue([
-      { name: 'code-review', description: 'Review this change', argumentHint: '<files>', content: '...', sourceInfo: { source: 'pi-extension' }, filePath: '/tmp/review.md' },
+      {
+        name: 'code-review',
+        description: 'Review this change',
+        argumentHint: '<files>',
+        content: '...',
+        sourceInfo: { source: 'pi-extension' },
+        filePath: '/tmp/review.md',
+      },
     ])
     skillsMock.mockReset().mockResolvedValue([
-      { name: 'debug', description: 'Debug a failing test', filePath: '/tmp/debug.md', baseDir: '/tmp', sourceInfo: { source: 'pi-extension' }, disableModelInvocation: false },
+      {
+        name: 'debug',
+        description: 'Debug a failing test',
+        filePath: '/tmp/debug.md',
+        baseDir: '/tmp',
+        sourceInfo: { source: 'pi-extension' },
+        disableModelInvocation: false,
+      },
     ])
-    agentsFilesMock.mockReset().mockResolvedValue([
-      { path: 'AGENTS.md', content: '# rules\none rule' },
-    ])
+    agentsFilesMock.mockReset().mockResolvedValue([{ path: 'AGENTS.md', content: '# rules\none rule' }])
     reloadMock.mockReset().mockResolvedValue(undefined)
   })
 

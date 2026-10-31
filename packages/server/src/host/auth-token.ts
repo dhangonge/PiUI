@@ -1,7 +1,7 @@
-import { randomBytes } from "node:crypto"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
-import path from "node:path"
+import { randomBytes } from 'node:crypto'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import path from 'node:path'
 
 /**
  * PiUI's own state lives here, separate from `~/.pi/agent`, which belongs to
@@ -9,11 +9,11 @@ import path from "node:path"
  */
 export function piuiDataDir(): string {
   const override = process.env.PIUI_DATA_DIR?.trim()
-  return override ? path.resolve(override) : path.join(homedir(), ".piui")
+  return override ? path.resolve(override) : path.join(homedir(), '.piui')
 }
 
 export function authTokenPath(): string {
-  return path.join(piuiDataDir(), "auth-token")
+  return path.join(piuiDataDir(), 'auth-token')
 }
 
 /**
@@ -33,31 +33,31 @@ export function resolveAuthToken(): string {
   const existing = readTokenFile(file)
   if (existing) return existing
 
-  const token = randomBytes(32).toString("base64url")
+  const token = randomBytes(32).toString('base64url')
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
   try {
     // Exclusive create, so two servers starting together cannot each believe
     // they own a different token.
-    writeFileSync(file, `${token}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" })
+    writeFileSync(file, `${token}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
     return token
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     return readTokenFile(file) ?? token
   }
 }
 
 function readTokenFile(file: string): string | undefined {
   try {
-    const value = readFileSync(file, "utf8").trim()
+    const value = readFileSync(file, 'utf8').trim()
     return value || undefined
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error
   }
 }
 
 export function cursorSecretPath(): string {
-  return path.join(piuiDataDir(), "cursor-secret")
+  return path.join(piuiDataDir(), 'cursor-secret')
 }
 
 /**
@@ -74,15 +74,15 @@ export function resolveCursorSecret(): string {
   const existing = readTokenFile(file)
   if (existing) return existing
 
-  const secret = randomBytes(32).toString("base64url")
+  const secret = randomBytes(32).toString('base64url')
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
   try {
     // Exclusive create, so two servers starting together cannot each believe
     // they own a different secret.
-    writeFileSync(file, `${secret}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" })
+    writeFileSync(file, `${secret}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
     return secret
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     return readTokenFile(file) ?? secret
   }
 }

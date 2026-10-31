@@ -54,7 +54,14 @@
     "shareLoopbackHint": "此链接仅供本机客户端使用。如需局域网分享，请用 PIUI_HOST=0.0.0.0 重启服务端。",
     "editServer": "编辑服务器",
     "deleteServer": "删除服务器",
-    "deleteServerConfirm": "确定从列表中移除「{{name}}」？此操作无法撤销。"
+    "deleteServerConfirm": "确定从列表中移除「{{name}}」？此操作无法撤销。",
+    "multiServerMode": "多服务器模式",
+    "multiServerModeDesc": "同时订阅多个服务器，按服务器浏览会话，并保持各个对话独立连接。",
+    "multiServerModeOffHint": "请在设置中订阅服务器，以显示其项目和会话。",
+    "subscribe": "订阅",
+    "unsubscribe": "取消订阅",
+    "setDefaultServer": "设为启动服务器",
+    "clearDefaultServer": "启动时使用上次活动服务器"
   },
   "service": {
     "title": "本地 PiUI 服务",
@@ -115,6 +122,8 @@
     "collapseLongMessagesDesc": "自动折叠较长的用户消息",
     "renderUserMarkdown": "用户消息 Markdown 渲染",
     "renderUserMarkdownDesc": "开启后，用户发送的消息会按 Markdown 渲染；关闭时保持纯文本显示",
+    "renderHtmlContent": "渲染 HTML 内容",
+    "renderHtmlContentDesc": "开启后将 AI 输出中的 HTML 渲染为实时预览，关闭后一律按源码展示",
     "outlineCurrentHighlight": "高亮当前对话位置",
     "outlineCurrentHighlightDesc": "在右侧历史导航条中标出当前视口所属的用户提示词",
     "actionsOnLatestAssistantOnly": "仅末尾显示操作按钮",
@@ -331,7 +340,15 @@
     "backupImportConfirm": "导入备份会替换当前本地设置，并重新加载应用。要继续吗？",
     "backupImportConfirmWithDate": "要导入创建于 {{date}} 的备份吗？这会替换当前本地设置，并重新加载应用。",
     "toastTitle": "发现新版本：{{version}}",
-    "toastBody": "点击打开关于页，并查看发布页面。"
+    "toastBody": "点击打开关于页，并查看发布页面。",
+    "diagnosticsCardTitle": "诊断",
+    "diagnosticsCardDesc": "本设备最近记录的客户端错误。日志只留在本地，并在 server 可达时上报到你自己 server 的日志文件。",
+    "diagnosticsEmpty": "没有记录到错误。",
+    "diagnosticsCount": "共记录了 {{count}} 条错误，新的在前。",
+    "diagnosticsTruncated": "另有 {{count}} 条更早的错误未展示。",
+    "diagnosticsCopy": "复制全部",
+    "diagnosticsCopied": "已复制",
+    "diagnosticsClear": "清空"
   },
   "keybindings": {
     "title": "键盘快捷键",

@@ -2,8 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [dev, main]
-    tags: ["v*"]
+    branches: [main]
+    tags: ['v*']
   pull_request:
 
 concurrency:
@@ -39,13 +39,44 @@ jobs:
 
       - run: npm ci
 
-      # 全量验证：typecheck + lint + 测试（默认 mock 驱动，不调用真实模型）+ 构建
-      - run: npm run validate
+      # 全量验证：typecheck + lint + 测试（默认 mock 驱动，不调用真实模型）+ 构建。
+      # Ubuntu 那支额外收集 app 覆盖率（阈值写在 packages/app/vitest.config.ts），
+      # 避免两支各跑一遍完整测试。
+      - name: Validate (with coverage)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          PIUI_TEST_COVERAGE: '1'
+        run: npm run validate
+
+      - name: Validate
+        if: matrix.os != 'ubuntu-latest'
+        run: npm run validate
+
+      # 冒烟依赖上面 validate 已构建的 dist（app/dist + 三包的 dist），
+      # 所以放在同一 job 里，不重复 build。
+      - name: Resolve Chromium
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          for bin in google-chrome google-chrome-stable chromium chromium-browser; do
+            if command -v "$bin" >/dev/null 2>&1; then
+              echo "CHROMIUM_BIN=$(command -v "$bin")" >> "$GITHUB_ENV"
+              echo "smoke browser: $bin"
+              exit 0
+            fi
+          done
+          echo "no Chromium/Google Chrome found on PATH" >&2
+          exit 1
+
+      - name: Smoke (timeline order + android UI)
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run smoke
 
   tauri-check:
     name: tauri check
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # clippy --all-targets 比原来的 cargo check 多编译测试目标，首次（无缓存）
+    # 会明显慢一截，放宽到 15 分钟。
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -55,6 +86,8 @@ jobs:
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -76,10 +109,10 @@ jobs:
       - name: Prepare empty tauri resources dir
         run: mkdir -p packages/app/src-tauri/resources
 
-      # Tauri 壳编译校验（cargo check + Rust 单元测试），不打包
-      - name: Cargo check
+      # Tauri 壳的静态检查（clippy -D warnings 同时覆盖编译）与 Rust 单元测试，不打包
+      - name: Cargo clippy
         working-directory: packages/app/src-tauri
-        run: cargo check
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Cargo test
         working-directory: packages/app/src-tauri

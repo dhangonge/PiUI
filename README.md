@@ -1,13 +1,18 @@
-# PiUI
+# PiUI（Android 客户端）
 
-PiUI 是 Pi 原生 coding agent 的 Web/桌面客户端。界面、session 浏览和扩展 UI 由 PiUI 提供，agent 执行由 Pi SDK 提供。
+PiUI 是 Pi 原生 coding agent 的 Android 客户端。界面、session 浏览和扩展 UI 由 PiUI 提供，agent 执行由 Pi SDK 提供。
+
+> 本仓是从上游 PiUI 剔除非安卓部分后的二次开发分支：仅保留 `packages/{app,protocol,server,pi-worker}` 与 Tauri Android 构建链路，已移除桌面打包（NSIS/DMG/DEB）、便携包（bun `--compile`）、内嵌本地服务进程、单实例、窗口装饰条、iOS 与 Docker 相关内容。
+>
+> **APK 内不包含 agent runtime**：手机端必须连一个远端 PiUI server（局域网或反向代理）。本地开发时才需要自己起 server。
 
 ## 要求
 
 - Node.js `>= 22.19.0`
 - npm
-- 已安装并可访问的 Pi SDK，或使用 PiUI 随附的 SDK
+- 默认使用 PiUI 固定的 Pi SDK `1.3.0`；外部 SDK 需单独通过兼容性验证
 - 对话需要配置 Pi 的 provider 凭据；测试和类型检查默认不会调用真实 LLM
+- 构建 APK 另需：JDK 17+、Android SDK（含 NDK `29.0.14206865`）、Rust 稳定版并带 `aarch64-linux-android` / `armv7-linux-androideabi` target
 
 ## 快速开始
 
@@ -60,6 +65,14 @@ npm run pi-worker -- web --host 127.0.0.1 --port 8787 --api-only
 npm run pi-worker -- web --help
 ```
 
+## ARM64 离线部署
+
+Linux ARM64 和 Android Termux ARM64 可使用自包含包，不需要在目标设备运行 npm install。包内含 Pi 1.3.0、PiUI server/worker/Web、Node、npm、rg/fd 和匹配平台的 PTY。
+
+解压到新目录后运行 `sh deploy.sh`；默认仅监听本机。可信局域网多设备测试需显式使用 `sh deploy.sh --listen 0.0.0.0 --port 8787`。每台设备/每个 PIUI_HOME 分别生成配置、会话和 token；不打包个人配置，不修改系统服务或全局 Node。
+
+Termux 必须解压到 `$HOME` 等私有可执行目录，不能在共享 Downloads 里直接运行。详细使用和回退见 [离线包说明](scripts/offline/README.md)，构建与验证边界见 [部署记录](docs/OFFLINE_DEPLOYMENT.md)。
+
 ## 监听地址和远程访问
 
 默认只监听本机：
@@ -83,7 +96,7 @@ $env:PIUI_PORT = "8787"
 npm run pi-worker -- web
 ```
 
-启动后 server 会打印局域网访问地址。也可以在 PiUI 的“设置 → 服务 → 网络监听”中修改监听地址和端口，重启服务后生效。
+启动后 server 会打印局域网访问地址。Android 客户端不管理远端服务的监听配置；请在服务所在机器修改环境变量并重启服务。
 
 监听地址选项：
 
@@ -103,17 +116,17 @@ PiUI API 使用本地 auth token。token 默认位于：
 
 ## 常用环境变量
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `PIUI_HOST` | `127.0.0.1` | server 监听地址 |
-| `PIUI_PORT` | `8787` | server 监听端口 |
-| `PIUI_AUTH_TOKEN` | 自动生成 | 显式指定 API token |
-| `PIUI_DATA_DIR` | `~/.piui` | PiUI 数据目录 |
-| `PIUI_WEB_ROOT` | 自动查找 | 指定前端静态文件目录 |
-| `PIUI_DRIVER` | `pi` | 使用 `mock` 可运行无 LLM 的测试 server |
-| `PIUI_SDK_PATH` | 空 | 指定 Pi SDK 路径 |
-| `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi agent 配置目录 |
-| `PI_CODING_AGENT_SESSION_DIR` | 自动 | Pi session 文件目录 |
+| 变量                          | 默认值        | 说明                                   |
+| ----------------------------- | ------------- | -------------------------------------- |
+| `PIUI_HOST`                   | `127.0.0.1`   | server 监听地址                        |
+| `PIUI_PORT`                   | `8787`        | server 监听端口                        |
+| `PIUI_AUTH_TOKEN`             | 自动生成      | 显式指定 API token                     |
+| `PIUI_DATA_DIR`               | `~/.piui`     | PiUI 数据目录                          |
+| `PIUI_WEB_ROOT`               | 自动查找      | 指定前端静态文件目录                   |
+| `PIUI_DRIVER`                 | `pi`          | 使用 `mock` 可运行无 LLM 的测试 server |
+| `PIUI_SDK_PATH`               | 空            | 指定 Pi SDK 路径                       |
+| `PI_CODING_AGENT_DIR`         | `~/.pi/agent` | Pi agent 配置目录                      |
+| `PI_CODING_AGENT_SESSION_DIR` | 自动          | Pi session 文件目录                    |
 
 设置示例：
 
@@ -124,19 +137,45 @@ PIUI_DATA_DIR=/var/lib/piui \
 npm run pi-worker -- web --api-only
 ```
 
-## 服务设置
+## 多服务器使用
 
-桌面端可以在“设置 → 服务”中管理：
+1. 在“设置 → 服务器”添加远端 PiUI 地址及 token。也可通过连接链接导入；不要公开分享含 token 的链接。
+2. 启用多服务器模式，订阅需要同时查看的服务器。侧栏按服务器、工作区、会话分组；搜索支持服务器名、工作区路径及会话内容。
+3. 打开不同服务器的会话或分屏。每个会话绑定自己的服务器，切换焦点不会断开其他服务器的会话流。
+4. “设为默认服务器”只改变下次启动的默认选择，不立即切换当前会话。关闭多服务器模式后恢复单服务器侧栏。
 
-- 网络监听地址
-- 网络监听端口
-- 自动启动
-- Pi SDK 来源
-- 终端 Shell
-- 额外环境变量
-- 服务启动、停止和重启
+会话、事件游标、命令、模型偏好、置顶、目录及终端快照按服务器隔离；文件、Git、provider 管理面板跟随当前焦点。Android 不启动或管理本地 agent runtime。
 
-监听配置和环境变量保存到本地服务设置中。修改监听地址或端口后需要重启 server；已运行的外部 server 不会被浏览器强行修改。
+本轮 OCUI 移植范围、验证方式和保留限制见 [同步记录](docs/OCUI_ANDROID_SYNC.md)。
+
+## 插件宿主适配（P0 + P1）
+
+已加入会话级主题、可见的 RPC 降级、组件回调错误隔离与 custom UI 取消处理。扩展诊断通过原有状态/通知通道显示，未将协议版本提升为 2；终端主题不会改变 Android 全局主题。
+
+- 这些修复主要在 server/worker；只安装新 APK 不会更新远端宿主。
+- 个人插件清单仅做版本/哈希快照和隔离验证，**没有自动启用整套个人配置**。
+- `PI_CODING_AGENT_DIR` 默认仍是 `~/.pi/agent`，为保持兼容没有修改。试用新宿主时应显式指定一个独立目录，再逐个配置插件；不要直接复制凭据、旧会话或自动补丁。
+- 初始化成功不代表插件功能全部适配。原生问答、任务卡片、远程评审和上下文视图属于后续阶段。
+
+完整实现、逐插件测试边界、可复现命令及签名 APK 记录见 [P0/P1 交付记录](docs/PLUGIN_HOST_P1.md)。
+
+## Android 构建
+
+```bash
+# 一次性：生成 Android 图标资源占位（不放桌面 runtime 进 APK）
+npm run prepare:tauri-mobile-resources
+
+# 开发（连接本机 8787 的 server；需先另开 npm run dev:server:pi）
+npm run tauri:android:dev
+
+# 打包 APK（arm64）
+npm run tauri:android:build -- --apk --target aarch64
+```
+
+- `gen/android` 已提交进仓库（含自定义 `MainActivity.kt` 与沉浸式主题），**不要重新 `tauri android init`**，否则会覆盖自定义文件。
+- 构建产物在 `packages/app/src-tauri/gen/android/app/build/outputs/apk/`。
+- 发布签名走 CI（`.github/workflows/android-release.yml`），需配置 `ANDROID_KEYSTORE_BASE64` / `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` 三个 secret。
+- 本机需安装 Android SDK（`ANDROID_HOME` 指向 SDK 根目录，NDK 装在 `$ANDROID_HOME/ndk/` 下即可被 tauri CLI 找到，CI 固定用 `29.0.14206865`，本机 r28 亦验证可构建）。
 
 ## 架构概览
 
@@ -163,9 +202,29 @@ session.preview
 npm run typecheck
 npm test
 npm run build
+npm run validate      # check:docs → conformance:sdk:check → typecheck → lint → test → build
 ```
 
-只运行 app 测试：
+app 覆盖率（阈值在 `packages/app/vitest.config.ts`，掉下门槛即失败）：
+
+```bash
+npm run test:coverage   # = npm test + app 的 --coverage，输出 text 表 + coverage/index.html
+```
+
+真实双后端 + Chromium 移动视口冒烟（使用 mock worker，不调用 LLM，也不读取个人 Pi 配置）：
+
+```bash
+npm run build
+npm run smoke                 # 两个冒烟都跑：npm run smoke:timeline && npm run smoke:android-ui
+npm run smoke:android-ui      # = node --import tsx scripts/smoke-android-ui.mjs
+npm run smoke:timeline        # = node --import tsx scripts/smoke-timeline-order.mjs
+```
+
+需要本机 Chromium；可通过 `CHROMIUM_BIN` 指定路径，`CHROMIUM_EXTRA_ARGS` 追加启动参数（容器/CI 里通常需要 `--no-sandbox`）。测试结束会关闭其启动的服务、worker 和浏览器，截图路径打印在输出中。`smoke-timeline-order.mjs` 单独校验聊天时间线：系统条目与隐藏 hook 消息不得让助手脱离所在回合，流式过程内容必须留在折叠壳内。两个冒烟都需要先 `npm run build`（依赖 `packages/app/dist` 与三个 Node 包的 `dist`）。
+
+CI（`.github/workflows/ci.yml`）在 ubuntu + windows 上跑 `npm run validate`，ubuntu 那支额外带 `PIUI_TEST_COVERAGE=1` 收覆盖率、并在同一个 job 里接着跑两个冒烟；推送到 `main`、`v*` tag 和所有 PR 都触发。
+
+只运行 app 测试（低内存环境可附加 `-- --maxWorkers=1`）：
 
 ```bash
 npm run test:run -w @piui/app
@@ -185,7 +244,7 @@ npm run install:test-extension
 
 ## 相关目录
 
-- `packages/app`：React Web/桌面客户端
+- `packages/app`：React 客户端（Tauri Android 壳 + Web）
 - `packages/server`：HTTP、WebSocket、session host、PTY 和静态托管
 - `packages/pi-worker`：Pi SDK worker 和 runtime adapter
 - `packages/protocol`：前后端协议与命令定义
@@ -201,7 +260,7 @@ npm run install:test-extension
 修改 SVG 后重新生成图标：
 
 ```bash
-# 1. 重新生成桌面/Windows/macOS/iOS 全套（写 src-tauri/icons）
+# 1. 重新生成通用图标全套（写 src-tauri/icons，同时是下一步的输入源）
 npm run icons:tauri -w @piui/app
 
 # 2. 重新生成 Android mipmap 全套（tauri 的 Android 输出比例不可控，必须用脚本覆盖）
@@ -239,7 +298,7 @@ git tag v0.x.x
 git push origin main
 git push origin v0.x.x
 
-# 5. GitHub Actions 自动构建并发布桌面端
+# 5. GitHub Actions 自动构建并发布 Android APK
 
 # 6. 把 main 同步回 dev
 git switch dev
@@ -255,17 +314,15 @@ git push origin dev
 
 ### 升级 Pi SDK
 
-升级 `@earendil-works/pi-*` SDK 时，不要只改 `package.json`，应使用同步脚本，它会同时更新依赖声明、`PI_PARITY_SDK_VERSION`、`BUNDLED_PI_SDK_VERSION`、测试断言和文档基线：
+当前发布基线固定为 `1.3.0`（权威来源是 `packages/protocol/src/version.ts` 的 `PI_PARITY_SDK_VERSION`，由 `npm run conformance:sdk:check` 门禁校验）。升级前先用 `scripts/probe-pi-sdk.mjs` 对指定候选安装运行隔离契约测试，不直接追随全局 Pi 或 npm latest。
+
+同步脚本会更新依赖声明、`PI_PARITY_SDK_VERSION`、`BUNDLED_PI_SDK_VERSION`、测试断言、`docs/` 中声明的文档基线（含 [`PI_SDK_API_MATRIX.md`](docs/PI_SDK_API_MATRIX.md) 的 `Baseline` 行）和文档草稿；修改完成不等于验证通过。请显式指定候选版本，检查整个 SDK 家族均为精确版本，并审阅文档中的能力声明：
 
 ```bash
-# 自动取 npm 最新版
-node scripts/update-pi-sdk.mjs
-
-# 或指定版本
-node scripts/update-pi-sdk.mjs 0.x.x
+node scripts/update-pi-sdk.mjs <candidate-version>
 
 # 不重新 npm install（依赖已正确安装时使用）
-node scripts/update-pi-sdk.mjs 0.x.x --no-install
+node scripts/update-pi-sdk.mjs <candidate-version> --no-install
 ```
 
 然后运行 SDK 一致性校验：
@@ -273,7 +330,10 @@ node scripts/update-pi-sdk.mjs 0.x.x --no-install
 ```bash
 npm run conformance:sdk          # 全量验证
 npm run conformance:sdk:check    # 只检查版本一致性
+npm run check:docs               # 校验文档里的声明式版本与代码常量一致
 ```
+
+`npm run validate` 已包含上面两个 `:check` 门禁，CI 每次推送都会跑。
 
 ## 许可证
 

@@ -25,11 +25,7 @@ export type {
 } from '@earendil-works/pi-coding-agent'
 
 // Agent messages and content blocks
-export type {
-  AgentMessage,
-  AgentEvent,
-  ThinkingLevel,
-} from '@earendil-works/pi-agent-core'
+export type { AgentMessage, AgentEvent, ThinkingLevel } from '@earendil-works/pi-agent-core'
 export type {
   UserMessage,
   AssistantMessage,

@@ -1,6 +1,6 @@
-import type { Server as HttpServer } from "node:http"
-import type { WebSocketServer } from "ws"
-import { closeEventWebSocket } from "./ws.ts"
+import type { Server as HttpServer } from 'node:http'
+import type { WebSocketServer } from 'ws'
+import { closeEventWebSocket } from './ws.ts'
 
 export interface ShutdownOptions {
   timeoutMs?: number
@@ -35,14 +35,16 @@ export function shutdownAppServer(
       server.close(error => (error ? reject(error) : resolve()))
     }),
   ]).then(async results => {
-    const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected")
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
     if (failure) throw failure.reason
     await options.cleanup?.()
   })
 
-  void closing.finally(() => {
-    clearTimeout(deadline)
-    if (hardStop) clearTimeout(hardStop)
-  }).catch(() => undefined)
+  void closing
+    .finally(() => {
+      clearTimeout(deadline)
+      if (hardStop) clearTimeout(hardStop)
+    })
+    .catch(() => undefined)
   return closing
 }

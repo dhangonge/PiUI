@@ -120,9 +120,29 @@ describe('SlashCommandMenu', () => {
   it('exports the pi TUI builtin command set', () => {
     const names = getFrontendCommands().map(cmd => cmd.name)
     for (const builtin of [
-      'new', 'compact', 'model', 'settings', 'hotkeys', 'changelog', 'resume',
-      'session', 'tree', 'clone', 'copy', 'fork', 'trust', 'login', 'logout',
-      'export', 'import', 'scoped-models', 'name', 'share', 'reload', 'quit', 'bash',
+      'new',
+      'compact',
+      'model',
+      'settings',
+      'hotkeys',
+      'changelog',
+      'resume',
+      'session',
+      'tree',
+      'clone',
+      'copy',
+      'fork',
+      'trust',
+      'login',
+      'logout',
+      'export',
+      'import',
+      'scoped-models',
+      'name',
+      'share',
+      'reload',
+      'quit',
+      'bash',
     ]) {
       expect(names).toContain(builtin)
     }

@@ -1,8 +1,24 @@
-import type { CommandRecord, ExtensionUiDialogResponse, JsonObject, JsonValue, RegistrySnapshot, CommandDescriptor, ToolDescriptor } from '@piui/protocol'
+import type {
+  CommandRecord,
+  ExtensionUiDialogResponse,
+  JsonObject,
+  JsonValue,
+  RegistrySnapshot,
+  CommandDescriptor,
+  ToolDescriptor,
+} from '@piui/protocol'
 import type { SessionInfo } from '@earendil-works/pi-coding-agent'
 import type { Model, Api } from '@earendil-works/pi-ai'
 import * as transport from '../transport/index.js'
-import { piSessionInfoStore, piBranchStore, piSessionStateStore, piModelsStore } from '../state/index.js'
+import { piSessionInfoStore, piBranchStore, piSessionStateStore } from '../state/index.js'
+import { getPiModelsStore } from '../state/piModelsStore'
+import {
+  getServerRevision,
+  getSessionRevision,
+  makeSessionKey,
+  scopeSessionResult,
+  sessionKeyToSessionId,
+} from '../../utils/sessionKey'
 import { mergeLatestBranchPage } from '../branchMerge.js'
 import { serverStore } from '../../store/serverStore'
 import type { PiBranchPage } from '../domain/index.js'
@@ -27,30 +43,45 @@ export async function loadPiSessionTools(sessionId: string, signal?: AbortSignal
 /**
  * Load all Pi sessions globally.
  */
-export async function loadPiSessions(signal?: AbortSignal): Promise<SessionInfo[]> {
-  const serverGeneration = serverStore.getActiveServerGeneration()
-  const sessions = await retryUnavailable(() => transport.listAllPiSessions(signal), signal)
-  if (serverStore.getActiveServerGeneration() !== serverGeneration) return sessions
-  piSessionInfoStore.replaceAll(sessions)
+export async function loadPiSessions(signal?: AbortSignal, serverId?: string, search?: string): Promise<SessionInfo[]> {
+  const revision = () => (serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration())
+  const generation = revision()
+  const raw = await retryUnavailable(() => transport.listAllPiSessions(signal, serverId, search), signal)
+  const sessions = serverId ? raw.map(info => ({ ...info, id: makeSessionKey(serverId, info.id) })) : raw
+  if (revision() !== generation) return sessions
+  if (serverId) piSessionInfoStore.replaceForServer(serverId, sessions)
+  else piSessionInfoStore.replaceAll(sessions)
   return sessions
 }
 
 /**
  * Load Pi sessions for specific working directory.
  */
-export async function loadPiSessionsForCwd(cwd: string, signal?: AbortSignal): Promise<SessionInfo[]> {
-  const serverGeneration = serverStore.getActiveServerGeneration()
-  const sessions = await retryUnavailable(() => transport.listPiSessions({ cwd }, signal), signal)
-  if (serverStore.getActiveServerGeneration() !== serverGeneration) return sessions
-  piSessionInfoStore.replaceForCwd(cwd, sessions)
+export async function loadPiSessionsForCwd(
+  cwd: string,
+  signal?: AbortSignal,
+  serverId?: string,
+  search?: string,
+): Promise<SessionInfo[]> {
+  const revision = () => (serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration())
+  const generation = revision()
+  const raw = await retryUnavailable(() => transport.listPiSessions({ cwd, search }, signal, serverId), signal)
+  const sessions = serverId ? raw.map(info => ({ ...info, id: makeSessionKey(serverId, info.id) })) : raw
+  if (revision() !== generation) return sessions
+  piSessionInfoStore.replaceForCwd(cwd, sessions, serverId)
   return sessions
 }
 
 /**
  * Delete a Pi session file.
  */
-export async function deletePiSession(cwd: string, sessionFile: string, signal?: AbortSignal): Promise<void> {
-  await transport.deletePiSession(cwd, sessionFile, signal)
+export async function deletePiSession(
+  cwd: string,
+  sessionFile: string,
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<void> {
+  await transport.deletePiSession(cwd, sessionFile, signal, serverId)
 }
 
 /**
@@ -61,26 +92,47 @@ export async function openPiSession(
   sessionFile?: string,
   signal?: AbortSignal,
   reuseFromSessionId?: string,
+  serverId?: string,
 ): Promise<transport.PiSessionOpenResult> {
-  const result = await transport.openPiSession({ cwd, sessionFile, reuseFromSessionId }, signal)
+  const result = scopeSessionResult(
+    await transport.openPiSession(
+      {
+        cwd,
+        sessionFile,
+        reuseFromSessionId: reuseFromSessionId ? sessionKeyToSessionId(reuseFromSessionId) : undefined,
+      },
+      signal,
+      serverId,
+    ),
+    serverId,
+  )
 
   if (!result.sessionId) {
     throw new Error('Session open failed: no sessionId returned')
   }
 
-  if (result.sessionFile && result.sessionFileReady !== false) {
-    // Existing sessions have a persisted file and can be previewed immediately.
-    await loadPiSessionData(result.sessionId, signal)
-  } else {
-    // A fresh Pi runtime has no session file until its first entry is written.
-    // Use the state returned by session.open instead of previewing a path that
-    // does not exist yet.
-    const state = result.state && typeof result.state === 'object' && !Array.isArray(result.state)
-      ? result.state as JsonObject
+  // session.open already carries the fresh runtime state, and branch.get reads
+  // the same runtime. Previewing the file again read the whole transcript a
+  // second time (21MB sessions cost ~220ms + page building on every open).
+  const state =
+    result.state && typeof result.state === 'object' && !Array.isArray(result.state)
+      ? (result.state as JsonObject)
       : undefined
-    if (state) piSessionStateStore.setState(result.sessionId, state)
+  if (state) piSessionStateStore.setState(result.sessionId, state)
+
+  try {
+    const branch = await transport.getPiBranchPage(
+      result.sessionId,
+      { limit: BRANCH_PAGE_LIMIT, maxBytes: BRANCH_PAGE_MAX_BYTES },
+      signal,
+    )
+    piBranchStore.setData(result.sessionId, branch)
+  } catch (error) {
+    if (!state) throw error
+    // Keep the open usable even when the first page fails: show an empty
+    // timeline; the event stream refreshes it once the runtime catches up.
     piBranchStore.setData(result.sessionId, {
-      head: (state?.head ?? {
+      head: (state.head ?? {
         sdkVersion: 'unknown',
         revision: 0,
         header: null,
@@ -96,8 +148,12 @@ export async function openPiSession(
   return result
 }
 
-export function createPiSession(cwd: string, signal?: AbortSignal): Promise<transport.PiSessionCreateResult> {
-  return transport.createPiSession(cwd, signal)
+export async function createPiSession(
+  cwd: string,
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<transport.PiSessionCreateResult> {
+  return scopeSessionResult(await transport.createPiSession(cwd, signal, serverId), serverId)
 }
 
 /**
@@ -108,7 +164,7 @@ const BRANCH_PAGE_LIMIT = 100
 const BRANCH_PAGE_MAX_BYTES = 2 * 1024 * 1024
 
 export async function loadPiSessionData(sessionId: string, signal?: AbortSignal): Promise<void> {
-  const generation = serverStore.getActiveServerGeneration()
+  const generation = getSessionRevision(sessionId)
   const flightKey = `${generation}:${sessionId}`
   const existing = sessionDataFlights.get(flightKey)
   if (existing) return existing
@@ -121,17 +177,17 @@ export async function loadPiSessionData(sessionId: string, signal?: AbortSignal)
 }
 
 async function loadPiSessionDataOnce(sessionId: string, signal?: AbortSignal): Promise<void> {
-  const serverGeneration = serverStore.getActiveServerGeneration()
+  const serverGeneration = getSessionRevision(sessionId)
   let lastError: unknown
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-        const preview = await retryUnavailable(() => transport.previewPiSession(
-          sessionId,
-          { limit: BRANCH_PAGE_LIMIT, maxBytes: BRANCH_PAGE_MAX_BYTES },
-          signal,
-        ), signal)
+      const preview = await retryUnavailable(
+        () =>
+          transport.previewPiSession(sessionId, { limit: BRANCH_PAGE_LIMIT, maxBytes: BRANCH_PAGE_MAX_BYTES }, signal),
+        signal,
+      )
 
-      if (serverStore.getActiveServerGeneration() !== serverGeneration) return
+      if (getSessionRevision(sessionId) !== serverGeneration) return
       piSessionStateStore.setState(sessionId, preview.state)
       piBranchStore.setData(sessionId, preview.branch)
       return
@@ -139,11 +195,11 @@ async function loadPiSessionDataOnce(sessionId: string, signal?: AbortSignal): P
       lastError = error
       if (!isSessionBusyError(error) && !isTransientServerError(error)) break
       if (attempt === 2) break
-      await waitForRetry(150 * (attempt + 1), undefined)
+      await waitForRetry(150 * (attempt + 1), signal)
     }
   }
 
-  if (serverStore.getActiveServerGeneration() !== serverGeneration) return
+  if (getSessionRevision(sessionId) !== serverGeneration) return
   console.error('Failed to load session data:', lastError)
   piSessionStateStore.setError(sessionId, lastError as Error)
   piBranchStore.setError(sessionId, lastError as Error)
@@ -157,15 +213,22 @@ function isSessionBusyError(error: unknown): boolean {
 function isTransientServerError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false
   const candidate = error as { status?: unknown; code?: unknown }
-  return candidate.status === 502 || candidate.status === 503 || candidate.status === 504
-    || candidate.code === 'BACKEND_UNAVAILABLE'
-    || candidate.code === 'WORKER_RESULT_UNKNOWN'
+  return (
+    candidate.status === 502 ||
+    candidate.status === 503 ||
+    candidate.status === 504 ||
+    candidate.code === 'BACKEND_UNAVAILABLE' ||
+    candidate.code === 'WORKER_RESULT_UNKNOWN'
+  )
 }
 
 async function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, delayMs)
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, delayMs)
     const onAbort = () => {
       clearTimeout(timer)
       reject(signal?.reason ?? new DOMException('The operation was aborted', 'AbortError'))
@@ -203,7 +266,7 @@ export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortS
   if (!currentBranch.hasMore || !currentBranch.beforeCursor) {
     return // No more data
   }
-  const serverGeneration = serverStore.getActiveServerGeneration()
+  const serverGeneration = getSessionRevision(sessionId)
 
   try {
     const olderPage = await transport.getPiBranchPage(
@@ -212,7 +275,7 @@ export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortS
       signal,
     )
 
-    if (serverStore.getActiveServerGeneration() !== serverGeneration || piBranchStore.getData(sessionId) !== currentBranch) return
+    if (getSessionRevision(sessionId) !== serverGeneration || piBranchStore.getData(sessionId) !== currentBranch) return
 
     // Prepend older items; keep latest head/hasMore/cursor from the new page
     piBranchStore.setData(sessionId, {
@@ -243,9 +306,13 @@ export async function loadMorePiBranchEntries(sessionId: string, signal?: AbortS
  * Used by the event stream when head revision changes.
  */
 export async function refreshPiBranch(sessionId: string, signal?: AbortSignal): Promise<void> {
-  const serverGeneration = serverStore.getActiveServerGeneration()
-  const latest = await transport.getPiBranchPage(sessionId, { limit: BRANCH_PAGE_LIMIT, maxBytes: BRANCH_PAGE_MAX_BYTES }, signal)
-  if (serverStore.getActiveServerGeneration() !== serverGeneration) return
+  const serverGeneration = getSessionRevision(sessionId)
+  const latest = await transport.getPiBranchPage(
+    sessionId,
+    { limit: BRANCH_PAGE_LIMIT, maxBytes: BRANCH_PAGE_MAX_BYTES },
+    signal,
+  )
+  if (getSessionRevision(sessionId) !== serverGeneration) return
   piBranchStore.setData(sessionId, mergeLatestBranchPage(piBranchStore.getData(sessionId), latest))
 }
 
@@ -254,9 +321,9 @@ export async function refreshPiBranch(sessionId: string, signal?: AbortSignal): 
  * Used by the event stream when state-only events arrive.
  */
 export async function refreshPiSessionState(sessionId: string, signal?: AbortSignal): Promise<void> {
-  const serverGeneration = serverStore.getActiveServerGeneration()
+  const serverGeneration = getSessionRevision(sessionId)
   const state = await transport.getPiSessionState(sessionId, signal)
-  if (serverStore.getActiveServerGeneration() !== serverGeneration) return
+  if (getSessionRevision(sessionId) !== serverGeneration) return
   piSessionStateStore.setState(sessionId, state as JsonObject)
 }
 
@@ -282,7 +349,11 @@ export async function sendPiPrompt(
  * Compact the session context (native /compact). Serialized — submit, then
  * wait for completion so callers can resolve pending UI.
  */
-export async function compactPiSession(sessionId: string, customInstructions?: string, signal?: AbortSignal): Promise<JsonValue> {
+export async function compactPiSession(
+  sessionId: string,
+  customInstructions?: string,
+  signal?: AbortSignal,
+): Promise<JsonValue> {
   try {
     const submitted = await transport.compactPi(sessionId, customInstructions, signal)
     // 压缩经常超过默认 30s 的 waitHostCommand 超时（会误报 Command timed out，
@@ -307,7 +378,10 @@ export async function reloadPiSessionResources(sessionId: string, signal?: Abort
  * Load the session's full runtime registry (tools, commands, extensions,
  * event handlers).
  */
-export async function loadPiSessionRegistry(sessionId: string, signal?: AbortSignal): Promise<RegistrySnapshot | undefined> {
+export async function loadPiSessionRegistry(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<RegistrySnapshot | undefined> {
   return (await transport.getPiSessionRegistry(sessionId, signal)) as RegistrySnapshot | undefined
 }
 
@@ -319,10 +393,15 @@ async function submitAndWait(submit: () => Promise<CommandRecord>, signal?: Abor
 
 /** Create a new native session from the current runtime (replacement). */
 export async function newPiSessionFrom(sessionId: string, signal?: AbortSignal): Promise<transport.PiForkResult> {
-  return (await submitAndWait(() => transport.newPiSession(sessionId, sessionId), signal) ?? {}) as transport.PiForkResult
+  return ((await submitAndWait(() => transport.newPiSession(sessionId, sessionId), signal)) ??
+    {}) as transport.PiForkResult
 }
 
-export async function cyclePiModel(sessionId: string, direction?: 'forward' | 'backward', signal?: AbortSignal): Promise<void> {
+export async function cyclePiModel(
+  sessionId: string,
+  direction?: 'forward' | 'backward',
+  signal?: AbortSignal,
+): Promise<void> {
   await submitAndWait(() => transport.cyclePiModel(sessionId, direction, signal), signal)
 }
 
@@ -335,7 +414,13 @@ export async function setPiScopedModels(sessionId: string, patterns: string[], s
 }
 
 /** Run a one-shot bash command; resolves with the native result. */
-export async function executePiBash(sessionId: string, command: string, excludeFromContext?: boolean, clientId?: string, signal?: AbortSignal): Promise<JsonValue> {
+export async function executePiBash(
+  sessionId: string,
+  command: string,
+  excludeFromContext?: boolean,
+  clientId?: string,
+  signal?: AbortSignal,
+): Promise<JsonValue> {
   return submitAndWait(() => transport.executePiBash(sessionId, command, excludeFromContext, clientId, signal), signal)
 }
 
@@ -344,15 +429,33 @@ export async function abortPiBashExecution(sessionId: string, signal?: AbortSign
 }
 
 /** Export the session; resolves with the native result (output path etc.). */
-export async function exportPiSession(sessionId: string, format: 'html' | 'jsonl', outputPath: string, signal?: AbortSignal): Promise<JsonValue> {
-  const submit = format === 'html'
-    ? () => transport.exportPiSessionHtml(sessionId, outputPath, signal)
-    : () => transport.exportPiSessionJsonl(sessionId, outputPath, signal)
+export async function exportPiSession(
+  sessionId: string,
+  format: 'html' | 'jsonl',
+  outputPath: string,
+  signal?: AbortSignal,
+): Promise<JsonValue> {
+  const submit =
+    format === 'html'
+      ? () => transport.exportPiSessionHtml(sessionId, outputPath, signal)
+      : () => transport.exportPiSessionJsonl(sessionId, outputPath, signal)
   return submitAndWait(submit, signal)
 }
 
 export async function waitForPiIdle(sessionId: string, signal?: AbortSignal): Promise<void> {
   await submitAndWait(() => transport.waitPiForIdle(sessionId, signal), signal)
+}
+
+/**
+ * Stop a background subagent by id (`StopAgent` extension tool).
+ *
+ * A foreground agent is stopped by aborting the turn that runs it; a
+ * background agent (`run_in_background`) keeps running after its tool call
+ * returned, so it has to be stopped through the plugin's own tool. The tool
+ * reports "already <status>" as a normal result, so only real failures reject.
+ */
+export async function stopPiAgent(sessionId: string, agentId: string, signal?: AbortSignal): Promise<void> {
+  await submitAndWait(() => transport.invokePiTool(sessionId, 'StopAgent', { agent_id: agentId }, signal), signal)
 }
 
 export async function sendPiCustomMessage(
@@ -363,7 +466,12 @@ export async function sendPiCustomMessage(
   await submitAndWait(() => transport.sendPiCustomMessage(sessionId, params, signal), signal)
 }
 
-export async function appendPiCustomEntry(sessionId: string, customType: string, data: JsonValue, signal?: AbortSignal): Promise<void> {
+export async function appendPiCustomEntry(
+  sessionId: string,
+  customType: string,
+  data: JsonValue,
+  signal?: AbortSignal,
+): Promise<void> {
   await submitAndWait(() => transport.appendPiCustomEntry(sessionId, customType, data, signal), signal)
 }
 
@@ -421,7 +529,12 @@ export async function abortPiOperation(sessionId: string, signal?: AbortSignal):
 /**
  * Set Pi model.
  */
-export async function setPiModel(sessionId: string, provider: string, modelId: string, signal?: AbortSignal): Promise<void> {
+export async function setPiModel(
+  sessionId: string,
+  provider: string,
+  modelId: string,
+  signal?: AbortSignal,
+): Promise<void> {
   try {
     await submitAndWait(() => transport.setPiModel(sessionId, { provider, modelId }, signal), signal)
   } catch (error) {
@@ -517,7 +630,12 @@ export async function importPiSession(
 /**
  * Set an entry label, then refresh session state (tree labels ride along).
  */
-export async function setPiEntryLabel(sessionId: string, entryId: string, label?: string, signal?: AbortSignal): Promise<void> {
+export async function setPiEntryLabel(
+  sessionId: string,
+  entryId: string,
+  label?: string,
+  signal?: AbortSignal,
+): Promise<void> {
   const submitted = await transport.setPiLabel(sessionId, entryId, label, signal)
   await transport.waitHostCommand(submitted.id, signal)
 }
@@ -560,29 +678,40 @@ export async function clearPiQueue(
   return (await transport.clearPiQueue(sessionId, signal)) as { steering: string[]; followUp: string[] } | null
 }
 
-export async function setPiSteeringMode(sessionId: string, mode: 'all' | 'one-at-a-time', signal?: AbortSignal): Promise<void> {
+export async function setPiSteeringMode(
+  sessionId: string,
+  mode: 'all' | 'one-at-a-time',
+  signal?: AbortSignal,
+): Promise<void> {
   await transport.setPiSteeringMode(sessionId, mode, signal)
 }
 
-export async function setPiFollowUpMode(sessionId: string, mode: 'all' | 'one-at-a-time', signal?: AbortSignal): Promise<void> {
+export async function setPiFollowUpMode(
+  sessionId: string,
+  mode: 'all' | 'one-at-a-time',
+  signal?: AbortSignal,
+): Promise<void> {
   await transport.setPiFollowUpMode(sessionId, mode, signal)
 }
 
 /**
  * Load available models from the Pi model runtime into the models store.
  */
-const modelFlights = new Map<number, Promise<Model<Api>[]>>()
+const modelFlights = new Map<string, Promise<Model<Api>[]>>()
 
-export async function loadPiModels(signal?: AbortSignal): Promise<Model<Api>[]> {
-  const serverGeneration = serverStore.getActiveServerGeneration()
-  const existing = modelFlights.get(serverGeneration)
+export async function loadPiModels(signal?: AbortSignal, serverId?: string): Promise<Model<Api>[]> {
+  const serverGeneration = serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration()
+  const key = `${serverId ?? ''}:${serverGeneration}`
+  const existing = modelFlights.get(key)
   if (existing) return existing
 
-  const flight = loadPiModelsOnce(serverGeneration, signal)
-  modelFlights.set(serverGeneration, flight)
-  void flight.finally(() => {
-    if (modelFlights.get(serverGeneration) === flight) modelFlights.delete(serverGeneration)
-  }).catch(() => undefined)
+  const flight = loadPiModelsOnce(serverGeneration, signal, serverId)
+  modelFlights.set(key, flight)
+  void flight
+    .finally(() => {
+      if (modelFlights.get(key) === flight) modelFlights.delete(key)
+    })
+    .catch(() => undefined)
   return flight
 }
 
@@ -594,20 +723,30 @@ export async function logoutPiProvider(providerId: string, signal?: AbortSignal)
   await transport.logoutProvider(providerId, signal)
 }
 
-export async function startPiProviderAuth(providerId: string, authType?: 'api_key' | 'oauth', signal?: AbortSignal): Promise<void> {
+export async function startPiProviderAuth(
+  providerId: string,
+  authType?: 'api_key' | 'oauth',
+  signal?: AbortSignal,
+): Promise<void> {
   await transport.startProviderAuth(providerId, authType, signal)
 }
 
-async function loadPiModelsOnce(serverGeneration: number, signal?: AbortSignal): Promise<Model<Api>[]> {
+async function loadPiModelsOnce(
+  serverGeneration: number,
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<Model<Api>[]> {
+  const piModelsStore = getPiModelsStore(serverId)
+  const revision = () => (serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration())
   piModelsStore.setLoading(true)
   try {
-    const result = await retryUnavailable(() => transport.listPiModels(signal), signal)
+    const result = await retryUnavailable(() => transport.listPiModels(signal, serverId), signal)
     const models = (Array.isArray(result) ? result : []) as unknown as Model<Api>[]
-    if (serverStore.getActiveServerGeneration() !== serverGeneration) return models
+    if (revision() !== serverGeneration) return models
     piModelsStore.setModels(models)
     return models
   } catch (error) {
-    if (serverStore.getActiveServerGeneration() !== serverGeneration) throw error
+    if (revision() !== serverGeneration) throw error
     piModelsStore.setError(error as Error)
     throw error
   }

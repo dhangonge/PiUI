@@ -2,16 +2,16 @@
  * Workspace-relative path containment (Phase 1).
  * Browser only submits relative POSIX paths; absolute/drive/UNC rejected.
  */
-import { realpathSync, existsSync, lstatSync, statSync } from "node:fs"
-import path from "node:path"
+import { realpathSync, existsSync, lstatSync, statSync } from 'node:fs'
+import path from 'node:path'
 
 export class PathSafetyError extends Error {
   constructor(
-    readonly code: "PATH_OUTSIDE_WORKSPACE" | "SYMLINK_ESCAPE" | "INVALID_REQUEST" | "FILE_TOO_LARGE",
+    readonly code: 'PATH_OUTSIDE_WORKSPACE' | 'SYMLINK_ESCAPE' | 'INVALID_REQUEST' | 'FILE_TOO_LARGE',
     message: string,
   ) {
     super(message)
-    this.name = "PathSafetyError"
+    this.name = 'PathSafetyError'
   }
 }
 
@@ -20,41 +20,41 @@ const UNC = /^[\\/]{2}/
 
 /** Reject absolute, drive, UNC, NUL, empty. Normalize relative segments. */
 export function normalizeRelativePath(input: string, platform = process.platform): string {
-  if (input == null || typeof input !== "string") {
-    throw new PathSafetyError("INVALID_REQUEST", "path required")
+  if (input == null || typeof input !== 'string') {
+    throw new PathSafetyError('INVALID_REQUEST', 'path required')
   }
-  let p = input.replace(/\\/g, "/")
-  if (p === "") return ""
-  if (p.includes("\0")) {
-    throw new PathSafetyError("INVALID_REQUEST", "NUL in path")
+  let p = input.replace(/\\/g, '/')
+  if (p === '') return ''
+  if (p.includes('\0')) {
+    throw new PathSafetyError('INVALID_REQUEST', 'NUL in path')
   }
-  if (p.startsWith("/") || ABSOLUTE_WIN.test(p) || UNC.test(p)) {
-    throw new PathSafetyError("PATH_OUTSIDE_WORKSPACE", "absolute path not allowed")
+  if (p.startsWith('/') || ABSOLUTE_WIN.test(p) || UNC.test(p)) {
+    throw new PathSafetyError('PATH_OUTSIDE_WORKSPACE', 'absolute path not allowed')
   }
   // strip leading ./
-  while (p.startsWith("./")) p = p.slice(2)
-  const parts = p.split("/").filter(seg => seg !== "" && seg !== ".")
+  while (p.startsWith('./')) p = p.slice(2)
+  const parts = p.split('/').filter(seg => seg !== '' && seg !== '.')
   const out: string[] = []
   for (const seg of parts) {
-    if (platform === "win32" && seg.includes(":")) {
-      throw new PathSafetyError("INVALID_REQUEST", "Windows alternate data streams are not allowed")
+    if (platform === 'win32' && seg.includes(':')) {
+      throw new PathSafetyError('INVALID_REQUEST', 'Windows alternate data streams are not allowed')
     }
-    if (seg === "..") {
+    if (seg === '..') {
       if (out.length === 0) {
-        throw new PathSafetyError("PATH_OUTSIDE_WORKSPACE", "path escapes workspace via ..")
+        throw new PathSafetyError('PATH_OUTSIDE_WORKSPACE', 'path escapes workspace via ..')
       }
       out.pop()
       continue
     }
     out.push(seg)
   }
-  return out.join("/")
+  return out.join('/')
 }
 
 function isInsideRoot(rootReal: string, targetReal: string): boolean {
   const rel = path.relative(rootReal, targetReal)
-  if (rel === "") return true
-  if (rel.startsWith("..") || path.isAbsolute(rel)) return false
+  if (rel === '') return true
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return false
   return true
 }
 
@@ -73,7 +73,7 @@ export interface ResolveResult {
 export function resolveWorkspacePath(rootPath: string, relativeInput: string): ResolveResult {
   const relative = normalizeRelativePath(relativeInput)
   const rootReal = realpathSync(rootPath)
-  const joined = relative === "" ? rootReal : path.join(rootReal, ...relative.split("/"))
+  const joined = relative === '' ? rootReal : path.join(rootReal, ...relative.split('/'))
 
   if (!existsSync(joined)) {
     // for create targets: check parent containment
@@ -86,7 +86,7 @@ export function resolveWorkspacePath(rootPath: string, relativeInput: string): R
       }
       const parentReal = realpathSync(cur)
       if (!isInsideRoot(rootReal, parentReal)) {
-        throw new PathSafetyError("PATH_OUTSIDE_WORKSPACE", "parent outside workspace")
+        throw new PathSafetyError('PATH_OUTSIDE_WORKSPACE', 'parent outside workspace')
       }
       const missingParent = path.relative(cur, parent)
       return {
@@ -99,7 +99,7 @@ export function resolveWorkspacePath(rootPath: string, relativeInput: string): R
     } else {
       const parentReal = realpathSync(parent)
       if (!isInsideRoot(rootReal, parentReal)) {
-        throw new PathSafetyError("PATH_OUTSIDE_WORKSPACE", "parent outside workspace")
+        throw new PathSafetyError('PATH_OUTSIDE_WORKSPACE', 'parent outside workspace')
       }
       return {
         relative,
@@ -121,9 +121,9 @@ export function resolveWorkspacePath(rootPath: string, relativeInput: string): R
   const targetReal = realpathSync(joined)
   if (!isInsideRoot(rootReal, targetReal)) {
     if (isSymlink) {
-      throw new PathSafetyError("SYMLINK_ESCAPE", "symlink points outside workspace")
+      throw new PathSafetyError('SYMLINK_ESCAPE', 'symlink points outside workspace')
     }
-    throw new PathSafetyError("PATH_OUTSIDE_WORKSPACE", "resolved path outside workspace")
+    throw new PathSafetyError('PATH_OUTSIDE_WORKSPACE', 'resolved path outside workspace')
   }
 
   // ensure we can stat

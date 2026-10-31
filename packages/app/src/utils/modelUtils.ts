@@ -6,6 +6,7 @@
 
 import type { Model, Api } from '@earendil-works/pi-ai'
 import { serverStorage } from './perServerStorage'
+import { serverStore } from '../store/serverStore'
 
 export type AnyModel = Model<Api>
 
@@ -72,9 +73,9 @@ interface SessionModelSelections {
 /**
  * 获取所有模型的使用统计
  */
-export function getModelUsageStats(): ModelUsageStats {
+export function getModelUsageStats(serverId = serverStore.getActiveServerId()): ModelUsageStats {
   try {
-    const stored = serverStorage.get(STORAGE_KEY)
+    const stored = serverStorage.getFor(STORAGE_KEY, serverId)
     return stored ? JSON.parse(stored) : {}
   } catch {
     return {}
@@ -84,9 +85,9 @@ export function getModelUsageStats(): ModelUsageStats {
 /**
  * 记录模型使用
  */
-export function recordModelUsage(model: AnyModel): void {
+export function recordModelUsage(model: AnyModel, serverId = serverStore.getActiveServerId()): void {
   const key = getModelKey(model)
-  const stats = getModelUsageStats()
+  const stats = getModelUsageStats(serverId)
 
   if (!stats[key]) {
     stats[key] = { count: 0, lastUsed: 0 }
@@ -96,7 +97,7 @@ export function recordModelUsage(model: AnyModel): void {
   stats[key].lastUsed = Date.now()
 
   try {
-    serverStorage.set(STORAGE_KEY, JSON.stringify(stats))
+    serverStorage.setFor(STORAGE_KEY, JSON.stringify(stats), serverId)
   } catch (e) {
     console.warn('Failed to save model usage stats:', e)
   }
@@ -109,12 +110,12 @@ export function recordModelUsage(model: AnyModel): void {
 const PREFERRED_MODEL_KEY = 'piui-preferred-model-key'
 
 /** Last model picked in the composer; applied to sessions created later. */
-export function getPreferredModelKey(): string | null {
-  return serverStorage.get(PREFERRED_MODEL_KEY)
+export function getPreferredModelKey(serverId = serverStore.getActiveServerId()): string | null {
+  return serverStorage.getFor(PREFERRED_MODEL_KEY, serverId)
 }
 
-export function setPreferredModelKey(key: string): void {
-  serverStorage.set(PREFERRED_MODEL_KEY, key)
+export function setPreferredModelKey(key: string, serverId = serverStore.getActiveServerId()): void {
+  serverStorage.setFor(PREFERRED_MODEL_KEY, key, serverId)
 }
 
 /**
@@ -133,9 +134,9 @@ export function getModelUsageCount(model: AnyModel): number {
 /**
  * 获取所有模型的 variant 偏好
  */
-export function getModelVariantPrefs(): ModelVariantPrefs {
+export function getModelVariantPrefs(serverId = serverStore.getActiveServerId()): ModelVariantPrefs {
   try {
-    const stored = serverStorage.get(VARIANT_STORAGE_KEY)
+    const stored = serverStorage.getFor(VARIANT_STORAGE_KEY, serverId)
     return stored ? JSON.parse(stored) : {}
   } catch {
     return {}
@@ -145,8 +146,12 @@ export function getModelVariantPrefs(): ModelVariantPrefs {
 /**
  * 保存模型的 variant 偏好
  */
-export function saveModelVariantPref(modelKey: string, variant: string | undefined): void {
-  const prefs = getModelVariantPrefs()
+export function saveModelVariantPref(
+  modelKey: string,
+  variant: string | undefined,
+  serverId = serverStore.getActiveServerId(),
+): void {
+  const prefs = getModelVariantPrefs(serverId)
 
   if (variant) {
     prefs[modelKey] = variant
@@ -155,7 +160,7 @@ export function saveModelVariantPref(modelKey: string, variant: string | undefin
   }
 
   try {
-    serverStorage.set(VARIANT_STORAGE_KEY, JSON.stringify(prefs))
+    serverStorage.setFor(VARIANT_STORAGE_KEY, JSON.stringify(prefs), serverId)
   } catch (e) {
     console.warn('Failed to save model variant pref:', e)
   }
@@ -164,8 +169,8 @@ export function saveModelVariantPref(modelKey: string, variant: string | undefin
 /**
  * 获取模型的 variant 偏好
  */
-export function getModelVariantPref(modelKey: string): string | undefined {
-  const prefs = getModelVariantPrefs()
+export function getModelVariantPref(modelKey: string, serverId?: string): string | undefined {
+  const prefs = getModelVariantPrefs(serverId)
   return prefs[modelKey]
 }
 
@@ -330,8 +335,8 @@ export function groupModelsByProvider(models: readonly AnyModel[]): ModelGroup[]
 /**
  * 获取最近使用的模型列表（用于快速访问）
  */
-export function getRecentModels(models: AnyModel[], limit = 5): AnyModel[] {
-  const stats = getModelUsageStats()
+export function getRecentModels(models: AnyModel[], limit = 5, serverId?: string): AnyModel[] {
+  const stats = getModelUsageStats(serverId)
 
   // 过滤出使用过的模型并按最近使用时间排序
   // 只要有记录且 count > 0 就视为使用过
@@ -357,9 +362,9 @@ export function getRecentModels(models: AnyModel[], limit = 5): AnyModel[] {
 /**
  * 获取所有置顶的模型 key 列表（有序）
  */
-export function getPinnedModelKeys(): string[] {
+export function getPinnedModelKeys(serverId = serverStore.getActiveServerId()): string[] {
   try {
-    const stored = serverStorage.get(PINNED_STORAGE_KEY)
+    const stored = serverStorage.getFor(PINNED_STORAGE_KEY, serverId)
     return stored ? JSON.parse(stored) : []
   } catch {
     return []
@@ -369,17 +374,17 @@ export function getPinnedModelKeys(): string[] {
 /**
  * 判断模型是否已置顶
  */
-export function isModelPinned(model: AnyModel): boolean {
+export function isModelPinned(model: AnyModel, serverId?: string): boolean {
   const key = getModelKey(model)
-  return getPinnedModelKeys().includes(key)
+  return getPinnedModelKeys(serverId).includes(key)
 }
 
 /**
  * 切换模型置顶状态
  */
-export function toggleModelPin(model: AnyModel): boolean {
+export function toggleModelPin(model: AnyModel, serverId = serverStore.getActiveServerId()): boolean {
   const key = getModelKey(model)
-  const pinned = getPinnedModelKeys()
+  const pinned = getPinnedModelKeys(serverId)
   const index = pinned.indexOf(key)
   let nowPinned: boolean
 
@@ -392,7 +397,7 @@ export function toggleModelPin(model: AnyModel): boolean {
   }
 
   try {
-    serverStorage.set(PINNED_STORAGE_KEY, JSON.stringify(pinned))
+    serverStorage.setFor(PINNED_STORAGE_KEY, JSON.stringify(pinned), serverId)
   } catch (e) {
     console.warn('Failed to save pinned models:', e)
   }
@@ -402,8 +407,8 @@ export function toggleModelPin(model: AnyModel): boolean {
 /**
  * 获取置顶模型列表（保持置顶顺序）
  */
-export function getPinnedModels(models: AnyModel[]): AnyModel[] {
-  const pinnedKeys = getPinnedModelKeys()
+export function getPinnedModels(models: AnyModel[], serverId?: string): AnyModel[] {
+  const pinnedKeys = getPinnedModelKeys(serverId)
   if (pinnedKeys.length === 0) return []
 
   const keySet = new Set(pinnedKeys)

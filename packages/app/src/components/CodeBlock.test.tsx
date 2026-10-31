@@ -9,16 +9,12 @@ const useInputCapabilitiesMock = vi.fn(() => ({
   preferTouchUi: false,
 }))
 type HighlightMockOutput = { highlightedCode?: string; output: { content: string; color?: string }[][] | null }
-const useSyntaxHighlightMock = vi.fn(
-  (_code: string, _options: unknown): HighlightMockOutput => ({
-    output: [[{ content: 'highlighted', color: '#fff' }]],
-  }),
-)
-const useStreamingSyntaxHighlightMock = vi.fn(
-  (_code: string, _options: unknown): HighlightMockOutput => ({
-    output: null,
-  }),
-)
+const useSyntaxHighlightMock = vi.fn((_code: string, _options: unknown): HighlightMockOutput => ({
+  output: [[{ content: 'highlighted', color: '#fff' }]],
+}))
+const useStreamingSyntaxHighlightMock = vi.fn((_code: string, _options: unknown): HighlightMockOutput => ({
+  output: null,
+}))
 const useInViewMock = vi.fn(() => ({ ref: vi.fn(), inView: false }))
 const themeSnapshot = { codeWordWrap: false }
 

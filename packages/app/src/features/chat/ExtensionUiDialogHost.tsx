@@ -29,14 +29,8 @@ export function ExtensionUiDialogHost({
     extensionUiStore.getSnapshot,
     extensionUiStore.getSnapshot,
   )
-  const pending = useMemo(
-    () => (sessionId ? snapshot.sessions[sessionId]?.pending ?? [] : []),
-    [sessionId, snapshot],
-  )
-  const sorted = useMemo(
-    () => [...pending].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    [pending],
-  )
+  const pending = useMemo(() => (sessionId ? (snapshot.sessions[sessionId]?.pending ?? []) : []), [sessionId, snapshot])
+  const sorted = useMemo(() => [...pending].sort((a, b) => a.createdAt.localeCompare(b.createdAt)), [pending])
   // 队列分页：当前显示第几个（0-based）。切换只是换显示，请求仍在队列里；
   // 处理（提交/取消）当前后队列前移，自然显示下一个；全部处理完回到 0。
   // 越界/清空在渲染期校正（React 调整 state 的官方模式，避免 effect 级联渲染）
@@ -61,7 +55,7 @@ export function ExtensionUiDialogHost({
 
   return (
     <ExtensionUiDialogCardWrapper
-      key={request.requestId}
+      key={`${request.sessionId}:${request.workerGeneration ?? ''}:${request.requestId}`}
       request={request}
       queueLength={sorted.length}
       queueIndex={queueIndex}

@@ -10,12 +10,16 @@ const {
   isTauriMobileMock,
   getDesktopPlatformMock,
   revealItemInDirMock,
+  downloadWorkspaceFileMock,
+  downloadFileContentMock,
 } = vi.hoisted(() => ({
   useFileExplorerMock: vi.fn(),
   isTauriMock: vi.fn(() => true),
   isTauriMobileMock: vi.fn(() => false),
   getDesktopPlatformMock: vi.fn((): DesktopPlatform => 'windows'),
   revealItemInDirMock: vi.fn(async (_path: string | string[]) => {}),
+  downloadWorkspaceFileMock: vi.fn(async (_options?: unknown) => {}),
+  downloadFileContentMock: vi.fn((_content?: unknown, _fileName?: string) => {}),
 }))
 
 vi.mock('../hooks', () => ({
@@ -30,6 +34,11 @@ vi.mock('../hooks/useVerticalSplitResize', () => ({
     handleResizeStart: vi.fn(),
     handleTouchResizeStart: vi.fn(),
   }),
+}))
+
+vi.mock('../utils/downloadUtils', () => ({
+  downloadWorkspaceFile: (options?: unknown) => downloadWorkspaceFileMock(options),
+  downloadFileContent: (content?: unknown, fileName?: string) => downloadFileContentMock(content, fileName),
 }))
 
 vi.mock('../utils/tauri', () => ({
@@ -50,8 +59,22 @@ vi.mock('../lib/internalDragCore', () => ({
 }))
 
 vi.mock('./CodePreview', () => ({
-  CodePreview: ({ code, readOnly, onChange }: { code: string; readOnly?: boolean; onChange?: (value: string) => void }) =>
-    <textarea aria-label="code editor" value={code} readOnly={readOnly} onChange={event => onChange?.(event.target.value)} />,
+  CodePreview: ({
+    code,
+    readOnly,
+    onChange,
+  }: {
+    code: string
+    readOnly?: boolean
+    onChange?: (value: string) => void
+  }) => (
+    <textarea
+      aria-label="code editor"
+      value={code}
+      readOnly={readOnly}
+      onChange={event => onChange?.(event.target.value)}
+    />
+  ),
 }))
 
 describe('FileExplorer', () => {
@@ -60,6 +83,8 @@ describe('FileExplorer', () => {
     isTauriMobileMock.mockReturnValue(false)
     getDesktopPlatformMock.mockReturnValue('windows')
     revealItemInDirMock.mockClear()
+    downloadWorkspaceFileMock.mockClear()
+    downloadFileContentMock.mockClear()
     useFileExplorerMock.mockReturnValue({
       tree: [
         {
@@ -87,13 +112,7 @@ describe('FileExplorer', () => {
 
   it('reveals the selected file in the system explorer from the context menu', async () => {
     render(
-      <FileExplorer
-        panelTabId="files-1"
-        directory="C:/repo"
-        previewFile={null}
-        previewFiles={[]}
-        position="right"
-      />,
+      <FileExplorer panelTabId="files-1" directory="C:/repo" previewFile={null} previewFiles={[]} position="right" />,
     )
 
     fireEvent.contextMenu(screen.getByRole('button', { name: 'app.ts' }))
@@ -108,13 +127,7 @@ describe('FileExplorer', () => {
     isTauriMock.mockReturnValue(false)
 
     render(
-      <FileExplorer
-        panelTabId="files-1"
-        directory="C:/repo"
-        previewFile={null}
-        previewFiles={[]}
-        position="right"
-      />,
+      <FileExplorer panelTabId="files-1" directory="C:/repo" previewFile={null} previewFiles={[]} position="right" />,
     )
 
     fireEvent.contextMenu(screen.getByRole('button', { name: 'app.ts' }))
@@ -125,13 +138,7 @@ describe('FileExplorer', () => {
     getDesktopPlatformMock.mockReturnValue('macos')
 
     render(
-      <FileExplorer
-        panelTabId="files-1"
-        directory="C:/repo"
-        previewFile={null}
-        previewFiles={[]}
-        position="right"
-      />,
+      <FileExplorer panelTabId="files-1" directory="C:/repo" previewFile={null} previewFiles={[]} position="right" />,
     )
 
     fireEvent.contextMenu(screen.getByRole('button', { name: 'app.ts' }))
@@ -168,5 +175,56 @@ describe('FileExplorer', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'code editor' }), { target: { value: 'updated' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(savePreview).toHaveBeenCalledWith('src/app.ts', 'updated', 'base-etag'))
+  })
+
+  it('offers a direct download when the file is too large to preview', async () => {
+    useFileExplorerMock.mockReturnValue({
+      ...useFileExplorerMock(),
+      previewContent: null,
+      previewError:
+        'http://127.0.0.1:8787/api/v1/host/commands/files.read 413 {"code":"FILE_TOO_LARGE","message":"too big"}',
+    })
+    render(
+      <FullscreenProvider>
+        <FileExplorer
+          panelTabId="files-1"
+          directory="C:/repo"
+          previewFile={{ path: 'src/app.ts', name: 'app.ts' }}
+          previewFiles={[{ path: 'src/app.ts', name: 'app.ts' }]}
+          position="right"
+        />
+      </FullscreenProvider>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download file' }))
+
+    await waitFor(() => {
+      expect(downloadWorkspaceFileMock).toHaveBeenCalledWith({
+        workspacePath: 'C:/repo',
+        path: 'src/app.ts',
+        fileName: 'app.ts',
+      })
+    })
+  })
+
+  it('still shows a plain error when the failure is not a size limit', () => {
+    useFileExplorerMock.mockReturnValue({
+      ...useFileExplorerMock(),
+      previewContent: null,
+      previewError: 'http://127.0.0.1:8787/api/v1/host/commands/files.read 404 {"code":"NOT_FOUND"}',
+    })
+    render(
+      <FullscreenProvider>
+        <FileExplorer
+          panelTabId="files-1"
+          directory="C:/repo"
+          previewFile={{ path: 'src/app.ts', name: 'app.ts' }}
+          previewFiles={[{ path: 'src/app.ts', name: 'app.ts' }]}
+          position="right"
+        />
+      </FullscreenProvider>,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Download file' })).not.toBeInTheDocument()
   })
 })

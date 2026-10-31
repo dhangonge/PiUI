@@ -59,6 +59,47 @@ describe('modelVisibilityStore', () => {
     expect(reloaded.modelVisibilityStore.getSnapshot()).toEqual(['openai:gpt-4o'])
   })
 
+  it('isolates equal model IDs and shares updates only with the owning settings store', async () => {
+    const { serverStore } = await import('./serverStore')
+    const { getModelVisibilityStore, modelVisibilityStore } = await import('./modelVisibilityStore')
+    const { serverStorage } = await import('../utils/perServerStorage')
+    const a = serverStore.addServer({ name: 'A', url: 'https://a.example.test' }).id
+    const b = serverStore.addServer({ name: 'B', url: 'https://b.example.test' }).id
+    serverStore.setActiveServer(a)
+    const first = getModelVisibilityStore(a),
+      second = getModelVisibilityStore(b)
+    first.setVisible('same:model', false)
+    expect(first.getSnapshot()).toEqual(['same:model'])
+    expect(second.getSnapshot()).toEqual([])
+    expect(modelVisibilityStore.getSnapshot()).toEqual(['same:model'])
+    serverStore.setActiveServer(b)
+    modelVisibilityStore.setVisible('another:model', false)
+    expect(second.getSnapshot()).toEqual(['another:model'])
+    const snapshot = first.getSnapshot()
+    serverStorage.setFor('unrelated', 'value', b)
+    expect(first.getSnapshot()).toBe(snapshot)
+  })
+
+  it('keeps model pins, recent usage and variant preferences in their own server shards', async () => {
+    const { serverStore } = await import('./serverStore')
+    const utils = await import('../utils/modelUtils')
+    const a = serverStore.addServer({ name: 'A', url: 'https://a.example.test' }).id
+    const b = serverStore.addServer({ name: 'B', url: 'https://b.example.test' }).id
+    serverStore.setActiveServer(a)
+    const same = model('same', 'model')
+    utils.toggleModelPin(same, b)
+    utils.recordModelUsage(same, b)
+    utils.saveModelVariantPref('same:model', 'high', b)
+    utils.setPreferredModelKey('same:model', b)
+    expect(utils.isModelPinned(same, a)).toBe(false)
+    expect(utils.isModelPinned(same, b)).toBe(true)
+    expect(utils.getRecentModels([same], 5, a)).toEqual([])
+    expect(utils.getRecentModels([same], 5, b)).toEqual([same])
+    expect(utils.getModelVariantPref('same:model', a)).toBeUndefined()
+    expect(utils.getPreferredModelKey(a)).toBeNull()
+    expect(utils.getPreferredModelKey(b)).toBe('same:model')
+  })
+
   it('persists consecutive channel toggles through reload', async () => {
     const { modelVisibilityStore } = await import('./modelVisibilityStore')
     const models = [model('anthropic', 'claude-3'), model('anthropic', 'claude-4')]

@@ -1,226 +1,104 @@
-import { randomUUID } from "node:crypto"
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync, promises as fs } from "node:fs"
-import { tmpdir } from "node:os"
-import path from "node:path"
-import { realpath } from "node:fs/promises"
-import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot } from "@piui/protocol"
-import { isJsonObject } from "@piui/protocol"
-import type { CatalogProvider, PiEventMeta, SessionRuntime, Unsubscribe } from "../runtime.js"
-import type { PackagesGateway } from "../command-table.js"
+import { randomUUID } from 'node:crypto'
+import { appendFileSync, existsSync, readFileSync, writeFileSync, promises as fs } from 'node:fs'
+import path from 'node:path'
+import { realpath } from 'node:fs/promises'
+import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot } from '@piui/protocol'
+import type { CatalogProvider, PiEventMeta, SessionRuntime, Unsubscribe } from '../runtime.js'
+import type { PackagesGateway } from '../command-table.js'
+import { mockLiveState, mockPreviewState } from './mock-session-state.js'
+import {
+  MockStore,
+  assertMockSessionFileInside,
+  filterMockSessions,
+  mockBranch,
+  nowIso,
+  sessionsDir,
+  textFromContent,
+} from './mock-session-store.js'
 import {
   entriesPageFromEntries,
   sessionHeadFromParts,
   type EntriesPage,
   type LiveMessage,
   type SessionHead,
-} from "./pagination.js"
+} from './pagination.js'
 
-const MOCK_SDK_VERSION = "mock"
+// 会话仓（jsonl 读写、路径校验）拆到独立模块；公开出口保持不变
+export { MockStore } from './mock-session-store.js'
 
-function mockHome(): string {
-  return process.env.PIUI_MOCK_DIR?.trim() || path.join(tmpdir(), "piui-mock")
-}
+const MOCK_SDK_VERSION = 'mock'
 
-function sessionsDir(): string {
-  return path.join(mockHome(), "sessions")
-}
-
-function nowIso(): string {
-  return new Date().toISOString()
-}
-
-export class MockStore {
-  list(): JsonObject[] {
-    const dir = sessionsDir()
-    if (!existsSync(dir)) return []
-    return readDirJsonl(dir)
-  }
-
-  open(sessionFile: string): { header: JsonObject | null; entries: JsonObject[] } {
-    return readJsonlFile(sessionFile)
-  }
-
-  create(cwd: string): { sessionFile: string; sessionId: string } {
-    const dir = sessionsDir()
-    mkdirSync(dir, { recursive: true })
-    const sessionId = randomUUID()
-    const sessionFile = path.join(dir, `${sessionId}.jsonl`)
-    const header: JsonObject = {
-      type: "session",
-      version: 1,
-      id: sessionId,
-      cwd,
-      timestamp: nowIso(),
-    }
-    writeFileSync(sessionFile, `${JSON.stringify(header)}\n`, "utf8")
-    return { sessionFile, sessionId }
-  }
-
-  async delete(sessionFile: string): Promise<void> {
-    await fs.unlink(sessionFile)
-  }
-}
-
-function readDirJsonl(dir: string): JsonObject[] {
-  const result: JsonObject[] = []
-  for (const name of safeReaddir(dir)) {
-    if (!name.endsWith(".jsonl")) continue
-    const file = path.join(dir, name)
-    try {
-      const { header, entries } = readJsonlFile(file)
-      const id = typeof header?.id === "string" ? header.id : path.basename(name, ".jsonl")
-      const messages = entries.filter(entry => entry.type === "message")
-      const firstUser = messages.find(entry => isJsonObject(entry.message) && entry.message.role === "user")
-      result.push({
-        id,
-        path: file,
-        cwd: typeof header?.cwd === "string" ? header.cwd : "",
-        name: typeof header?.name === "string" ? header.name : null,
-        parentSessionPath: typeof header?.parentSession === "string" ? header.parentSession : null,
-        created: typeof header?.timestamp === "string" ? header.timestamp : nowIso(),
-        modified: lastTimestamp(entries) ?? (typeof header?.timestamp === "string" ? header.timestamp : nowIso()),
-        messageCount: messages.length,
-        firstMessage: firstUser && isJsonObject(firstUser.message)
-          ? textFromContent(firstUser.message.content).slice(0, 120)
-          : "",
-      })
-    } catch {
-      /* skip corrupted mock session files */
-    }
-  }
-  result.sort((a, b) => String(b.modified).localeCompare(String(a.modified)))
-  return result
-}
-
-function safeReaddir(dir: string): string[] {
-  try {
-    return readdirSync(dir)
-  } catch {
-    return []
-  }
-}
-
-function readJsonlFile(file: string): { header: JsonObject | null; entries: JsonObject[] } {
-  const lines = readFileSync(file, "utf8").split("\n").filter(line => line.trim())
-  let header: JsonObject | null = null
-  const entries: JsonObject[] = []
-  for (const line of lines) {
-    const value = JSON.parse(line) as unknown
-    if (!isJsonObject(value)) continue
-    if (value.type === "session") header = value
-    else entries.push(value)
-  }
-  return { header, entries }
-}
-
-async function assertMockSessionFileInside(sessionFile: string): Promise<void> {
-  const root = await realpath(sessionsDir())
-  const target = await realpath(sessionFile)
-  const rootKey = process.platform === "win32" ? root.toLowerCase() : root
-  const targetKey = process.platform === "win32" ? target.toLowerCase() : target
-  if (targetKey !== rootKey && !targetKey.startsWith(rootKey + path.sep)) {
-    throw Object.assign(new Error("Mock session file is outside the session directory"), { code: "PATH_OUTSIDE_WORKSPACE" })
-  }
-}
-
-function lastTimestamp(entries: JsonObject[]): string | undefined {
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const ts = entries[index]?.timestamp
-    if (typeof ts === "string") return ts
-  }
-  return undefined
-}
-
-function textFromContent(content: JsonValue | undefined): string {
-  if (typeof content === "string") return content
-  if (!Array.isArray(content)) return ""
-  return content
-    .filter(block => isJsonObject(block) && block.type === "text" && typeof block.text === "string")
-    .map(block => String((block as JsonObject).text))
-    .join("")
-}
+/** Prompt prefix that makes the mock stream a slow thinking + tool turn (UI smoke). */
+export const MOCK_SLOW_TOOL_PREFIX = 'mock-slow:'
 
 export class MockCatalog implements CatalogProvider, PackagesGateway {
   private readonly store = new MockStore()
 
-  async listSessions(cwd: string): Promise<JsonValue> {
-    return this.store.list().filter(info => info.cwd === cwd || !cwd)
+  async listSessions(cwd: string, search?: string): Promise<JsonValue> {
+    return filterMockSessions(
+      this.store.list().filter(info => info.cwd === cwd || !cwd),
+      search,
+    )
   }
 
-  async listAllSessions(): Promise<JsonValue> {
-    return this.store.list()
+  async listAllSessions(search?: string): Promise<JsonValue> {
+    return filterMockSessions(this.store.list(), search)
   }
 
   async createSession(cwd: string): Promise<JsonValue> {
     return { ...this.store.create(cwd), cwd }
   }
 
-  async previewSession(cwd: string, sessionFile: string, params: { cursor?: string; limit?: number; maxBytes?: number } = {}): Promise<JsonValue> {
+  async previewSession(
+    cwd: string,
+    sessionFile: string,
+    params: { cursor?: string; limit?: number; maxBytes?: number } = {},
+  ): Promise<JsonValue> {
     const info = this.store.list().find(item => item.path === sessionFile)
-    if (!info) throw Object.assign(new Error("session file not found"), { code: "SESSION_NOT_FOUND" })
-    const sessionId = typeof info.id === "string" ? info.id : "mock-session"
-    const head = sessionHeadFromParts({
-      sdkVersion: MOCK_SDK_VERSION,
-      revision: 0,
-      header: null,
-      leafId: null,
-      entryCount: 0,
-    }, sessionId)
-    const branch = entriesPageFromEntries(head, [], {
-      cursor: params.cursor,
-      limit: params.limit ?? 100,
-      maxBytes: params.maxBytes ?? 2 * 1024 * 1024,
-    }, entry => entry)
+    if (!info) throw Object.assign(new Error('session file not found'), { code: 'SESSION_NOT_FOUND' })
+    const sessionId = typeof info.id === 'string' ? info.id : 'mock-session'
+    const { header, entries } = this.store.open(sessionFile)
+    const leafId = typeof entries.at(-1)?.id === 'string' ? String(entries.at(-1)!.id) : null
+    const head = sessionHeadFromParts(
+      {
+        sdkVersion: MOCK_SDK_VERSION,
+        revision: entries.length,
+        header,
+        leafId,
+        entryCount: entries.length,
+      },
+      sessionId,
+    )
+    const branch = entriesPageFromEntries(
+      head,
+      mockBranch(entries, leafId),
+      {
+        cursor: params.cursor,
+        limit: params.limit ?? 100,
+        maxBytes: params.maxBytes ?? 2 * 1024 * 1024,
+      },
+      entry => entry,
+    )
     return {
-      state: {
+      state: mockPreviewState({
         sessionId,
         sessionFile,
-        sessionName: null,
+        sessionName: header?.name ?? null,
         cwd,
-        model: null,
-        thinkingLevel: "off",
-        isStreaming: false,
-        isCompacting: false,
-        steeringMode: "one-at-a-time",
-        followUpMode: "one-at-a-time",
-        autoCompactionEnabled: true,
-        autoRetryEnabled: true,
-        messageCount: 0,
-        pendingMessageCount: 0,
-        availableThinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-        isIdle: true,
-        isBashRunning: false,
-        hasPendingBashMessages: false,
-        isRetrying: false,
-        retryAttempt: 0,
-        queue: { steering: [], followUp: [], steeringMode: "one-at-a-time", followUpMode: "one-at-a-time" },
-        supportsThinking: true,
-        activeTools: [],
-        scopedModels: [],
-        sessionStats: {
-          sessionFile: sessionFile,
-          sessionId,
-          userMessages: 0,
-          assistantMessages: 0,
-          toolCalls: 0,
-          toolResults: 0,
-          totalMessages: 0,
-          tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          cost: 0,
-        },
-        contextUsage: { tokens: 0, contextWindow: 200000, percent: 0 },
-        retry: null,
-        compaction: null,
+        entries,
         head,
-      },
+      }),
       branch,
     }
   }
 
-  async previewSessionById(sessionId: string, params: { cursor?: string; limit?: number; maxBytes?: number } = {}): Promise<JsonValue> {
+  async previewSessionById(
+    sessionId: string,
+    params: { cursor?: string; limit?: number; maxBytes?: number } = {},
+  ): Promise<JsonValue> {
     const info = this.store.list().find(item => item.id === sessionId)
-    if (!info || typeof info.path !== "string" || typeof info.cwd !== "string") {
-      throw Object.assign(new Error("session file not found"), { code: "SESSION_NOT_FOUND" })
+    if (!info || typeof info.path !== 'string' || typeof info.cwd !== 'string') {
+      throw Object.assign(new Error('session file not found'), { code: 'SESSION_NOT_FOUND' })
     }
     return this.previewSession(info.cwd, info.path, params)
   }
@@ -228,20 +106,31 @@ export class MockCatalog implements CatalogProvider, PackagesGateway {
   async deleteSession(_cwd: string, sessionFile: string): Promise<void> {
     const root = path.resolve(sessionsDir())
     const resolved = path.resolve(sessionFile)
-    if (!existsSync(resolved)) throw Object.assign(new Error("session file not found"), { code: "SESSION_NOT_FOUND" })
+    if (!existsSync(resolved)) throw Object.assign(new Error('session file not found'), { code: 'SESSION_NOT_FOUND' })
     const realRoot = await fs.realpath(root)
     const realTarget = await fs.realpath(resolved)
-    const rootKey = process.platform === "win32" ? realRoot.toLowerCase() : realRoot
-    const resolvedKey = process.platform === "win32" ? realTarget.toLowerCase() : realTarget
+    const rootKey = process.platform === 'win32' ? realRoot.toLowerCase() : realRoot
+    const resolvedKey = process.platform === 'win32' ? realTarget.toLowerCase() : realTarget
     if (!resolvedKey.startsWith(rootKey + path.sep)) {
-      throw Object.assign(new Error("session file is outside the mock session directory"), { code: "PATH_OUTSIDE_WORKSPACE" })
+      throw Object.assign(new Error('session file is outside the mock session directory'), {
+        code: 'PATH_OUTSIDE_WORKSPACE',
+      })
     }
     await this.store.delete(resolved)
   }
 
   async listModels(): Promise<JsonValue> {
     return [
-      { provider: "mock", id: "mock", name: "Mock", reasoning: true, input: ["text", "image"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 8192 },
+      {
+        provider: 'mock',
+        id: 'mock',
+        name: 'Mock',
+        reasoning: true,
+        input: ['text', 'image'],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128000,
+        maxTokens: 8192,
+      },
     ]
   }
 
@@ -254,7 +143,7 @@ export class MockCatalog implements CatalogProvider, PackagesGateway {
   }
 
   getProjectTrust(cwd: string): JsonValue {
-    return { workspacePath: cwd, required: false, decision: null, defaultDecision: "always", trusted: true }
+    return { workspacePath: cwd, required: false, decision: null, defaultDecision: 'always', trusted: true }
   }
 
   setProjectTrust(cwd: string): JsonValue {
@@ -290,7 +179,7 @@ export class MockCatalog implements CatalogProvider, PackagesGateway {
   }
 }
 
-interface MockEntry extends JsonObject {}
+type MockEntry = JsonObject
 
 export class MockPiSession implements SessionRuntime {
   private header: JsonObject | null
@@ -302,10 +191,10 @@ export class MockPiSession implements SessionRuntime {
   private timers: NodeJS.Timeout[] = []
   private steeringQueue: string[] = []
   private followUpQueue: string[] = []
-  private steeringMode: "all" | "one-at-a-time" = "all"
-  private followUpMode: "all" | "one-at-a-time" = "one-at-a-time"
-  private thinkingLevel = "off"
-  private activeTools = ["mock-tool"]
+  private steeringMode: 'all' | 'one-at-a-time' = 'all'
+  private followUpMode: 'all' | 'one-at-a-time' = 'one-at-a-time'
+  private thinkingLevel = 'off'
+  private activeTools = ['mock-tool']
   private dynamicToolRegistered = false
   private autoCompaction = true
   private autoRetry = true
@@ -325,21 +214,23 @@ export class MockPiSession implements SessionRuntime {
   ) {
     this.header = header
     this.entries = entries
-    this.leafId = typeof entries.at(-1)?.id === "string" ? entries.at(-1)!.id as string : null
+    this.leafId = typeof entries.at(-1)?.id === 'string' ? (entries.at(-1)!.id as string) : null
   }
 
   static async open(cwd: string, sessionFile?: string): Promise<MockPiSession> {
     const store = new MockStore()
     if (sessionFile) {
       if (!existsSync(sessionFile)) {
-        throw Object.assign(new Error("mock session file no longer exists"), { code: "SESSION_NOT_FOUND" })
+        throw Object.assign(new Error('mock session file no longer exists'), { code: 'SESSION_NOT_FOUND' })
       }
       const root = await realpath(sessionsDir())
       const target = await realpath(path.resolve(sessionFile))
-      const rootKey = process.platform === "win32" ? root.toLowerCase() : root
-      const targetKey = process.platform === "win32" ? target.toLowerCase() : target
+      const rootKey = process.platform === 'win32' ? root.toLowerCase() : root
+      const targetKey = process.platform === 'win32' ? target.toLowerCase() : target
       if (!targetKey.startsWith(rootKey + path.sep)) {
-        throw Object.assign(new Error("mock session file is outside the session directory"), { code: "PATH_OUTSIDE_WORKSPACE" })
+        throw Object.assign(new Error('mock session file is outside the session directory'), {
+          code: 'PATH_OUTSIDE_WORKSPACE',
+        })
       }
       const { header, entries } = store.open(sessionFile)
       return new MockPiSession(sessionFile, cwd, header, entries)
@@ -350,7 +241,7 @@ export class MockPiSession implements SessionRuntime {
   }
 
   getSessionId(): string {
-    return typeof this.header?.id === "string" ? this.header.id : "mock-session"
+    return typeof this.header?.id === 'string' ? this.header.id : 'mock-session'
   }
 
   getSessionFile(): string | undefined {
@@ -394,20 +285,23 @@ export class MockPiSession implements SessionRuntime {
 
   private persist(entry: JsonObject): void {
     this.entries.push(entry)
-    this.leafId = typeof entry.id === "string" ? entry.id : this.leafId
+    this.leafId = typeof entry.id === 'string' ? entry.id : this.leafId
     this.revision += 1
-    if (this.sessionFile) appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`, "utf8")
+    if (this.sessionFile) appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`, 'utf8')
     this.emitHead()
   }
 
   getHead(): SessionHead {
-    return sessionHeadFromParts({
-      sdkVersion: MOCK_SDK_VERSION,
-      revision: this.revision,
-      header: this.header,
-      leafId: this.leafId,
-      entryCount: this.entries.length,
-    }, this.getSessionId())
+    return sessionHeadFromParts(
+      {
+        sdkVersion: MOCK_SDK_VERSION,
+        revision: this.revision,
+        header: this.header,
+        leafId: this.leafId,
+        entryCount: this.entries.length,
+      },
+      this.getSessionId(),
+    )
   }
 
   getEntriesPage(cursor: string | undefined, limit: number, maxBytes: number): EntriesPage {
@@ -415,21 +309,13 @@ export class MockPiSession implements SessionRuntime {
   }
 
   getBranchPage(cursor: string | undefined, limit: number, maxBytes: number): EntriesPage {
-    const byId = new Map(this.entries.map(entry => [String(entry.id), entry]))
-    const branch: MockEntry[] = []
-    const visited = new Set<string>()
-    let id: string | null = this.leafId
-    while (id && !visited.has(id)) {
-      visited.add(id)
-      const entry = byId.get(id)
-      if (!entry) break
-      branch.unshift(entry)
-      id = typeof entry.parentId === "string" ? entry.parentId : null
-    }
-    const checkpoint = cursor ? undefined : {
-      position: { epoch: this.eventEpoch, sequence: this.eventSequence },
-      liveMessage: this.liveMessage,
-    }
+    const branch = mockBranch(this.entries, this.leafId)
+    const checkpoint = cursor
+      ? undefined
+      : {
+          position: { epoch: this.eventEpoch, sequence: this.eventSequence },
+          liveMessage: this.liveMessage,
+        }
     return entriesPageFromEntries(this.getHead(), branch, { cursor, limit, maxBytes, checkpoint }, entry => entry)
   }
 
@@ -442,57 +328,29 @@ export class MockPiSession implements SessionRuntime {
   }
 
   getAttachment(): JsonObject {
-    throw Object.assign(new Error("mock sessions have no attachments"), { code: "NOT_FOUND" })
+    throw Object.assign(new Error('mock sessions have no attachments'), { code: 'NOT_FOUND' })
   }
 
   getState(): JsonObject {
-    return {
+    return mockLiveState({
       sessionId: this.getSessionId(),
-      sessionFile: this.sessionFile ?? null,
-      sessionName: typeof this.header?.name === "string" ? this.header.name : null,
+      sessionFile: this.sessionFile,
+      sessionName: typeof this.header?.name === 'string' ? this.header.name : null,
       cwd: this.cwd,
-      model: { provider: "mock", id: "mock", name: "Mock" },
+      model: { provider: 'mock', id: 'mock', name: 'Mock' },
       thinkingLevel: this.thinkingLevel,
-      isStreaming: this.streaming,
-      isCompacting: this.compacting,
+      streaming: this.streaming,
+      compacting: this.compacting,
       steeringMode: this.steeringMode,
       followUpMode: this.followUpMode,
       autoCompactionEnabled: this.autoCompaction,
       autoRetryEnabled: this.autoRetry,
-      messageCount: this.entries.length,
-      pendingMessageCount: this.steeringQueue.length + this.followUpQueue.length,
-      availableThinkingLevels: ["off", "minimal", "low", "medium", "high"],
-      isIdle: !this.streaming,
-      isBashRunning: false,
-      hasPendingBashMessages: false,
-      isRetrying: false,
-      retryAttempt: 0,
-      queue: {
-        steering: [...this.steeringQueue],
-        followUp: [...this.followUpQueue],
-        steeringMode: this.steeringMode,
-        followUpMode: this.followUpMode,
-      },
-      supportsThinking: true,
-      activeTools: [...this.activeTools],
-      scopedModels: [],
-      // 与真实 SDK getSessionStats/getContextUsage 形状一致（mock 无真实消耗）
-      sessionStats: {
-        sessionFile: this.sessionFile ?? null,
-        sessionId: this.getSessionId(),
-        userMessages: 0,
-        assistantMessages: 0,
-        toolCalls: 0,
-        toolResults: 0,
-        totalMessages: this.entries.length,
-        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        cost: 0,
-      },
-      contextUsage: { tokens: 0, contextWindow: 200000, percent: 0 },
-      retry: { phase: "idle", autoEnabled: this.autoRetry },
-      compaction: { autoEnabled: this.autoCompaction, operation: { type: "none" } },
+      entriesLength: this.entries.length,
+      steeringQueue: this.steeringQueue,
+      followUpQueue: this.followUpQueue,
+      activeTools: this.activeTools,
       head: this.getHead(),
-    }
+    })
   }
 
   listSkills(): JsonValue {
@@ -508,29 +366,27 @@ export class MockPiSession implements SessionRuntime {
   }
 
   getRegistry(): RegistrySnapshot {
-    const tools: RegistrySnapshot["tools"] = [
+    const tools: RegistrySnapshot['tools'] = [
       {
-        name: "mock-tool",
-        description: "Mock tool for tests",
-        parameters: { type: "object", properties: { echo: { type: "string" } } },
-        sourceInfo: { source: "builtin" },
+        name: 'mock-tool',
+        description: 'Mock tool for tests',
+        parameters: { type: 'object', properties: { echo: { type: 'string' } } },
+        sourceInfo: { source: 'builtin' },
       },
     ]
     if (this.dynamicToolRegistered) {
       tools.push({
-        name: "mock-dynamic-tool",
-        description: "Mock dynamically registered tool",
-        parameters: { type: "object", properties: { value: { type: "string" } } },
-        sourceInfo: { source: "dynamic" },
+        name: 'mock-dynamic-tool',
+        description: 'Mock dynamically registered tool',
+        parameters: { type: 'object', properties: { value: { type: 'string' } } },
+        sourceInfo: { source: 'dynamic' },
       })
     }
     return {
       sdkVersion: MOCK_SDK_VERSION,
       tools,
       activeTools: [...this.activeTools],
-      commands: [
-        { name: "mock-command", description: "Mock extension command", sourceInfo: { source: "builtin" } },
-      ],
+      commands: [{ name: 'mock-command', description: 'Mock extension command', sourceInfo: { source: 'builtin' } }],
       extensions: [],
       eventHandlers: [],
     }
@@ -552,62 +408,69 @@ export class MockPiSession implements SessionRuntime {
   private appendUserMessage(text: string, images?: ImageInput[]): JsonObject {
     const timestamp = Date.now()
     const content: JsonValue = images?.length
-      ? [{ type: "text", text }, ...images.map(image => ({ type: "image", data: image.data, mimeType: image.mimeType }))]
+      ? [
+          { type: 'text', text },
+          ...images.map(image => ({ type: 'image', data: image.data, mimeType: image.mimeType })),
+        ]
       : text
     const entry: JsonObject = {
-      type: "message",
+      type: 'message',
       id: `mock-user-${randomUUID()}`,
       parentId: this.leafId,
       timestamp: nowIso(),
-      message: { role: "user", timestamp, content },
+      message: { role: 'user', timestamp, content },
     }
     this.persist(entry)
     return entry
   }
 
   private runMockTurn(userText: string): void {
+    if (userText.startsWith(MOCK_SLOW_TOOL_PREFIX)) {
+      this.runMockToolTurn(userText)
+      return
+    }
     const full = `Mock reply to: ${userText}`
     const chunks = [full.slice(0, Math.ceil(full.length / 2)), full]
     const messageId = randomUUID()
     this.streaming = true
-    this.emitEvent({ type: "agent_start" })
+    this.emitEvent({ type: 'agent_start' })
     this.schedule(() => {
       const message: JsonObject = {
-        role: "assistant",
+        role: 'assistant',
         timestamp: Date.now(),
-        provider: "mock",
-        model: "mock",
-        stopReason: "stop",
-        content: [{ type: "text", text: chunks[0] }],
+        provider: 'mock',
+        model: 'mock',
+        stopReason: 'stop',
+        content: [{ type: 'text', text: chunks[0] }],
       }
-      this.liveMessage = { id: messageId, revision: 1, phase: "streaming", message }
-      this.emitEvent({ type: "message_start", message })
+      this.liveMessage = { id: messageId, revision: 1, phase: 'streaming', message }
+      this.emitEvent({ type: 'message_start', message })
     }, 5)
     this.schedule(() => {
       const message: JsonObject = {
-        role: "assistant",
+        role: 'assistant',
         timestamp: Date.now(),
-        provider: "mock",
-        model: "mock",
-        stopReason: "stop",
-        content: [{ type: "text", text: chunks[1] ?? full }],
+        provider: 'mock',
+        model: 'mock',
+        stopReason: 'stop',
+        content: [{ type: 'text', text: chunks[1] ?? full }],
       }
-      this.liveMessage = { id: messageId, revision: 2, phase: "streaming", message }
-      this.emitEvent({ type: "message_update", message })
+      this.liveMessage = { id: messageId, revision: 2, phase: 'streaming', message }
+      this.emitEvent({ type: 'message_update', message })
     }, 15)
     this.schedule(() => {
       const message: JsonObject = {
-        role: "assistant",
+        role: 'assistant',
         timestamp: Date.now(),
-        provider: "mock",
-        model: "mock",
-        stopReason: "stop",
-        content: [{ type: "text", text: full }],
+        provider: 'mock',
+        model: 'mock',
+        stopReason: 'stop',
+        content: [{ type: 'text', text: full }],
       }
-      this.liveMessage = { id: messageId, revision: 3, phase: "persisting", message }
-      this.emitEvent({ type: "message_end", message })
+      this.liveMessage = { id: messageId, revision: 3, phase: 'persisting', message }
+      this.emitEvent({ type: 'message_end', message })
       this.persist({
-        type: "message",
+        type: 'message',
         id: `mock-assistant-${randomUUID()}`,
         parentId: this.leafId,
         timestamp: nowIso(),
@@ -615,9 +478,69 @@ export class MockPiSession implements SessionRuntime {
       })
       this.liveMessage = undefined
       this.streaming = false
-      this.emitEvent({ type: "agent_end" })
+      this.emitEvent({ type: 'agent_end' })
       this.drainQueue()
     }, 25)
+  }
+
+  /**
+   * UI-smoke turn: streams thinking + a tool call + text over ~2.6s so tests can
+   * observe the live process shell before it settles.
+   */
+  private runMockToolTurn(userText: string): void {
+    const callId = `mock-call-${randomUUID()}`
+    const messageId = randomUUID()
+    const thinking = { type: 'thinking', thinking: 'Checking the workspace before answering' }
+    const call = { type: 'toolCall', id: callId, name: 'mock-tool', arguments: { echo: userText } }
+    const answer = `Mock tool reply to: ${userText}`
+    const build = (content: JsonValue[]): JsonObject => ({
+      role: 'assistant',
+      timestamp: Date.now(),
+      provider: 'mock',
+      model: 'mock',
+      stopReason: 'stop',
+      content,
+    })
+    const stream = (content: JsonValue[], revision: number, type: 'message_start' | 'message_update') => {
+      const message = build(content)
+      this.liveMessage = { id: messageId, revision, phase: 'streaming', message }
+      this.emitEvent({ type, message })
+    }
+    this.streaming = true
+    this.emitEvent({ type: 'agent_start' })
+    this.schedule(() => stream([thinking], 1, 'message_start'), 5)
+    this.schedule(() => stream([thinking, call], 2, 'message_update'), 700)
+    this.schedule(() => stream([thinking, call, { type: 'text', text: answer }], 3, 'message_update'), 1400)
+    this.schedule(() => {
+      const message = build([thinking, call, { type: 'text', text: answer }])
+      this.liveMessage = { id: messageId, revision: 4, phase: 'persisting', message }
+      this.persist({
+        type: 'message',
+        id: `mock-assistant-${randomUUID()}`,
+        parentId: this.leafId,
+        timestamp: nowIso(),
+        message,
+      })
+      this.persist({
+        type: 'message',
+        id: `mock-tool-result-${randomUUID()}`,
+        parentId: this.leafId,
+        timestamp: nowIso(),
+        message: {
+          role: 'toolResult',
+          toolName: 'mock-tool',
+          toolCallId: callId,
+          isError: false,
+          timestamp: Date.now(),
+          content: [{ type: 'text', text: `mock-tool echo: ${userText}` }],
+        },
+      })
+      this.emitEvent({ type: 'message_end', message })
+      this.liveMessage = undefined
+      this.streaming = false
+      this.emitEvent({ type: 'agent_end' })
+      this.drainQueue()
+    }, 2600)
   }
 
   private drainQueue(): void {
@@ -629,12 +552,16 @@ export class MockPiSession implements SessionRuntime {
     }
   }
 
-  async prompt(text: string, _images?: ImageInput[], options: { expandPromptTemplates?: boolean; streamingBehavior?: "steer" | "followUp" } = {}): Promise<void> {
+  async prompt(
+    text: string,
+    _images?: ImageInput[],
+    options: { expandPromptTemplates?: boolean; streamingBehavior?: 'steer' | 'followUp' } = {},
+  ): Promise<void> {
     if (this.streaming) {
       if (!options.streamingBehavior) {
-        throw Object.assign(new Error("mock session is already streaming"), { code: "SESSION_BUSY" })
+        throw Object.assign(new Error('mock session is already streaming'), { code: 'SESSION_BUSY' })
       }
-      if (options.streamingBehavior === "followUp") return this.followUp(text)
+      if (options.streamingBehavior === 'followUp') return this.followUp(text)
       return this.steer(text)
     }
     this.appendUserMessage(text)
@@ -642,20 +569,22 @@ export class MockPiSession implements SessionRuntime {
   }
 
   async steer(text: string): Promise<void> {
-    if (!this.streaming) throw Object.assign(new Error("Cannot steer an idle mock session"), { code: "SESSION_CONFLICT" })
+    if (!this.streaming)
+      throw Object.assign(new Error('Cannot steer an idle mock session'), { code: 'SESSION_CONFLICT' })
     this.steeringQueue.push(text)
-    this.emitEvent({ type: "queue_update", steering: [...this.steeringQueue], followUp: [...this.followUpQueue] })
+    this.emitEvent({ type: 'queue_update', steering: [...this.steeringQueue], followUp: [...this.followUpQueue] })
   }
 
   async followUp(text: string): Promise<void> {
-    if (!this.streaming) throw Object.assign(new Error("Cannot queue a follow-up on an idle mock session"), { code: "SESSION_CONFLICT" })
+    if (!this.streaming)
+      throw Object.assign(new Error('Cannot queue a follow-up on an idle mock session'), { code: 'SESSION_CONFLICT' })
     this.followUpQueue.push(text)
-    this.emitEvent({ type: "queue_update", steering: [...this.steeringQueue], followUp: [...this.followUpQueue] })
+    this.emitEvent({ type: 'queue_update', steering: [...this.steeringQueue], followUp: [...this.followUpQueue] })
   }
 
-  async sendUserMessage(text: string, images?: ImageInput[], deliverAs?: "steer" | "followUp"): Promise<void> {
-    if (deliverAs === "steer") return this.steer(text)
-    if (deliverAs === "followUp") return this.followUp(text)
+  async sendUserMessage(text: string, _images?: ImageInput[], deliverAs?: 'steer' | 'followUp'): Promise<void> {
+    if (deliverAs === 'steer') return this.steer(text)
+    if (deliverAs === 'followUp') return this.followUp(text)
     return this.prompt(text)
   }
 
@@ -667,7 +596,7 @@ export class MockPiSession implements SessionRuntime {
     if (this.streaming) {
       this.streaming = false
       this.liveMessage = undefined
-      this.emitEvent({ type: "agent_end" })
+      this.emitEvent({ type: 'agent_end' })
     }
     return cleared
   }
@@ -684,7 +613,7 @@ export class MockPiSession implements SessionRuntime {
     this.resetLive()
     this.emitHead()
     return {
-      operation: "new",
+      operation: 'new',
       sourceSessionId,
       targetSessionId: this.getSessionId(),
       targetSessionFile: created.sessionFile,
@@ -698,7 +627,8 @@ export class MockPiSession implements SessionRuntime {
     const store = new MockStore()
     const targetPath = path.resolve(sessionPath)
     await assertMockSessionFileInside(targetPath)
-    if (!existsSync(targetPath)) throw Object.assign(new Error("mock session file not found"), { code: "SESSION_NOT_FOUND" })
+    if (!existsSync(targetPath))
+      throw Object.assign(new Error('mock session file not found'), { code: 'SESSION_NOT_FOUND' })
     const { header, entries } = store.open(targetPath)
     this.header = header
     this.entries = entries
@@ -706,7 +636,7 @@ export class MockPiSession implements SessionRuntime {
     this.resetLive()
     this.emitHead()
     return {
-      operation: "switch",
+      operation: 'switch',
       sourceSessionId,
       targetSessionId: this.getSessionId(),
       targetSessionFile: targetPath,
@@ -720,16 +650,23 @@ export class MockPiSession implements SessionRuntime {
     const store = new MockStore()
     const created = store.create(this.cwd)
     const index = this.entries.findIndex(entry => entry.id === entryId)
-    if (index < 0) throw Object.assign(new Error("entry not found"), { code: "NOT_FOUND" })
+    if (index < 0) throw Object.assign(new Error('entry not found'), { code: 'NOT_FOUND' })
     const carried = this.entries.slice(0, index + 1)
-    for (const entry of carried) appendFileSync(created.sessionFile, `${JSON.stringify(entry)}\n`, "utf8")
+    for (const entry of carried) appendFileSync(created.sessionFile, `${JSON.stringify(entry)}\n`, 'utf8')
     this.entries = carried.map(entry => ({ ...entry }))
-    this.header = { type: "session", version: 1, id: created.sessionId, cwd: this.cwd, timestamp: nowIso(), parentSession: this.sessionFile ?? null }
+    this.header = {
+      type: 'session',
+      version: 1,
+      id: created.sessionId,
+      cwd: this.cwd,
+      timestamp: nowIso(),
+      parentSession: this.sessionFile ?? null,
+    }
     this.sessionFileReplace(created.sessionFile)
     this.resetLive()
     this.emitHead()
     return {
-      operation: "fork",
+      operation: 'fork',
       sourceSessionId,
       targetSessionId: this.getSessionId(),
       targetSessionFile: created.sessionFile,
@@ -740,11 +677,11 @@ export class MockPiSession implements SessionRuntime {
 
   async importSession(inputPath: string): Promise<JsonObject> {
     const sourceSessionId = this.getSessionId()
-    if (!existsSync(inputPath)) throw Object.assign(new Error("import file not found"), { code: "NOT_FOUND" })
+    if (!existsSync(inputPath)) throw Object.assign(new Error('import file not found'), { code: 'NOT_FOUND' })
     const store = new MockStore()
     const created = store.create(this.cwd)
-    const content = readFileSync(inputPath, "utf8")
-    writeFileSync(created.sessionFile, content, "utf8")
+    const content = readFileSync(inputPath, 'utf8')
+    writeFileSync(created.sessionFile, content, 'utf8')
     const { header, entries } = store.open(created.sessionFile)
     this.header = header
     this.entries = entries
@@ -752,7 +689,7 @@ export class MockPiSession implements SessionRuntime {
     this.resetLive()
     this.emitHead()
     return {
-      operation: "import",
+      operation: 'import',
       sourceSessionId,
       targetSessionId: this.getSessionId(),
       targetSessionFile: created.sessionFile,
@@ -769,7 +706,7 @@ export class MockPiSession implements SessionRuntime {
     this.clearTimers()
     this.streaming = false
     this.liveMessage = undefined
-    this.leafId = typeof this.entries.at(-1)?.id === "string" ? this.entries.at(-1)!.id as string : null
+    this.leafId = typeof this.entries.at(-1)?.id === 'string' ? (this.entries.at(-1)!.id as string) : null
     this.revision += 1
     this.eventEpoch = randomUUID()
     this.eventSequence = 0
@@ -792,17 +729,17 @@ export class MockPiSession implements SessionRuntime {
   }
 
   async cycleThinkingLevel(): Promise<JsonValue | undefined> {
-    const levels = ["off", "minimal", "low", "medium", "high"]
+    const levels = ['off', 'minimal', 'low', 'medium', 'high']
     const index = levels.indexOf(this.thinkingLevel)
     this.thinkingLevel = levels[(index + 1) % levels.length]!
     return this.thinkingLevel
   }
 
-  async setSteeringMode(mode: "all" | "one-at-a-time"): Promise<void> {
+  async setSteeringMode(mode: 'all' | 'one-at-a-time'): Promise<void> {
     this.steeringMode = mode
   }
 
-  async setFollowUpMode(mode: "all" | "one-at-a-time"): Promise<void> {
+  async setFollowUpMode(mode: 'all' | 'one-at-a-time'): Promise<void> {
     this.followUpMode = mode
   }
 
@@ -815,10 +752,10 @@ export class MockPiSession implements SessionRuntime {
 
   async compact(): Promise<JsonValue | undefined> {
     return {
-      status: "completed",
+      status: 'completed',
       result: {
-        summary: "Mock compaction summary",
-        firstKeptEntryId: this.entries[0]?.id ?? "",
+        summary: 'Mock compaction summary',
+        firstKeptEntryId: this.entries[0]?.id ?? '',
         tokensBefore: 1000,
         estimatedTokensAfter: 100,
       },
@@ -850,22 +787,22 @@ export class MockPiSession implements SessionRuntime {
   }
 
   async invokeTool(name: string, args?: JsonObject): Promise<JsonValue | undefined> {
-    if (name === "mock-dynamic-tool" && this.dynamicToolRegistered) {
-      return { content: [{ type: "text", text: `mock-dynamic-tool value: ${String(args?.value ?? "")}` }], details: {} }
+    if (name === 'mock-dynamic-tool' && this.dynamicToolRegistered) {
+      return { content: [{ type: 'text', text: `mock-dynamic-tool value: ${String(args?.value ?? '')}` }], details: {} }
     }
-    if (name !== "mock-tool") throw Object.assign(new Error(`tool not found: ${name}`), { code: "NOT_FOUND" })
-    return { content: [{ type: "text", text: `mock-tool echo: ${String(args?.echo ?? "")}` }], details: {} }
+    if (name !== 'mock-tool') throw Object.assign(new Error(`tool not found: ${name}`), { code: 'NOT_FOUND' })
+    return { content: [{ type: 'text', text: `mock-tool echo: ${String(args?.echo ?? '')}` }], details: {} }
   }
 
   async invokeCommand(name: string): Promise<JsonValue | undefined> {
-    if (name !== "mock-command") throw Object.assign(new Error(`command not found: ${name}`), { code: "NOT_FOUND" })
+    if (name !== 'mock-command') throw Object.assign(new Error(`command not found: ${name}`), { code: 'NOT_FOUND' })
     this.dynamicToolRegistered = true
     return undefined
   }
 
   async getCommandCompletions(name: string, prefix: string): Promise<JsonValue | undefined> {
-    if (name !== "mock-command") return undefined
-    const options = ["alpha", "beta", "gamma"]
+    if (name !== 'mock-command') return undefined
+    const options = ['alpha', 'beta', 'gamma']
     const items = options
       .filter(value => value.startsWith(prefix))
       .map(value => ({ value, label: value, description: `mock completion for ${name}` }))
@@ -874,16 +811,16 @@ export class MockPiSession implements SessionRuntime {
 
   async navigateTree(entryId: string): Promise<JsonObject> {
     const entry = this.entries.find(item => item.id === entryId)
-    if (!entry) throw Object.assign(new Error("entry not found"), { code: "NOT_FOUND" })
+    if (!entry) throw Object.assign(new Error('entry not found'), { code: 'NOT_FOUND' })
     this.leafId = entryId
     this.revision += 1
     this.emitHead()
-    return { editorText: "", cancelled: false }
+    return { editorText: '', cancelled: false }
   }
 
   async setLabel(entryId: string, label?: string): Promise<void> {
     const entry = this.entries.find(item => item.id === entryId)
-    if (!entry) throw Object.assign(new Error("entry not found"), { code: "NOT_FOUND" })
+    if (!entry) throw Object.assign(new Error('entry not found'), { code: 'NOT_FOUND' })
     if (label === undefined) delete entry.label
     else entry.label = label
     this.revision += 1
@@ -894,7 +831,7 @@ export class MockPiSession implements SessionRuntime {
 
   async appendCustomEntry(customType: string, data?: JsonValue): Promise<void> {
     this.persist({
-      type: "custom",
+      type: 'custom',
       customType,
       data: data ?? null,
       id: `mock-custom-${randomUUID()}`,
@@ -904,13 +841,13 @@ export class MockPiSession implements SessionRuntime {
   }
 
   async exportHtml(outputPath: string): Promise<JsonValue | undefined> {
-    writeFileSync(outputPath, "<html><body>mock export</body></html>", "utf8")
+    writeFileSync(outputPath, '<html><body>mock export</body></html>', 'utf8')
     return { path: outputPath }
   }
 
   async exportJsonl(outputPath: string): Promise<JsonValue | undefined> {
     const lines = [this.header, ...this.entries].filter(Boolean).map(value => JSON.stringify(value))
-    writeFileSync(outputPath, `${lines.join("\n")}\n`, "utf8")
+    writeFileSync(outputPath, `${lines.join('\n')}\n`, 'utf8')
     return { path: outputPath }
   }
 

@@ -15,8 +15,8 @@ import {
   CheckIcon,
 } from '../../../components/Icons'
 import { useServerStore, useRouter } from '../../../hooks'
-import { clearSessionRuntimeState } from '../../../utils/sessionLifecycle'
-import { settingsFieldClass, SettingsSection } from './SettingsUI'
+import { multiServerStore, useMultiServerStore } from '../../../store/multiServerStore'
+import { settingsFieldClass, SettingRow, SettingsSection, Toggle } from './SettingsUI'
 import type { ServerConfig, ServerHealth } from '../../../store/serverStore'
 import { parseConnectLink } from '../../../store/serverStore'
 import { fetchHostShare } from '../../../pi/transport'
@@ -57,6 +57,8 @@ function ServerItem({
   onDelete,
   onEdit,
   onCheckHealth,
+  isStartupDefault,
+  onToggleDefault,
 }: {
   server: ServerConfig
   health: ServerHealth | null
@@ -65,11 +67,14 @@ function ServerItem({
   onDelete: () => void
   onEdit: (updates: { name: string; url: string; token?: string }) => void
   onCheckHealth: () => void
+  isStartupDefault: boolean
+  onToggleDefault: () => void
 }) {
   const { t } = useTranslation(['settings', 'common'])
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [showShare, setShowShare] = useState(false)
+  const multiServer = useMultiServerStore()
 
   const statusIcon = () => {
     if (!health || health.status === 'checking') return <SpinnerIcon size={12} className="animate-spin text-text-400" />
@@ -128,10 +133,7 @@ function ServerItem({
           className="min-w-0 flex-1 overflow-hidden bg-transparent border-none p-0 text-left"
         >
           <div className="min-w-0">
-            <div
-              className="text-[length:var(--fs-md)] font-medium text-text-100 truncate"
-              title={server.name}
-            >
+            <div className="text-[length:var(--fs-md)] font-medium text-text-100 truncate" title={server.name}>
               {server.name}
             </div>
             <div className="text-[length:var(--fs-xs)] text-text-400 truncate font-mono flex items-center gap-1 mt-0.5 min-w-0">
@@ -143,6 +145,35 @@ function ServerItem({
           </div>
         </button>
         <div className="shrink-0 flex items-center gap-0.5">
+          <button
+            type="button"
+            aria-pressed={isStartupDefault}
+            aria-label={t(isStartupDefault ? 'servers.clearDefaultServer' : 'servers.setDefaultServer')}
+            title={t(isStartupDefault ? 'servers.clearDefaultServer' : 'servers.setDefaultServer')}
+            className={`p-1.5 rounded-md hover:bg-bg-200/70 ${isStartupDefault ? 'text-accent-main-100' : 'text-text-400'}`}
+            onClick={event => {
+              event.stopPropagation()
+              onToggleDefault()
+            }}
+          >
+            <CheckIcon size={14} />
+          </button>
+          {multiServer.enabled && (
+            <button
+              type="button"
+              aria-pressed={multiServer.subscribedServerIds.includes(server.id)}
+              aria-label={t(
+                multiServer.subscribedServerIds.includes(server.id) ? 'servers.unsubscribe' : 'servers.subscribe',
+              )}
+              className="p-1.5 rounded-md text-accent-main-100 hover:bg-bg-200/70"
+              onClick={event => {
+                event.stopPropagation()
+                multiServerStore.setSubscribed(server.id, !multiServerStore.isSubscribed(server.id))
+              }}
+            >
+              {multiServer.subscribedServerIds.includes(server.id) ? <CheckIcon size={14} /> : <WifiIcon size={14} />}
+            </button>
+          )}
           {(server.isDefault || server.token) && (
             <button
               type="button"
@@ -235,7 +266,7 @@ function SharePanel({ server }: { server: ServerConfig }) {
     let cancelled = false
     if (server.isDefault) {
       // 本地服务器向服务端要分享信息，它能分辨 loopback 与 LAN 绑定
-      fetchHostShare()
+      fetchHostShare(undefined, server.id)
         .then(info => {
           if (!cancelled) setShare(info)
         })
@@ -394,7 +425,9 @@ function EditServerForm({
 
       {showAuth && (
         <div>
-          <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.token')}</label>
+          <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">
+            {t('servers.token')}
+          </label>
           <input
             type="password"
             value={token}
@@ -448,8 +481,7 @@ function AddServerForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     const connectLink = parseConnectLink(url)
-    const trimmedName =
-      name.trim().slice(0, SERVER_NAME_MAX_LENGTH) || (connectLink ? hostNameOf(connectLink.url) : '')
+    const trimmedName = name.trim().slice(0, SERVER_NAME_MAX_LENGTH) || (connectLink ? hostNameOf(connectLink.url) : '')
     if (!trimmedName) {
       setError(t('servers.nameRequired'))
       return
@@ -520,7 +552,9 @@ function AddServerForm({
       {showAuth && (
         <>
           <div>
-            <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">{t('servers.token')}</label>
+            <label className="block text-[length:var(--fs-xs)] font-medium text-text-300 mb-1">
+              {t('servers.token')}
+            </label>
             <input
               type="password"
               value={token}
@@ -533,7 +567,9 @@ function AddServerForm({
             />
           </div>
 
-          <div className="text-[length:var(--fs-xs)] text-text-400 leading-relaxed">{t('servers.credentialsStorage')}</div>
+          <div className="text-[length:var(--fs-xs)] text-text-400 leading-relaxed">
+            {t('servers.credentialsStorage')}
+          </div>
         </>
       )}
 
@@ -563,9 +599,12 @@ function AddServerForm({
 export function ServersSettings() {
   const { t } = useTranslation(['settings', 'common'])
   const [addingServer, setAddingServer] = useState(false)
+  const multiServer = useMultiServerStore()
   const {
     servers,
     activeServer,
+    defaultServerId,
+    setDefaultServer,
     addServer,
     removeServer,
     updateServer,
@@ -574,7 +613,7 @@ export function ServersSettings() {
     checkAllHealth,
     getHealth,
   } = useServerStore()
-  const { navigateHome, sessionId: routeSessionId } = useRouter()
+  const { setDirectory } = useRouter()
   const orderedServers = useMemo(() => {
     if (!activeServer) return servers
     const active = servers.find(s => s.id === activeServer.id)
@@ -586,21 +625,16 @@ export function ServersSettings() {
     checkAllHealth()
   }, [checkAllHealth])
 
-  // 切换服务器：设置 active + 清理当前 session + 导航回首页
+  // Switching focus keeps other servers' sessions alive.
   const handleSelectServer = useCallback(
     (id: string) => {
       if (activeServer?.id === id) return // 没变，不做事
 
-      // 清理当前 session 的 store 状态
-      if (routeSessionId) {
-        clearSessionRuntimeState(routeSessionId)
-      }
-
-      setActiveServer(id) // 内部触发 serverChangeListeners → reconnectSSE()
-      navigateHome()
+      setActiveServer(id)
+      setDirectory(undefined)
       void checkHealth(id)
     },
-    [activeServer?.id, checkHealth, routeSessionId, setActiveServer, navigateHome],
+    [activeServer?.id, checkHealth, setActiveServer, setDirectory],
   )
 
   return (
@@ -627,6 +661,13 @@ export function ServersSettings() {
         </div>
       }
     >
+      <SettingRow
+        label={t('servers.multiServerMode')}
+        description={t('servers.multiServerModeDesc')}
+        onClick={() => multiServerStore.setEnabled(!multiServer.enabled)}
+      >
+        <Toggle enabled={multiServer.enabled} onChange={() => multiServerStore.setEnabled(!multiServer.enabled)} />
+      </SettingRow>
       <div className="space-y-1.5">
         {orderedServers.map(s => (
           <ServerItem
@@ -634,6 +675,8 @@ export function ServersSettings() {
             server={s}
             health={getHealth(s.id)}
             isActive={activeServer?.id === s.id}
+            isStartupDefault={defaultServerId === s.id}
+            onToggleDefault={() => setDefaultServer(defaultServerId === s.id ? null : s.id)}
             onSelect={() => handleSelectServer(s.id)}
             onDelete={() => removeServer(s.id)}
             onEdit={updates => {
@@ -656,7 +699,9 @@ export function ServersSettings() {
         )}
 
         {servers.length === 0 && !addingServer && (
-          <div className="text-[length:var(--fs-md)] text-text-400 text-center py-8">{t('servers.noServersConfigured')}</div>
+          <div className="text-[length:var(--fs-md)] text-text-400 text-center py-8">
+            {t('servers.noServersConfigured')}
+          </div>
         )}
       </div>
     </SettingsSection>

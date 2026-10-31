@@ -5,7 +5,7 @@
 > Pi 源码参考：`E:\dev\re_agent_UI\pi`  
 > UI 基线：`_archive/opencodeui-baseline`  
 > 当前版本：`0.1.0`
-> Pi parity 基线：`@earendil-works/pi-coding-agent@0.84.2`
+> Pi parity 基线：`@earendil-works/pi-coding-agent@1.4.0`
 
 > 2026-07-25 修订：项目目标已提升为 Pi SDK/headless 与内置工作流完整覆盖。能力状态以
 > `docs/PI_UI_INTEGRATION.md` 为准，后续实施采用 R0-R12 路线。本文后半部分保留的旧阶段记录仅作历史参考，
@@ -43,21 +43,21 @@ PiUI 是 Pi coding agent 的完整图形客户端。它保留 OpenCodeUI 中成�
 
 ### 2.1 Pi Native Parity 路线
 
-| 阶段 | 内容 | 状态 |
-|---|---|---|
-| R0 | 锁定 Pi 版本、能力矩阵、文档基线、真实性能基线 | 已完成 |
-| R1 | Protocol v2、类型化 command/event/capability、worker handshake | 已完成 |
-| R2 | worker supervisor、单写 lease、generation、崩溃恢复 | 已完成 |
-| R3 | session tree、navigate、label、fork、clone、import、持久删除 | 已完成 |
-| R4 | steer/follow-up control lane、queue、retry、compact、工具控制 | 已完成 |
-| R5 | 多模态 prompt 与完整工具结果 | 已完成：图片附件 base64 原生上传、工具结果与截断路径完整渲染、所有工具流式实时输出 |
-| R6 | Pi user bash 与流式执行控制 | 未开始 |
-| R7 | extension command、UI bridge、dynamic tools、custom entries | 未开始 |
-| R8 | settings、resources、reload、diagnostics | 已完成：settings/global/project、reload + 资源检查（PiResourceManagement 含 extensions/tools/commands/handlers/skills/prompts/AGENTS·CLAUDE 区块）、真实 SDK 对话框与状态事件 E2E |
-| R9 | packages 与三层 trust | 未开始 |
-| R10 | provider auth、模型、scoped models | 已完成：provider auth（api_key/OAuth 对话框）、模型目录 refresh/reload、scoped models 全链路。llama.cpp 本地模型属 Pi 官方规划中（issue #3107/#3567/#3357），SDK 未暴露，PiUI 不消费 |
-| R11 | stats、context usage、HTML/JSONL export | 已完成：stats/context usage 全链路（左下角圆环 + 详情对话框）与 HTML/JSONL export 三层测试齐全。share 属 Pi 官方未暴露语义（SDK 无 share API），PiUI 不消费 |
-| R12 | conformance、升级门禁、故障注入、发布 | 进行中：逐命令真实 SDK 冒烟（real-session.integration.test）与 scoped models 全链路已加入；升级门禁脚本（scripts/sdk-conformance.mjs）与 worker-client 故障注入矩阵（心跳超时/崩溃/协议不匹配）已完成 |
+| 阶段 | 内容                                                           | 状态                                                                                                                                                                                                  |
+| ---- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R0   | 锁定 Pi 版本、能力矩阵、文档基线、真实性能基线                 | 已完成                                                                                                                                                                                                |
+| R1   | Protocol v2、类型化 command/event/capability、worker handshake | 已完成                                                                                                                                                                                                |
+| R2   | worker supervisor、单写 lease、generation、崩溃恢复            | 已完成                                                                                                                                                                                                |
+| R3   | session tree、navigate、label、fork、clone、import、持久删除   | 已完成                                                                                                                                                                                                |
+| R4   | steer/follow-up control lane、queue、retry、compact、工具控制  | 已完成                                                                                                                                                                                                |
+| R5   | 多模态 prompt 与完整工具结果                                   | 已完成：图片附件 base64 原生上传、工具结果与截断路径完整渲染、所有工具流式实时输出                                                                                                                    |
+| R6   | Pi user bash 与流式执行控制                                    | 未开始                                                                                                                                                                                                |
+| R7   | extension command、UI bridge、dynamic tools、custom entries    | 未开始                                                                                                                                                                                                |
+| R8   | settings、resources、reload、diagnostics                       | 已完成：settings/global/project、reload + 资源检查（PiResourceManagement 含 extensions/tools/commands/handlers/skills/prompts/AGENTS·CLAUDE 区块）、真实 SDK 对话框与状态事件 E2E                     |
+| R9   | packages 与三层 trust                                          | 未开始                                                                                                                                                                                                |
+| R10  | provider auth、模型、scoped models                             | 已完成：provider auth（api_key/OAuth 对话框）、模型目录 refresh/reload、scoped models 全链路。llama.cpp 本地模型属 Pi 官方规划中（issue #3107/#3567/#3357），SDK 未暴露，PiUI 不消费                  |
+| R11  | stats、context usage、HTML/JSONL export                        | 已完成：stats/context usage 全链路（左下角圆环 + 详情对话框）与 HTML/JSONL export 三层测试齐全。share 属 Pi 官方未暴露语义（SDK 无 share API），PiUI 不消费                                           |
+| R12  | conformance、升级门禁、故障注入、发布                          | 进行中：逐命令真实 SDK 冒烟（real-session.integration.test）与 scoped models 全链路已加入；升级门禁脚本（scripts/sdk-conformance.mjs）与 worker-client 故障注入矩阵（心跳超时/崩溃/协议不匹配）已完成 |
 
 每项能力的实时状态、来源和完成条件见 `docs/PI_UI_INTEGRATION.md`
 
@@ -248,7 +248,7 @@ PiUI 可以复用 UI 结构，但不能继续以 OpenCode API 作为内部架构
 - WebSocket command/event 类型
 - runtime 与 presentation 类型
 - schema 和运行时校验
--错误码、protocol version、capabilities
+  -错误码、protocol version、capabilities
 - 不依赖 React、Node server 或 Pi SDK
 
 #### `packages/server`
@@ -313,7 +313,7 @@ interface WorkspaceRecord {
 interface SessionRecord {
   id: string
   cwd: string
-  driverId: "pi"
+  driverId: 'pi'
   driverSessionId: string
   sessionFile: string | null
   title: string
@@ -323,7 +323,7 @@ interface SessionRecord {
   archivedAt: string | null
   epoch: string
   sequence: number
-  runtimeState: "detached" | "idle" | "running" | "retrying" | "compacting" | "crashed"
+  runtimeState: 'detached' | 'idle' | 'running' | 'retrying' | 'compacting' | 'crashed'
 }
 ```
 
@@ -370,7 +370,7 @@ interface CommandRecord {
   commandId: string
   sessionId: string
   kind: string
-  status: "accepted" | "running" | "completed" | "failed" | "cancelled"
+  status: 'accepted' | 'running' | 'completed' | 'failed' | 'cancelled'
   submittedAt: string
   completedAt?: string
   error?: ProblemV1
@@ -471,19 +471,19 @@ health response 增加：
 
 ## 10. 阶段总览
 
-| 阶段 | 名称 | 结果 | 状态 |
-|---|---|---|---|
-| 0 | 基线冻结与真实门禁 | 当前状态可重复验证 | 已完成 |
-| 1 | 单一 Pi 后端 | OpenCode SSE 和双 server 状态停止运行 | 已完成 |
-| 2 | 安全与能力控制 | 本地接口有认证、Origin 和 trust | 进行中 |
-| 3 | 会话执行内核 | 单 session 单写，命令可追踪 | 进行中 |
-| 4 | 事件协议与多会话状态 | delta、sequence、replay、resync 可用 | 待开始 |
-| 5 | 持久化与 Pi JSONL 恢复 | 重启不丢 workspace/session | 待开始 |
-| 6 | 去除 OpenCode 数据层 | SDK shim、SSE、旧类型全部删除 | 进行中 |
-| 7 | Pi 会话能力完善 | 模型、thinking、queue、compact、tree 完整 | 待开始 |
-| 8 | 文件与 Git 完善 | 编辑、完整 diff 和常用 Git 操作可用 | 待开始 |
-| 9 | PTY 与桌面端 | Pi 原生 PTY，可选 Tauri 壳 | 待开始 |
-| 10 | 发布准备 | CI、安装、升级、文档和验收完成 | 待开始 |
+| 阶段 | 名称                   | 结果                                      | 状态   |
+| ---- | ---------------------- | ----------------------------------------- | ------ |
+| 0    | 基线冻结与真实门禁     | 当前状态可重复验证                        | 已完成 |
+| 1    | 单一 Pi 后端           | OpenCode SSE 和双 server 状态停止运行     | 已完成 |
+| 2    | 安全与能力控制         | 本地接口有认证、Origin 和 trust           | 进行中 |
+| 3    | 会话执行内核           | 单 session 单写，命令可追踪               | 进行中 |
+| 4    | 事件协议与多会话状态   | delta、sequence、replay、resync 可用      | 待开始 |
+| 5    | 持久化与 Pi JSONL 恢复 | 重启不丢 workspace/session                | 待开始 |
+| 6    | 去除 OpenCode 数据层   | SDK shim、SSE、旧类型全部删除             | 进行中 |
+| 7    | Pi 会话能力完善        | 模型、thinking、queue、compact、tree 完整 | 待开始 |
+| 8    | 文件与 Git 完善        | 编辑、完整 diff 和常用 Git 操作可用       | 待开始 |
+| 9    | PTY 与桌面端           | Pi 原生 PTY，可选 Tauri 壳                | 待开始 |
+| 10   | 发布准备               | CI、安装、升级、文档和验收完成            | 待开始 |
 
 ## 11. 阶段 0：基线冻结与真实门禁
 
@@ -1142,19 +1142,19 @@ npm run test:e2e:mock
 
 ## 23. OpenCode 残留处理表
 
-| 残留 | 当前处理 | 最终处理 |
-|---|---|---|
-| SDK shim | 临时阻止编译崩溃 | 阶段 6 删除 |
-| `api/events.ts` SSE | 当前仍可能运行 | 阶段 1 停止，阶段 6 删除 transport |
-| `serverStore` | 当前仍以 4096 健康检查 | 阶段 1 替换 |
-| `types/api/*` SDK 类型 | 当前大量引用 | 阶段 6 替换为自有类型 |
-| `api/session.ts` | 多个可见操作仍调用 | 阶段 6 迁移 |
-| `api/pty.ts` | 当前是假功能 | 阶段 2 隐藏，阶段 9 重写 |
-| OpenCode Tauri service | 当前代码残留 | 阶段 1/9 删除 |
-| `src-router` | 当前无主入口 | 确认外部无引用后删除 |
-| app 独立 lockfile | 含旧 SDK | 阶段 0 删除或重建 |
-| manifest/README 文案 | 仍有旧名称 | 阶段 10 清理 |
-| `_archive` | 只读参考 | 保留，不参与构建 |
+| 残留                   | 当前处理               | 最终处理                           |
+| ---------------------- | ---------------------- | ---------------------------------- |
+| SDK shim               | 临时阻止编译崩溃       | 阶段 6 删除                        |
+| `api/events.ts` SSE    | 当前仍可能运行         | 阶段 1 停止，阶段 6 删除 transport |
+| `serverStore`          | 当前仍以 4096 健康检查 | 阶段 1 替换                        |
+| `types/api/*` SDK 类型 | 当前大量引用           | 阶段 6 替换为自有类型              |
+| `api/session.ts`       | 多个可见操作仍调用     | 阶段 6 迁移                        |
+| `api/pty.ts`           | 当前是假功能           | 阶段 2 隐藏，阶段 9 重写           |
+| OpenCode Tauri service | 当前代码残留           | 阶段 1/9 删除                      |
+| `src-router`           | 当前无主入口           | 确认外部无引用后删除               |
+| app 独立 lockfile      | 含旧 SDK               | 阶段 0 删除或重建                  |
+| manifest/README 文案   | 仍有旧名称             | 阶段 10 清理                       |
+| `_archive`             | 只读参考               | 保留，不参与构建                   |
 
 ## 24. 功能完成定义
 

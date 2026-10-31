@@ -1,5 +1,5 @@
-import { useSyncExternalStore } from "react"
-import { getPiNativeStatus, subscribePiNativeStatus } from "./nativeStatus"
+import { useSyncExternalStore } from 'react'
+import { getPiNativeStatus, subscribePiNativeStatus } from './nativeStatus'
 
 export interface PiCapabilities {
   pty: boolean

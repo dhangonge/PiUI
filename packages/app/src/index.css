@@ -9,10 +9,13 @@
  * DOM 推成 GPU 层导致空闲功耗偏高。
  * 不用 transform：避免打断 InputBox todo-swap 等 transform 动画，
  * 也避免父层 transform 让子级 backdrop-blur 采样错位。
- * .tauri-app class 由 main.tsx 在 Tauri 环境下添加到 <html>。
+ * .tauri-app class 由 main.tsx 在 Tauri 环境下添加到 <html>，
+ * .tauri-desktop 只在桌面 Tauri 加：Android WebView 的
+ * backdrop-filter 本就正常，这个 hint 会让滚动中的玻璃层
+ * 逐帧重取背景纹理，缺帧时直接露出半透明底色。
  */
-.tauri-app[data-glass] :is(.glass, .glass-alt),
-.tauri-app [class*='backdrop-blur'] {
+.tauri-desktop[data-glass] :is(.glass, .glass-alt),
+.tauri-desktop [class*='backdrop-blur'] {
   will-change: backdrop-filter;
 }
 
@@ -31,6 +34,30 @@
 .mobile-chat-pager::-webkit-scrollbar-thumb,
 .mobile-chat-pager::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* 横滑面板的对话面：静止态必须是纯 2D。
+ * preserve-3d + transform 会让子级 .glass 的 backdrop-filter 在 3D 上下文中
+ * 采样不可靠（Android WebView 上缺帧就露出半透明底色，看起来像闪一下）。
+ * 只有真的在滑（data-mobile-chat-moving）时才挂回去。 */
+.mobile-chat-surface {
+  transform: none;
+}
+
+/* 3D 透视只在真的在滑的时候挂。静止态没有 3D 渲染上下文，
+ * 子级的 backdrop-filter 不会被拉伸到 3D 图层里。 */
+.mobile-chat-pager[data-mobile-chat-moving] {
+  perspective: 1200px;
+  perspective-origin: 50% 50%;
+}
+
+.mobile-chat-pager[data-mobile-chat-moving] .mobile-chat-surface {
+  transform: translate3d(var(--mobile-chat-offset-x, 0px), 0, 0) rotateY(var(--mobile-chat-rotate-y, 0deg))
+    scale(var(--mobile-chat-scale, 1));
+  transform-origin: var(--mobile-chat-transform-origin, 50% 50%);
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  will-change: transform;
 }
 
 /* 导航到消息时保留顶部空间，避免被对话标题栏遮挡。 */
@@ -148,7 +175,8 @@ body,
 }
 
 @keyframes settings-search-highlight {
-  0%, 24% {
+  0%,
+  24% {
     background-color: hsl(var(--accent-main-100) / 0.14);
     box-shadow: 0 0 0 1px hsl(var(--accent-main-100) / 0.38);
   }
@@ -369,9 +397,10 @@ body,
     'Segoe UI Emoji';
   --font-sans: var(--font-ui-sans);
   --font-ui-serif: 'Georgia', 'Noto Serif', serif;
-  --font-mono: 'Fira Code', 'Noto Sans Mono CJK SC', 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular',
-    'SF Mono', Menlo, Consolas, 'Liberation Mono', 'Noto Sans Mono', 'Ubuntu Mono',
-    'WenQuanYi Micro Hei Mono', 'DejaVu Sans Mono', 'Noto Sans CJK SC', ui-monospace, monospace;
+  --font-mono:
+    'Fira Code', 'Noto Sans Mono CJK SC', 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo,
+    Consolas, 'Liberation Mono', 'Noto Sans Mono', 'Ubuntu Mono', 'WenQuanYi Micro Hei Mono', 'DejaVu Sans Mono',
+    'Noto Sans CJK SC', ui-monospace, monospace;
 }
 
 :root[data-mode='dark'] {
@@ -401,9 +430,10 @@ body,
     'Segoe UI Emoji';
   --font-sans: var(--font-ui-sans);
   --font-ui-serif: 'Georgia', 'Noto Serif', serif;
-  --font-mono: 'Fira Code', 'Noto Sans Mono CJK SC', 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular',
-    'SF Mono', Menlo, Consolas, 'Liberation Mono', 'Noto Sans Mono', 'Ubuntu Mono',
-    'WenQuanYi Micro Hei Mono', 'DejaVu Sans Mono', 'Noto Sans CJK SC', ui-monospace, monospace;
+  --font-mono:
+    'Fira Code', 'Noto Sans Mono CJK SC', 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo,
+    Consolas, 'Liberation Mono', 'Noto Sans Mono', 'Ubuntu Mono', 'WenQuanYi Micro Hei Mono', 'DejaVu Sans Mono',
+    'Noto Sans CJK SC', ui-monospace, monospace;
 
   /* Background - 灰调晨雾 */
   --bg-000: 150 10% 99%;
@@ -525,7 +555,10 @@ body {
   margin-bottom: 1rem;
 }
 
-.markdown-content.text-\[length\:var\(--fs-sm\)\] .markdown-stream-block:not(:first-child) > :first-child > :first-child {
+.markdown-content.text-\[length\:var\(--fs-sm\)\]
+  .markdown-stream-block:not(:first-child)
+  > :first-child
+  > :first-child {
   margin-top: 0.5rem;
 }
 
@@ -632,7 +665,8 @@ body {
   color: hsl(var(--text-300));
 }
 
-.markdown-content .markdown-html-control:is(input:not([type='checkbox']):not([type='radio']), textarea, select, button) {
+.markdown-content
+  .markdown-html-control:is(input:not([type='checkbox']):not([type='radio']), textarea, select, button) {
   max-width: 100%;
   border: 1px solid hsl(var(--border-200) / 0.75);
   border-radius: 5px;
@@ -660,7 +694,8 @@ body {
   outline-offset: 2px;
 }
 
-.markdown-content :is(.markdown-html-control[type='checkbox'], .markdown-html-control[type='radio'], .markdown-html-progress) {
+.markdown-content
+  :is(.markdown-html-control[type='checkbox'], .markdown-html-control[type='radio'], .markdown-html-progress) {
   accent-color: hsl(var(--accent-main-100));
 }
 
@@ -1043,6 +1078,18 @@ body {
   backdrop-filter: blur(22px) saturate(200%);
 }
 
+/* 收起/展开的 200ms 里祖先 opacity < 1 会形成 backdrop root，玻璃拿不到模糊，
+ * 背后的消息会变清晰透出（看起来像闪一下）。这段窗口退成实色，
+ * 视觉上是「实心面板淡出/淡入」而不是「模糊突然消失」。
+ * data-composer-fading 由 InputBox 在收起态翻转后挂 220ms。 */
+[data-composer-fading] .glass {
+  background-color: hsl(var(--bg-000));
+}
+
+[data-composer-fading] .glass-alt {
+  background-color: hsl(var(--bg-100));
+}
+
 /* ============================================
  * Todo Swap Transition
  * ============================================ */
@@ -1078,7 +1125,8 @@ body {
   transition:
     opacity 180ms cubic-bezier(0.22, 1, 0.36, 1),
     transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform, opacity;
+  /* 不要常驻 will-change：这面板是 glass-alt，常驻合成层会让
+   * 祖先形成 backdrop root，开合时子级背景模糊会突变。 */
   pointer-events: none;
 }
 
@@ -1238,7 +1286,41 @@ body {
   background-size: calc(1lh / round(1lh / 2px)) calc(1lh / round(1lh / 2px));
 }
 
+/* The accessory stays in the composer width container and its reserved dock height.
+   React renders nothing inside the wrapper when the widget is absent, so it is truly empty. */
+[data-composer-accessory]:empty {
+  display: none;
+}
+
+/* 卡片必须自成一个合成层。
+ * 它和输入区在同一个由 [data-composer-dock] transform 建立的层里：
+ * 那一层因为玻璃面板/胶囊淡入而重绘时，Android WebView 会把卡片的底色与边框
+ * 丢一帧，卡片文字仍然叠在聊天正文上（真机 WebView 155 上稳定复现）。
+ * translateZ(0) 让卡片独立成层后，点击、滚动都不再出现该丢帧；
+ * contain:paint 和关闭 backdrop-filter 都不能消除，所以不是模糊或遮罩问题。 */
+.todo-widget {
+  transform: translateZ(0);
+  animation: todo-widget-enter 180ms ease-out;
+}
+
+@keyframes todo-widget-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .todo-widget {
+    animation: none;
+  }
+
+  .todo-widget-panel,
+  .todo-widget svg,
   [data-input-box],
   [data-floating-actions],
   .todo-swap-panel {

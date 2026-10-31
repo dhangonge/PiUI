@@ -32,6 +32,7 @@ export interface ServerHealth {
 export interface ServerSettingsBackup {
   servers: ServerConfig[]
   activeServerId: string | null
+  defaultServerId?: string | null
 }
 
 interface ServerClockCalibration {
@@ -95,18 +96,21 @@ function formatExceptionDiagnostics(url: string, err: unknown): string {
   if (!(err instanceof Error)) return `Request: GET ${url}\n\nError: ${String(err)}`
 
   const cause = 'cause' in err && err.cause !== undefined ? `\n\nCause:\n${String(err.cause)}` : ''
-  return [
-    `Request: GET ${url}`,
-    `Error name: ${err.name}`,
-    `Message: ${err.message}`,
-    err.stack ? `Stack:\n${err.stack}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n\n') + cause
+  return (
+    [
+      `Request: GET ${url}`,
+      `Error name: ${err.name}`,
+      `Message: ${err.message}`,
+      err.stack ? `Stack:\n${err.stack}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n') + cause
+  )
 }
 
 const STORAGE_KEY = 'piui-servers'
 const ACTIVE_SERVER_KEY = 'piui-active-server'
+const DEFAULT_SERVER_KEY = 'piui-default-server'
 export const LOCAL_SERVER_ID = 'local'
 
 /**
@@ -116,6 +120,7 @@ export const LOCAL_SERVER_ID = 'local'
 class ServerStore {
   private servers: ServerConfig[] = []
   private activeServerId: string | null = null
+  private defaultServerId: string | null = null
   private healthMap = new Map<string, ServerHealth>()
   private healthCheckSeqMap = new Map<string, number>()
   private clockCalibrationMap = new Map<string, ServerClockCalibration>()
@@ -166,7 +171,10 @@ class ServerStore {
       // 加载当前选中的服务器
       // 优先从 sessionStorage 读取（per-window 隔离，刷新保持）
       // 回退到 localStorage（新窗口首次打开时继承上次默认）
-      const activeId = sessionStorage.getItem(ACTIVE_SERVER_KEY) ?? localStorage.getItem(ACTIVE_SERVER_KEY)
+      const preferred = localStorage.getItem(DEFAULT_SERVER_KEY)
+      this.defaultServerId = preferred && this.servers.some(server => server.id === preferred) ? preferred : null
+      const activeId =
+        this.defaultServerId ?? sessionStorage.getItem(ACTIVE_SERVER_KEY) ?? localStorage.getItem(ACTIVE_SERVER_KEY)
       if (activeId && this.servers.some(s => s.id === activeId)) {
         this.activeServerId = activeId
       } else {
@@ -190,6 +198,8 @@ class ServerStore {
   private saveToStorage(): void {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.servers))
+      if (this.defaultServerId) localStorage.setItem(DEFAULT_SERVER_KEY, this.defaultServerId)
+      else localStorage.removeItem(DEFAULT_SERVER_KEY)
       if (this.activeServerId) {
         // 写入 sessionStorage（当前窗口刷新保持）+ localStorage（新窗口默认值）
         sessionStorage.setItem(ACTIVE_SERVER_KEY, this.activeServerId)
@@ -269,6 +279,23 @@ class ServerStore {
 
   getStoredServers(): ServerConfig[] {
     return [...this.servers]
+  }
+
+  getServer(id: string): ServerConfig | null {
+    return this._serversSnapshot.find(server => server.id === id) ?? null
+  }
+
+  getDefaultServerId(): string | null {
+    return this.defaultServerId
+  }
+
+  setDefaultServer(id: string | null): boolean {
+    if (id !== null && !this.servers.some(server => server.id === id)) return false
+    if (id === this.defaultServerId) return true
+    this.defaultServerId = id
+    this.saveToStorage()
+    this.notify()
+    return true
   }
 
   /**
@@ -406,13 +433,14 @@ class ServerStore {
     const wasActive = this.activeServerId === id
 
     this.servers = this.servers.filter(s => s.id !== id)
+    if (this.defaultServerId === id) this.defaultServerId = null
     this.healthMap.delete(id)
     this.healthCheckSeqMap.delete(id)
     this.clockCalibrationMap.delete(id)
 
     // 如果删除的是当前选中的，切换到默认
     if (this.activeServerId === id) {
-      this.activeServerId = this.servers[0]?.id ?? null
+      this.activeServerId = this.defaultServerId ?? this.servers[0]?.id ?? null
     }
 
     this.saveToStorage()
@@ -519,7 +547,9 @@ class ServerStore {
       })
 
       const latency = Date.now() - startTime
-      const responseBody = await response.text().catch(err => `[Failed to read response body: ${normalizeConnectionError(err)}]`)
+      const responseBody = await response
+        .text()
+        .catch(err => `[Failed to read response body: ${normalizeConnectionError(err)}]`)
       const details = formatResponseDiagnostics({ url: healthUrl, response, latency, body: responseBody })
 
       if (response.ok) {
@@ -551,7 +581,12 @@ class ServerStore {
           return commitHealth(health)
         }
 
-        if (!isRecord(data) || data.ok !== true || data.service !== 'piui-server' || data.protocolVersion !== PROTOCOL_VERSION) {
+        if (
+          !isRecord(data) ||
+          data.ok !== true ||
+          data.service !== 'piui-server' ||
+          data.protocolVersion !== PROTOCOL_VERSION
+        ) {
           const health: ServerHealth = {
             status: 'error',
             latency,
@@ -654,6 +689,11 @@ function normalizeServerBackup(raw: unknown): ServerSettingsBackup {
   return {
     servers: normalizedServers,
     activeServerId,
+    defaultServerId:
+      typeof parsed?.defaultServerId === 'string' &&
+      normalizedServers.some(server => server.id === parsed.defaultServerId)
+        ? parsed.defaultServerId
+        : null,
   }
 }
 
@@ -661,12 +701,15 @@ export function exportServerSettingsBackup(): ServerSettingsBackup {
   return {
     servers: serverStore.getStoredServers().map(server => ({ ...server })),
     activeServerId: serverStore.getActiveServerId(),
+    defaultServerId: serverStore.getDefaultServerId(),
   }
 }
 
 export function importServerSettingsBackup(raw: unknown): void {
   const normalized = normalizeServerBackup(raw)
   localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized.servers))
+  if (normalized.defaultServerId) localStorage.setItem(DEFAULT_SERVER_KEY, normalized.defaultServerId)
+  else localStorage.removeItem(DEFAULT_SERVER_KEY)
   if (normalized.activeServerId) {
     localStorage.setItem(ACTIVE_SERVER_KEY, normalized.activeServerId)
     sessionStorage.setItem(ACTIVE_SERVER_KEY, normalized.activeServerId)

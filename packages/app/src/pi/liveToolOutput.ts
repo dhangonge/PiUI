@@ -1,8 +1,14 @@
 import { useSyncExternalStore } from 'react'
+import { useSessionNavigation } from '../contexts/SessionNavigationContext'
+import { isScopedSessionKey } from '../utils/sessionKey'
+
+function outputKey(toolCallId: string, sessionId?: string | null): string {
+  return sessionId && isScopedSessionKey(sessionId) ? `${sessionId}::${toolCallId}` : toolCallId
+}
 
 /**
- * 运行中工具（bash 等）的实时输出，按 toolCallId 键控（Pi 生成的 UUID 全局
- * 唯一，无需 session 维度）。Pi 的 tool_execution_update.partialResult 是
+ * Live output is isolated by the owning session on multi-server connections.
+ * Pi 的 tool_execution_update.partialResult 是
  * 累积输出（不是增量），直接替换显示即可；tool_execution_end 时清除。
  */
 
@@ -22,17 +28,21 @@ function notify(): void {
 export function extractToolExecutionText(partialResult: { content?: unknown } | undefined): string {
   if (!partialResult || !Array.isArray(partialResult.content)) return ''
   return partialResult.content
-    .filter((block): block is { type: 'text'; text: string } => (
-      Boolean(block) && typeof block === 'object' && !Array.isArray(block)
-      && (block as { type?: unknown }).type === 'text'
-      && typeof (block as { text?: unknown }).text === 'string'
-    ))
+    .filter(
+      (block): block is { type: 'text'; text: string } =>
+        Boolean(block) &&
+        typeof block === 'object' &&
+        !Array.isArray(block) &&
+        (block as { type?: unknown }).type === 'text' &&
+        typeof (block as { text?: unknown }).text === 'string',
+    )
     .map(block => block.text)
     .join('')
 }
 
 export const liveToolOutputStore = {
   set(toolCallId: string, sessionId: string, text: string): void {
+    toolCallId = outputKey(toolCallId, sessionId)
     const previous = outputs.get(toolCallId)
     if (previous && previous.text === text) return
     outputs.set(toolCallId, { sessionId, text })
@@ -41,12 +51,13 @@ export const liveToolOutputStore = {
   /** 追加增量输出（用户 `!cmd` 的 bash_execution_update.delta 是 chunk） */
   append(toolCallId: string, sessionId: string, delta: string): void {
     if (!delta) return
+    toolCallId = outputKey(toolCallId, sessionId)
     const previous = outputs.get(toolCallId)
     outputs.set(toolCallId, { sessionId, text: (previous?.text ?? '') + delta })
     notify()
   },
-  delete(toolCallId: string): void {
-    if (!outputs.delete(toolCallId)) return
+  delete(toolCallId: string, sessionId?: string): void {
+    if (!outputs.delete(outputKey(toolCallId, sessionId))) return
     notify()
   },
   clearSession(sessionId: string): void {
@@ -59,8 +70,8 @@ export const liveToolOutputStore = {
     }
     if (changed) notify()
   },
-  get(toolCallId: string): string | undefined {
-    return outputs.get(toolCallId)?.text
+  get(toolCallId: string, sessionId?: string | null): string | undefined {
+    return outputs.get(outputKey(toolCallId, sessionId))?.text
   },
   subscribe(listener: () => void): () => void {
     listeners.add(listener)
@@ -74,8 +85,8 @@ export const liveToolOutputStore = {
 
 /** 订阅某工具调用的实时输出；无输出或非运行中时返回 undefined */
 export function useLiveToolOutput(toolCallId: string | undefined): string | undefined {
-  return useSyncExternalStore(
-    liveToolOutputStore.subscribe,
-    () => (toolCallId ? liveToolOutputStore.get(toolCallId) : undefined),
+  const { currentSessionId } = useSessionNavigation()
+  return useSyncExternalStore(liveToolOutputStore.subscribe, () =>
+    toolCallId ? liveToolOutputStore.get(toolCallId, currentSessionId) : undefined,
   )
 }

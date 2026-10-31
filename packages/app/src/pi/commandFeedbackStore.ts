@@ -47,7 +47,8 @@ export const commandFeedbackStore = {
     const full: CommandFeedbackEntry = {
       ...entry,
       kind: entry.kind ?? 'command',
-      id: globalThis.crypto?.randomUUID?.() ?? `${entry.sessionId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      id:
+        globalThis.crypto?.randomUUID?.() ?? `${entry.sessionId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       at: Date.now(),
     }
     const session = current.sessions[entry.sessionId] ?? []

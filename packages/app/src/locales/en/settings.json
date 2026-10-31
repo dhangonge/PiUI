@@ -54,7 +54,14 @@
     "shareLoopbackHint": "This link works for clients on this machine only. Restart the server with PIUI_HOST=0.0.0.0 to share it on your LAN.",
     "editServer": "Edit server",
     "deleteServer": "Delete Server",
-    "deleteServerConfirm": "Remove \"{{name}}\" from the server list? This cannot be undone."
+    "deleteServerConfirm": "Remove \"{{name}}\" from the server list? This cannot be undone.",
+    "multiServerMode": "Multi-server mode",
+    "multiServerModeDesc": "Subscribe to multiple servers. Browse sessions by server and keep independent conversations connected.",
+    "multiServerModeOffHint": "Subscribe to a server in Settings to show its projects and sessions here.",
+    "subscribe": "Subscribe",
+    "unsubscribe": "Unsubscribe",
+    "setDefaultServer": "Use at startup",
+    "clearDefaultServer": "Use last active server at startup"
   },
   "service": {
     "title": "Local PiUI Service",
@@ -115,6 +122,8 @@
     "collapseLongMessagesDesc": "Auto-collapse lengthy user messages",
     "renderUserMarkdown": "Render User Markdown",
     "renderUserMarkdownDesc": "Render sent user messages as Markdown when enabled; keep plain text when disabled",
+    "renderHtmlContent": "Render HTML Content",
+    "renderHtmlContentDesc": "Render HTML in AI output as live preview; show HTML as source code when disabled",
     "outlineCurrentHighlight": "Highlight Current Position",
     "outlineCurrentHighlightDesc": "Mark the user prompt that owns the current viewport in the right-side history rail",
     "actionsOnLatestAssistantOnly": "Actions on latest reply only",
@@ -331,7 +340,15 @@
     "backupImportConfirm": "Importing a backup will replace the current local settings and reload the app. Continue?",
     "backupImportConfirmWithDate": "Import the backup created at {{date}}? This will replace the current local settings and reload the app.",
     "toastTitle": "New version available: {{version}}",
-    "toastBody": "Click to open About and view the release page."
+    "toastBody": "Click to open About and view the release page.",
+    "diagnosticsCardTitle": "Diagnostics",
+    "diagnosticsCardDesc": "Recent client-side errors recorded on this device. They are kept locally and reported to your own PiUI server log when it is reachable.",
+    "diagnosticsEmpty": "No errors recorded.",
+    "diagnosticsCount": "{{count}} error(s) recorded, newest first.",
+    "diagnosticsTruncated": "{{count}} older error(s) not shown.",
+    "diagnosticsCopy": "Copy all",
+    "diagnosticsCopied": "Copied",
+    "diagnosticsClear": "Clear"
   },
   "keybindings": {
     "title": "Keyboard Shortcuts",

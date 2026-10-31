@@ -73,9 +73,10 @@ describe('SessionChangesPanel', () => {
     }))
     getHostGitDiff.mockImplementation(async (_workspace, mode) => ({
       mode,
-      files: mode === 'branch'
-        ? [{ file: 'src/branch.ts', status: 'modified', additions: 1, deletions: 1, binary: false }]
-        : [{ file: 'src/git.ts', status: 'modified', additions: 1, deletions: 1, binary: false }],
+      files:
+        mode === 'branch'
+          ? [{ file: 'src/branch.ts', status: 'modified', additions: 1, deletions: 1, binary: false }]
+          : [{ file: 'src/git.ts', status: 'modified', additions: 1, deletions: 1, binary: false }],
     }))
   })
 

@@ -1,4 +1,4 @@
-import type { JsonObject, JsonValue } from "./json.js"
+import type { JsonObject, JsonValue } from './json.js'
 
 export type ToolDescriptor = {
   name: string
@@ -35,11 +35,11 @@ export type RegistrySnapshot = {
   eventHandlers: string[]
 }
 
-export type PiCapabilityScope = "global" | "session"
+export type PiCapabilityScope = 'global' | 'session'
 
-export type PiCapabilitySource = "pi-sdk" | "pi-extension" | "piui-adapter"
+export type PiCapabilitySource = 'pi-sdk' | 'pi-extension' | 'piui-adapter'
 
-export type PiCapabilityQueue = "immediate" | "serialized"
+export type PiCapabilityQueue = 'immediate' | 'serialized'
 
 export type PiCapability = {
   name: string
@@ -62,14 +62,14 @@ export type PiRegistrySnapshot = {
   protocolVersion: number
   revision: number
   sdkVersion: string
-  driver: "mock" | "pi"
+  driver: 'mock' | 'pi'
   globalCommands: PiCapability[]
   sessionCommands: PiCapability[]
 }
 
-export type HostCapabilityDomain = "server" | "commands" | "workspaces" | "files" | "git" | "terminals"
+export type HostCapabilityDomain = 'server' | 'commands' | 'workspaces' | 'files' | 'git' | 'terminals'
 
-export type HostCapabilityQueue = "immediate" | "serialized"
+export type HostCapabilityQueue = 'immediate' | 'serialized'
 
 export type HostCapability = {
   name: string
@@ -87,7 +87,7 @@ export type HostCapability = {
 export type HostRegistrySnapshot = {
   protocolVersion: number
   revision: number
-  service: "piui-server"
+  service: 'piui-server'
   commands: HostCapability[]
 }
 

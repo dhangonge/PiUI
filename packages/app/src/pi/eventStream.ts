@@ -15,12 +15,22 @@ import type { AgentMessage, AgentSessionEvent, PiLiveMessage } from './domain/in
 import type { ProviderAuthEvent, SessionsActivitySnapshot, SessionActivityStatus } from '@piui/protocol'
 import { getApiBase, getPiAuthToken } from './httpClient.js'
 import { openPiSocket, PI_SOCKET_CLOSED, PI_SOCKET_CLOSING, PI_SOCKET_OPEN, type PiSocket } from './piSocket'
-import { piBranchStore, piCommandStore, piSessionStateStore } from './state/index.js'
+import { piBranchStore, getPiCommandStore, piSessionStateStore } from './state/index.js'
+import {
+  isScopedSessionKey,
+  makeSessionKey,
+  splitSessionKey,
+  getServerRevision,
+  scopeSessionResult,
+} from '../utils/sessionKey'
 import { extensionUiStore } from './extensionUiStore'
+import { getPiModelsStore } from './state/piModelsStore'
+import { piSessionInfoStore } from './piSessionInfoStore'
 import { extensionTuiStore } from './extensionTuiStore'
 import { commandFeedbackStore } from './commandFeedbackStore'
 import { notificationStore } from '../store/notificationStore'
 import { liveToolOutputStore, extractToolExecutionText } from './liveToolOutput'
+import { childAgentStore, type SubagentChildPayload } from './childAgentStore'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { serverStore } from '../store/serverStore'
 import { perfMark } from '../utils/perf'
@@ -35,15 +45,20 @@ import {
   type PackageProgress,
 } from './managementEventStore'
 import type { SessionStatus } from '../types/session'
-import {
-  loadPiSessionData,
-  refreshPiBranch,
-  refreshPiSessionState,
-} from './controllers/index.js'
+import { loadPiSessionData, refreshPiBranch, refreshPiSessionState } from './controllers/index.js'
 
 const PING_INTERVAL_MS = 25_000
 const RECONNECT_DELAY_MS = 1_000
+const RECONNECT_MAX_DELAY_MS = 30_000
+/** 距上次收到任意帧超过这个时长视为半死连接（等于连续两次 ping 没有回音） */
+const STALE_FRAME_MS = PING_INTERVAL_MS * 2
 const REFRESH_DEBOUNCE_MS = 150
+/**
+ * piui:sessions-changed 的合并窗口：一次 attach/detach/close 或窗口切换会连发
+ * 多条 sessions.updated，而每个监听方都要各拉一次 150KB 量级的列表。
+ * 窗口内只派发一次（trailing edge），但最后一次必须落地。
+ */
+const SESSIONS_CHANGED_THROTTLE_MS = 250
 
 type PiEventPayload = {
   event: AgentSessionEvent
@@ -87,9 +102,37 @@ type SessionsUpdatedPayload = {
  * - resync_required: full reload for that stream
  * - sessions.updated: reload global session list
  */
-class PiEventStream {
-  constructor() {
-    queueMicrotask(() => this.ensureManagementWatch())
+export class PiEventStream {
+  private readonly serverId?: string
+
+  constructor(serverId?: string) {
+    this.serverId = serverId
+    this.onPageVisible = this.handlePageVisible.bind(this)
+    this.onNetworkOnline = this.handleNetworkOnline.bind(this)
+    this.onNativeForeground = this.handleNativeForeground.bind(this)
+    if (!serverId) queueMicrotask(() => this.ensureManagementWatch())
+  }
+
+  private sessionKey(id: string): string {
+    return this.serverId ? makeSessionKey(this.serverId, id) : id
+  }
+
+  private get commandStore() {
+    return getPiCommandStore(this.serverId)
+  }
+  private providers(): string[] {
+    return this.serverId ? [] : getTrackedManagementProviders()
+  }
+  private serverRefs = 0
+
+  connectServer(): void {
+    this.serverRefs += 1
+    this.ensureSocket()
+  }
+
+  disconnectServer(): void {
+    this.serverRefs = Math.max(0, this.serverRefs - 1)
+    if (!this.hasSubscriptions()) this.closeSocket()
   }
 
   private ws: PiSocket | null = null
@@ -98,11 +141,25 @@ class PiEventStream {
   private cursors = new Map<string, EventCursor>()
   private pingTimer: ReturnType<typeof setInterval> | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectAttempts = 0
+  /** 最后一次收到任意服务端帧的时间戳；看门狗靠它判断连接是否还活着 */
+  private lastFrameAt = 0
+  private resumeListenersAttached = false
+  private readonly onPageVisible: () => void
+  private readonly onNetworkOnline: () => void
+  /** 原生侧 onResume 兜底信号（部分 Android WebView 后台不派发 visibilitychange） */
+  private readonly onNativeForeground: () => void
+  private sessionsChangedTimer: ReturnType<typeof setTimeout> | null = null
   private branchRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private stateRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   /** Subscribe a session stream (reference counted). */
   connect(sessionId: string): void {
+    if (!this.serverId && isScopedSessionKey(sessionId)) {
+      const target = splitSessionKey(sessionId)
+      getPiEventStream(target.serverId).connect(target.sessionId)
+      return
+    }
     this.refCounts.set(sessionId, (this.refCounts.get(sessionId) ?? 0) + 1)
     if (this.refCounts.get(sessionId) === 1) {
       this.ensureSocket()
@@ -112,12 +169,17 @@ class PiEventStream {
 
   /** Unsubscribe a session stream; closes the socket when nothing remains. */
   disconnect(sessionId: string): void {
+    if (!this.serverId && isScopedSessionKey(sessionId)) {
+      const target = splitSessionKey(sessionId)
+      streams.get(target.serverId)?.stream.disconnect(target.sessionId)
+      return
+    }
     const count = this.refCounts.get(sessionId) ?? 0
     if (count <= 1) {
       this.refCounts.delete(sessionId)
       this.cursors.delete(eventStreamKey({ kind: 'session', id: sessionId }))
-      this.clearRefreshTimers(sessionId)
-      liveToolOutputStore.clearSession(sessionId)
+      this.clearRefreshTimers(this.sessionKey(sessionId))
+      liveToolOutputStore.clearSession(this.sessionKey(sessionId))
     } else {
       this.refCounts.set(sessionId, count - 1)
       return
@@ -167,12 +229,32 @@ class PiEventStream {
 
   /** Drop everything (server switch etc.). */
   disconnectAll(): void {
-    for (const sessionId of this.refCounts.keys()) this.clearRefreshTimers(sessionId)
+    for (const sessionId of this.refCounts.keys()) this.clearRefreshTimers(this.sessionKey(sessionId))
+    this.serverRefs = 0
     this.refCounts.clear()
     this.workspaceRefCounts.clear()
     this.cursors.clear()
-    piCommandStore.clearAll()
+    this.commandStore.clearAll()
     this.closeSocket()
+  }
+
+  invalidate(): void {
+    const ids = new Set([
+      ...this.knownActiveSessions,
+      ...Object.keys(extensionUiStore.getSnapshot().sessions).filter(
+        id => this.serverId && id.startsWith(`${this.serverId}::`),
+      ),
+      ...[...this.refCounts.keys()].map(id => this.sessionKey(id)),
+    ])
+    this.disconnectAll()
+    this.knownActiveSessions.clear()
+    for (const id of ids) {
+      activeSessionStore.removeSession(id)
+      extensionUiStore.remove(id)
+      extensionTuiStore.remove(id)
+      liveToolOutputStore.clearSession(id)
+      childAgentStore.clearSession(id)
+    }
   }
 
   /** Replace every subscription when the active backend changes. */
@@ -205,7 +287,12 @@ class PiEventStream {
   private closeSocket(): void {
     const ws = this.ws
     this.ws = null
+    // 拆连接前把挂起的列表刷新落地，避免最后一次 sessions.updated 被节流吞掉
+    this.flushSessionsChanged()
     this.clearPing()
+    this.lastFrameAt = 0
+    this.reconnectAttempts = 0
+    this.detachResumeListeners()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -216,19 +303,29 @@ class PiEventStream {
   }
 
   private openSocket(): void {
-    const url = new URL(wsEventsUrl())
-    const token = getPiAuthToken()
+    const url = new URL(wsEventsUrl(this.serverId))
+    const token = getPiAuthToken(this.serverId)
     if (token) url.searchParams.set('token', token)
 
     const ws = openPiSocket(url.toString())
     this.ws = ws
+    this.attachResumeListeners()
 
     ws.onopen = () => {
       if (this.ws !== ws) return
+      this.reconnectAttempts = 0
+      this.lastFrameAt = Date.now()
       this.sendSubscribe()
-      notifyReconnected()
+      notifyReconnected(this.serverId)
+      this.clearPing()
       this.pingTimer = setInterval(() => {
-        this.send({ type: 'ping', protocolVersion: PROTOCOL_VERSION })
+        if (this.isStale()) {
+          // 半死连接（后台冻结 / 网络切换后 TCP 已黑）：WS 层可能很久都不报
+          // close，只能自己拉断，让 onclose 走重连
+          ws.close()
+          return
+        }
+        this.sendPing()
       }, PING_INTERVAL_MS)
     }
     ws.onmessage = e => {
@@ -236,23 +333,96 @@ class PiEventStream {
       // swapped this.ws (server switch). Ignore messages from any socket that
       // is no longer the active one, mirroring the onclose identity check.
       if (this.ws !== ws) return
+      this.lastFrameAt = Date.now()
       this.handleRaw(String(e.data))
     }
     ws.onclose = () => {
       if (this.ws !== ws) return
       this.clearPing()
+      this.lastFrameAt = 0
       this.ws = null
       if (this.hasSubscriptions()) {
         if (this.reconnectTimer) return
         this.reconnectTimer = setTimeout(() => {
           this.reconnectTimer = null
           if (!this.ws) this.openSocket()
-        }, RECONNECT_DELAY_MS)
+        }, this.nextReconnectDelay())
       }
     }
     ws.onerror = () => {
       // close follows; reconnect handled there
     }
+  }
+
+  private isStale(): boolean {
+    return this.lastFrameAt > 0 && Date.now() - this.lastFrameAt >= STALE_FRAME_MS
+  }
+
+  private sendPing(): void {
+    this.send({ type: 'ping', protocolVersion: PROTOCOL_VERSION })
+  }
+
+  /**
+   * 1s → 2s → 4s … 上限 30s，±20% 抖动：断网恢复时多端不会同时扑向服务端。
+   * 每次参与计数（而不是在 onopen 里算）——open 被对端立刻关掉的循环也要退避。
+   */
+  private nextReconnectDelay(): number {
+    const base = Math.min(RECONNECT_DELAY_MS * 2 ** this.reconnectAttempts, RECONNECT_MAX_DELAY_MS)
+    this.reconnectAttempts += 1
+    const jitter = base * 0.2 * (Math.random() * 2 - 1)
+    return Math.round(base + jitter)
+  }
+
+  private attachResumeListeners(): void {
+    if (this.resumeListenersAttached) return
+    if (typeof document === 'undefined' || typeof window === 'undefined') return
+    this.resumeListenersAttached = true
+    document.addEventListener('visibilitychange', this.onPageVisible)
+    window.addEventListener('online', this.onNetworkOnline)
+    window.addEventListener('piui:foreground', this.onNativeForeground)
+  }
+
+  private detachResumeListeners(): void {
+    if (!this.resumeListenersAttached) return
+    this.resumeListenersAttached = false
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.onPageVisible)
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', this.onNetworkOnline)
+      window.removeEventListener('piui:foreground', this.onNativeForeground)
+    }
+  }
+
+  private handlePageVisible(): void {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+    this.resumeNow()
+  }
+
+  private handleNetworkOnline(): void {
+    this.resumeNow()
+  }
+
+  /** MainActivity.onResume 注入的兜底信号：走与 visibilitychange 完全相同的路径。 */
+  private handleNativeForeground(): void {
+    this.resumeNow()
+  }
+
+  /** 回前台 / 网络恢复：跳过退避立即重连，socket 还活着就先探活。 */
+  private resumeNow(): void {
+    if (!this.hasSubscriptions()) return
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    if (this.ws && this.ws.readyState === PI_SOCKET_OPEN) {
+      // 后台期间定时器被冻结，回来的第一刻可能已经过了整个 ping 周期：
+      // 已经超时就当半死直接拉断，否则立刻 ping 一次探活
+      if (this.isStale()) this.ws.close()
+      else this.sendPing()
+      return
+    }
+    // 之前的失败大多来自后台冻结 / 网络切换，不是服务端在拒绝：回前台从 1s 重新起跳
+    this.reconnectAttempts = 0
+    if (!this.ws) this.openSocket()
   }
 
   private sendSubscribe(): void {
@@ -274,7 +444,7 @@ class PiEventStream {
       const cursor = this.cursors.get(key)
       if (cursor) cursors[key] = cursor
     }
-    for (const providerId of getTrackedManagementProviders()) {
+    for (const providerId of this.providers()) {
       const stream = { kind: 'provider' as const, id: providerId }
       streams.push(stream)
       const cursor = this.cursors.get(eventStreamKey(stream))
@@ -288,7 +458,7 @@ class PiEventStream {
     // 上下文用量永远不恢复。每次订阅建立都主动 pull 一次（有防抖合并），
     // 让打开/刷新会话时立即拿到正在工作的 runtime 的真实状态。
     for (const sessionId of this.refCounts.keys()) {
-      this.scheduleStateRefresh(sessionId)
+      this.scheduleStateRefresh(this.sessionKey(sessionId))
     }
   }
 
@@ -318,12 +488,40 @@ class PiEventStream {
     if ('channel' in message && message.channel === 'control' && message.type === 'problem') {
       this.closeSocket()
       window.dispatchEvent(new CustomEvent('piui:event-stream-error', { detail: message.problem }))
+      return
     }
+    // pong / hello 无 channel：帧本身已经算“连接还活着”（看门狗在 onmessage
+    // 里记时间戳），这里只需显式消费，不要当未知消息处理
+    if ('type' in message && (message.type === 'pong' || message.type === 'hello')) return
   }
 
   private handleEvent(envelope: EventEnvelope): void {
-    const sessionId = envelope.stream.kind === 'session' ? envelope.stream.id : null
+    const sessionId = envelope.stream.kind === 'session' ? this.sessionKey(envelope.stream.id) : null
     this.cursors.set(eventStreamKey(envelope.stream), envelope.cursor)
+    if (
+      !this.serverId &&
+      streams.has(serverStore.getActiveServerId()) &&
+      ['sessions.updated', 'sessions.activity'].includes(envelope.channel)
+    )
+      return
+    // Management and workspace panels are bound to the focused server. Never
+    // feed another endpoint's auth, files or terminals into those global stores.
+    if (
+      this.serverId &&
+      this.serverId !== serverStore.getActiveServerId() &&
+      [
+        'provider.auth',
+        'packages.progress',
+        'resources.updated',
+        'workspace.files',
+        'workspace.git',
+        'terminal.created',
+        'terminal.updated',
+        'terminal.exited',
+        'terminal.deleted',
+      ].includes(envelope.channel)
+    )
+      return
     switch (envelope.channel) {
       case 'pi.event':
         if (sessionId) this.handlePiEvent(sessionId, envelope.payload as unknown as PiEventPayload)
@@ -345,12 +543,22 @@ class PiEventStream {
         break
       case 'command.updated':
         if (isCommandRecord(envelope.payload)) {
-          piCommandStore.upsert(envelope.payload)
-          window.dispatchEvent(new CustomEvent('piui:command-updated', { detail: envelope.payload }))
+          this.commandStore.upsert(envelope.payload)
+          const detail = scopeSessionResult<CommandRecord>(envelope.payload, this.serverId)
+          window.dispatchEvent(
+            new CustomEvent('piui:command-updated', {
+              detail: this.serverId ? { ...detail, id: makeSessionKey(this.serverId, detail.id) } : detail,
+            }),
+          )
         }
         break
       case 'extension.ui':
         if (sessionId) this.handleExtensionUiEvent(sessionId, envelope.payload as unknown as PiExtensionUiEvent)
+        break
+      case 'subagent.child':
+        if (sessionId) {
+          childAgentStore.receive(envelope.payload as unknown as SubagentChildPayload, sessionId)
+        }
         break
       case 'provider.auth':
         this.handleProviderAuthEvent(envelope.payload as unknown as ProviderAuthEvent)
@@ -372,9 +580,11 @@ class PiEventStream {
       case 'registry.updated': {
         const payload = envelope.payload as { sessionId?: string } | undefined
         if (sessionId || payload?.sessionId) {
-          window.dispatchEvent(new CustomEvent('piui:registry-updated', {
-            detail: { sessionId: sessionId ?? payload?.sessionId },
-          }))
+          window.dispatchEvent(
+            new CustomEvent('piui:registry-updated', {
+              detail: { sessionId: sessionId ?? (payload?.sessionId ? this.sessionKey(payload.sessionId) : undefined) },
+            }),
+          )
         }
         break
       }
@@ -382,9 +592,11 @@ class PiEventStream {
       case 'terminal.updated':
       case 'terminal.exited':
       case 'terminal.deleted':
-        window.dispatchEvent(new CustomEvent('piui:terminals-changed', {
-          detail: { workspacePath: envelope.stream.kind === 'workspace' ? envelope.stream.id : undefined },
-        }))
+        window.dispatchEvent(
+          new CustomEvent('piui:terminals-changed', {
+            detail: { workspacePath: envelope.stream.kind === 'workspace' ? envelope.stream.id : undefined },
+          }),
+        )
         break
     }
   }
@@ -398,39 +610,57 @@ class PiEventStream {
   }
 
   private handleSessionsUpdated(payload: SessionsUpdatedPayload | undefined): void {
+    payload = scopeSessionResult(payload, this.serverId)
     if (payload?.replaced && payload.sourceSessionId && payload.targetSessionId) {
       if (payload.reason === 'runtime-reuse') {
         // runtime 复用（ensureAttached 偷同目录空闲 runtime）：源 session 的
         // 磁盘数据和 pane 绑定都不变，不做替换清理，只刷新会话列表。
         // 若按真实替换处理，paneLayoutStore.remapSession 会把所有绑定源
         // session 的 pane 全部切走（分屏互相串扰）。
-        window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
+        this.scheduleSessionsChanged()
         return
       }
       // Runtime replacement (fork/new/import): the worker now owns a
       // different session id. Drop the old session's cursors and keyed
       // data; panes re-subscribe and reload under the new id when they
       // follow piui:session-replaced (their connect effect owns ref counts).
-      this.cursors.delete(eventStreamKey({ kind: 'session', id: payload.sourceSessionId }))
-      this.branchRefreshTimers.delete(payload.sourceSessionId)
-      this.stateRefreshTimers.delete(payload.sourceSessionId)
+      this.cursors.delete(eventStreamKey({ kind: 'session', id: splitSessionKey(payload.sourceSessionId).sessionId }))
+      this.clearRefreshTimers(payload.sourceSessionId)
       piBranchStore.clear(payload.sourceSessionId)
       piSessionStateStore.clear(payload.sourceSessionId)
-      piCommandStore.clearSession(payload.sourceSessionId)
+      this.commandStore.clearSession(splitSessionKey(payload.sourceSessionId).sessionId)
       window.dispatchEvent(new CustomEvent('piui:session-replaced', { detail: payload }))
     }
     // 事件驱动刷新：SessionContext/useSessions 订阅 piui:sessions-changed 会
-    // 各自重新拉列表（并更新 piSessionInfoStore），这里不需要再直接拉一次
+    // 各自重新拉列表（并更新 piSessionInfoStore），这里不需要再直接拉一次。
+    // 连发的多条（attach/detach/窗口切换）在窗口内合并成一次。
+    this.scheduleSessionsChanged()
+  }
+
+  /** trailing edge 合并：窗口内多次请求只派发一次，且最后一次一定派发。 */
+  private scheduleSessionsChanged(): void {
+    if (this.sessionsChangedTimer) return
+    this.sessionsChangedTimer = setTimeout(() => {
+      this.sessionsChangedTimer = null
+      window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
+    }, SESSIONS_CHANGED_THROTTLE_MS)
+  }
+
+  /** 清理路径（closeSocket/disconnectAll）：把挂起的派发立刻落地而不是丢弃。 */
+  private flushSessionsChanged(): void {
+    if (!this.sessionsChangedTimer) return
+    clearTimeout(this.sessionsChangedTimer)
+    this.sessionsChangedTimer = null
     window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
   }
 
   private handleExtensionUiEvent(sessionId: string, event: PiExtensionUiEvent): void {
     switch (event.type) {
       case 'requested':
-        extensionUiStore.requestOpened(event.request)
+        extensionUiStore.requestOpened({ ...event.request, sessionId })
         // Surface as pending action on the sidebar (awaiting permission/answer)
         activeSessionStore.addPendingRequest(
-          event.request.requestId,
+          isScopedSessionKey(sessionId) ? `${sessionId}:${event.request.requestId}` : event.request.requestId,
           sessionId,
           event.request.kind === 'confirm' ? 'permission' : 'question',
           event.request.title,
@@ -438,7 +668,9 @@ class PiEventStream {
         break
       case 'settled':
         extensionUiStore.requestSettled(sessionId, event.requestId)
-        activeSessionStore.resolvePendingRequest(event.requestId)
+        activeSessionStore.resolvePendingRequest(
+          isScopedSessionKey(sessionId) ? `${sessionId}:${event.requestId}` : event.requestId,
+        )
         break
       case 'state':
         extensionUiStore.statePatched(sessionId, event.patch)
@@ -470,13 +702,13 @@ class PiEventStream {
         break
       }
       case 'tuiAttach':
-        extensionTuiStore.attach(event.sessionId, event.attach)
+        extensionTuiStore.attach(sessionId, event.attach)
         break
       case 'tuiDetach':
-        extensionTuiStore.detach(event.sessionId, event.key)
+        extensionTuiStore.detach(sessionId, event.key)
         break
       case 'tuiFrame':
-        extensionTuiStore.frame(event.sessionId, event.data)
+        extensionTuiStore.frame(sessionId, event.data)
         break
     }
   }
@@ -486,7 +718,9 @@ class PiEventStream {
    * Feeds activeSessionStore so the sidebar shows working/retrying dots.
    */
   private handleActivitySnapshot(snapshot: SessionsActivitySnapshot): void {
-    const active = snapshot?.sessions ?? {}
+    const active = Object.fromEntries(
+      Object.entries(snapshot?.sessions ?? {}).map(([id, status]) => [this.sessionKey(id), status]),
+    )
     for (const [sessionId, status] of Object.entries(active)) {
       if (!this.knownActiveSessions.has(sessionId)) notifySessionStarted(sessionId)
       activeSessionStore.updateStatus(sessionId, activityToSessionStatus(status))
@@ -517,7 +751,7 @@ class PiEventStream {
         break
       case 'tool_execution_end':
         if ('toolCallId' in event && typeof event.toolCallId === 'string') {
-          liveToolOutputStore.delete(event.toolCallId)
+          liveToolOutputStore.delete(event.toolCallId, sessionId)
         }
         this.scheduleBranchRefresh(sessionId)
         break
@@ -532,8 +766,13 @@ class PiEventStream {
       case 'bash_execution_update': {
         // 用户 `!cmd`/`/bash` 的流式输出（pi TUI onChunk 的事件流对应物）。
         // id = worker 透传的 clientId，delta 是增量 chunk。
-        if ('id' in event && typeof event.id === 'string' && event.id
-          && 'delta' in event && typeof event.delta === 'string') {
+        if (
+          'id' in event &&
+          typeof event.id === 'string' &&
+          event.id &&
+          'delta' in event &&
+          typeof event.delta === 'string'
+        ) {
           liveToolOutputStore.append(event.id, sessionId, event.delta)
         }
         this.scheduleStateRefresh(sessionId)
@@ -595,20 +834,24 @@ class PiEventStream {
     if (!stream) return
     if (cursor) this.cursors.set(key, cursor)
     if (stream.kind === 'session') {
-      void loadPiSessionData(stream.id).catch(() => undefined)
-      // resync 时同样主动拉一次运行时 state（branch 与 state 一起恢复）
-      this.scheduleStateRefresh(stream.id)
+      void loadPiSessionData(this.sessionKey(stream.id)).catch(() => undefined)
+      // Restore branch and state together after a replay gap.
+      this.scheduleStateRefresh(this.sessionKey(stream.id))
     } else if (stream.kind === 'server') {
       window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
     } else if (stream.kind === 'provider') {
       receiveProviderAuthUpdated()
     } else if (stream.kind === 'workspace') {
-      window.dispatchEvent(new CustomEvent('piui:workspace-files-changed', {
-        detail: { workspacePath: stream.id, changes: [], rescan: true },
-      }))
-      window.dispatchEvent(new CustomEvent('piui:workspace-git-updated', {
-        detail: { workspacePath: stream.id },
-      }))
+      window.dispatchEvent(
+        new CustomEvent('piui:workspace-files-changed', {
+          detail: { workspacePath: stream.id, changes: [], rescan: true },
+        }),
+      )
+      window.dispatchEvent(
+        new CustomEvent('piui:workspace-git-updated', {
+          detail: { workspacePath: stream.id },
+        }),
+      )
     }
   }
 
@@ -638,20 +881,52 @@ class PiEventStream {
   }
 
   private hasSubscriptions(): boolean {
-    return this.refCounts.size > 0 || this.workspaceRefCounts.size > 0 || getTrackedManagementProviders().length > 0
+    return (
+      this.serverRefs > 0 || this.refCounts.size > 0 || this.workspaceRefCounts.size > 0 || this.providers().length > 0
+    )
   }
 }
 
 export const piEventStream = new PiEventStream()
+const streams = new Map<string, { stream: PiEventStream; revision: number }>()
+
+export function getPiEventStream(serverId: string): PiEventStream {
+  let entry = streams.get(serverId)
+  if (!entry) {
+    entry = { stream: new PiEventStream(serverId), revision: getServerRevision(serverId) }
+    streams.set(serverId, entry)
+  }
+  return entry.stream
+}
+
 serverStore.onServerChange(() => piEventStream.handleServerChange())
+serverStore.subscribe(() => {
+  for (const [id, entry] of streams) {
+    const revision = getServerRevision(id)
+    if (revision === entry.revision) continue
+    entry.revision = revision
+    entry.stream.invalidate()
+    piBranchStore.clearServer(id)
+    piSessionStateStore.clearServer(id)
+    getPiModelsStore(id).clear()
+    piSessionInfoStore.replaceForServer(id, [])
+    window.dispatchEvent(new CustomEvent('piui:server-invalidated', { detail: { serverId: id } }))
+  }
+})
 
 function isCommandRecord(value: unknown): value is CommandRecord {
   if (!isJsonObject(value)) return false
-  return typeof value.id === 'string' &&
+  return (
+    typeof value.id === 'string' &&
     typeof value.type === 'string' &&
-    (value.status === 'accepted' || value.status === 'running' || value.status === 'completed' ||
-      value.status === 'failed' || value.status === 'cancelled' || value.status === 'unknown_after_crash') &&
+    (value.status === 'accepted' ||
+      value.status === 'running' ||
+      value.status === 'completed' ||
+      value.status === 'failed' ||
+      value.status === 'cancelled' ||
+      value.status === 'unknown_after_crash') &&
     typeof value.submittedAt === 'string'
+  )
 }
 
 function activityToSessionStatus(status: SessionActivityStatus): SessionStatus {
@@ -665,8 +940,8 @@ function activityToSessionStatus(status: SessionActivityStatus): SessionStatus {
   return { type: 'busy' }
 }
 
-function wsEventsUrl(): string {
-  const base = getApiBase()
+function wsEventsUrl(serverId?: string): string {
+  const base = getApiBase(serverId)
   if (base) return base.replace(/^http/, 'ws') + '/api/v1/events'
   const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
   return `${protocol}://${location.host}/api/v1/events`

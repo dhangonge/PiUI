@@ -24,7 +24,12 @@ export function getFrontendCommands(): Command[] {
   return [
     { name: 'new', description: 'Start a new session', source: 'frontend' },
     { name: 'compact', description: 'Manually compact the session context', source: 'frontend' },
-    { name: 'model', description: 'Select model (opens selector UI)', argumentHint: '<provider/model>', source: 'frontend' },
+    {
+      name: 'model',
+      description: 'Select model (opens selector UI)',
+      argumentHint: '<provider/model>',
+      source: 'frontend',
+    },
     { name: 'settings', description: 'Open settings menu', source: 'frontend' },
     { name: 'hotkeys', description: 'Show all keyboard shortcuts', source: 'frontend' },
     { name: 'changelog', description: 'Show changelog entries', source: 'frontend' },
@@ -35,16 +40,40 @@ export function getFrontendCommands(): Command[] {
     { name: 'copy', description: 'Copy last agent message to clipboard', source: 'frontend' },
     { name: 'fork', description: 'Create a new fork from a previous user message', source: 'frontend' },
     { name: 'share', description: 'Share session as a secret GitHub gist', source: 'frontend' },
-    { name: 'reload', description: 'Reload keybindings, extensions, skills, prompts, themes, and context files', source: 'frontend' },
+    {
+      name: 'reload',
+      description: 'Reload keybindings, extensions, skills, prompts, themes, and context files',
+      source: 'frontend',
+    },
     { name: 'quit', description: 'Quit Pi', source: 'frontend' },
     // 带参命令：选中后填入输入框等你输参数再回车（和 TUI 一致）
     { name: 'name', description: 'Set session display name', argumentHint: '<name>', source: 'builtin' },
-    { name: 'trust', description: 'Save project trust decision for future sessions', argumentHint: '<yes|no|reset>', source: 'builtin' },
+    {
+      name: 'trust',
+      description: 'Save project trust decision for future sessions',
+      argumentHint: '<yes|no|reset>',
+      source: 'builtin',
+    },
     { name: 'login', description: 'Configure provider authentication', argumentHint: '<provider>', source: 'builtin' },
     { name: 'logout', description: 'Remove provider authentication', argumentHint: '<provider>', source: 'builtin' },
-    { name: 'export', description: 'Export session (HTML default, or specify path: .html/.jsonl)', argumentHint: '<path>', source: 'builtin' },
-    { name: 'import', description: 'Import and resume a session from a JSONL file', argumentHint: '<path>', source: 'builtin' },
-    { name: 'scoped-models', description: 'Enable/disable models for Ctrl+P cycling', argumentHint: '<patterns>', source: 'builtin' },
+    {
+      name: 'export',
+      description: 'Export session (HTML default, or specify path: .html/.jsonl)',
+      argumentHint: '<path>',
+      source: 'builtin',
+    },
+    {
+      name: 'import',
+      description: 'Import and resume a session from a JSONL file',
+      argumentHint: '<path>',
+      source: 'builtin',
+    },
+    {
+      name: 'scoped-models',
+      description: 'Enable/disable models for Ctrl+P cycling',
+      argumentHint: '<patterns>',
+      source: 'builtin',
+    },
     // PiUI 扩展：one-shot bash 通过斜杠命令路径执行，不再保留 TUI 的 `!` 前缀
     // 快捷方式，避免误触与 Markdown 图片语法冲突。
     { name: 'bash', description: 'Run a one-shot bash command', argumentHint: '<command>', source: 'builtin' },

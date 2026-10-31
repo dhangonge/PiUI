@@ -15,13 +15,8 @@ export function WorkspaceSettings() {
     manualTerminalTitles,
     setManualTerminalTitles,
   } = useTheme()
-  const {
-    sidebarFolderRecents,
-    sidebarShowChildSessions,
-    wakeLock,
-    terminalCopyOnSelect,
-    terminalRightClickPaste,
-  } = useLayoutStore()
+  const { sidebarFolderRecents, sidebarShowChildSessions, wakeLock, terminalCopyOnSelect, terminalRightClickPaste } =
+    useLayoutStore()
 
   const toggleManualTerminalTitles = () => {
     const next = !manualTerminalTitles
@@ -32,7 +27,11 @@ export function WorkspaceSettings() {
   return (
     <div>
       <SettingsSection title={t('workspace.layout')} description={t('workspace.layoutDesc')}>
-        <SettingRow label={t('appearance.wideMode')} description={t('appearance.wideModeDesc')} onClick={toggleWideMode}>
+        <SettingRow
+          label={t('appearance.wideMode')}
+          description={t('appearance.wideModeDesc')}
+          onClick={toggleWideMode}
+        >
           <Toggle enabled={isWideMode} onChange={toggleWideMode} />
         </SettingRow>
 

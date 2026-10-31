@@ -78,17 +78,19 @@ export const ToolGroup = memo(function ToolGroup({
     ? true
     : processCollapseEnabled
       ? false
-      : !descriptiveToolSteps ||
-        hasActiveTools ||
-        (immersiveMode && !!isStreaming && hasReadableTools)
+      : !descriptiveToolSteps || hasActiveTools || (immersiveMode && !!isStreaming && hasReadableTools)
 
   const groupStateKey = `message:${groupId}:tool-group:${executions[0]?.call.id ?? 'empty'}`
-  const [expanded, setExpanded] = useUiDisclosureState(groupStateKey, shouldStartExpanded)
+  const [storedExpanded, setExpanded, touched] = useUiDisclosureState(groupStateKey, shouldStartExpanded)
+  const expanded = processCollapseEnabled && !defaultExpanded && !touched ? false : storedExpanded
   const hasAutoExpandedReadableRef = useRef(
     !processCollapseEnabled && shouldStartExpanded && immersiveMode && hasReadableTools,
   )
-  const { rootRef: stepsRootRef, headerRef: stepsHeaderRef, withScrollLock: withStepsScrollLock } =
-    useDisclosureScrollLock()
+  const {
+    rootRef: stepsRootRef,
+    headerRef: stepsHeaderRef,
+    withScrollLock: withStepsScrollLock,
+  } = useDisclosureScrollLock()
 
   useEffect(() => {
     // 用户发起的 bash：默认展开由初始状态保证，不参与自动展开/收起干预
@@ -193,9 +195,7 @@ export const ToolGroup = memo(function ToolGroup({
             </span>
             {totalDiffStats && !hasActiveTools && (
               <span className="ml-1.5 inline-flex items-center gap-1 text-[length:var(--fs-xxs)] font-mono font-medium tabular-nums">
-                {totalDiffStats.additions > 0 && (
-                  <span className="text-success-100">+{totalDiffStats.additions}</span>
-                )}
+                {totalDiffStats.additions > 0 && <span className="text-success-100">+{totalDiffStats.additions}</span>}
                 {totalDiffStats.deletions > 0 && <span className="text-danger-100">-{totalDiffStats.deletions}</span>}
               </span>
             )}
@@ -217,9 +217,7 @@ export const ToolGroup = memo(function ToolGroup({
                   : t('stepsCount', { done: doneCount, total: totalCount })}
               </span>
               {!effectiveExpanded && modelLabel && (
-                <span className="text-[length:var(--fs-sm)] text-text-500 font-mono opacity-70">
-                  {modelLabel}
-                </span>
+                <span className="text-[length:var(--fs-sm)] text-text-500 font-mono opacity-70">{modelLabel}</span>
               )}
             </span>
           </button>

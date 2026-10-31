@@ -38,10 +38,7 @@ export function usePiNativeStatus(): PiNativeStatus {
 export async function refreshPiNativeStatus(signal?: AbortSignal): Promise<PiNativeStatus> {
   setStatus({ ...current, status: 'booting', error: undefined })
   try {
-    const [health, registry] = await Promise.all([
-      fetchHostHealth(signal),
-      fetchPiRegistry(signal),
-    ])
+    const [health, registry] = await Promise.all([fetchHostHealth(signal), fetchPiRegistry(signal)])
     const missingCoreCommands = missingCore(registry)
     const next: PiNativeStatus = {
       status: missingCoreCommands.length > 0 ? 'degraded' : 'online',
@@ -75,11 +72,13 @@ export { subscribe as subscribePiNativeStatus }
 /**
  * Test helper: inject a fake registry into the native status snapshot.
  */
-export function piNativeStatusForTest(registry: Partial<import('@piui/protocol').PiRegistrySnapshot> | undefined): void {
+export function piNativeStatusForTest(
+  registry: Partial<import('@piui/protocol').PiRegistrySnapshot> | undefined,
+): void {
   setStatus({
     status: registry ? 'online' : 'offline',
     registry: registry
-      ? {
+      ? ({
           protocolVersion: PROTOCOL_VERSION,
           revision: 1,
           sdkVersion: 'test',
@@ -87,7 +86,7 @@ export function piNativeStatusForTest(registry: Partial<import('@piui/protocol')
           globalCommands: [],
           sessionCommands: [],
           ...registry,
-        } as import('@piui/protocol').PiRegistrySnapshot
+        } as import('@piui/protocol').PiRegistrySnapshot)
       : undefined,
     missingCoreCommands: [],
     checkedAt: Date.now(),

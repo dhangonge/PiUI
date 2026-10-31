@@ -1,4 +1,13 @@
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react'
 import { useInputCapabilities } from '../hooks/useInputCapabilities'
 import { useSyntaxHighlight, useStreamingSyntaxHighlight, type HighlightTokens } from '../hooks/useSyntaxHighlight'
 import { themeStore } from '../store/themeStore'
@@ -7,6 +16,12 @@ import { useInView } from '../hooks/useInView'
 
 /** Languages that carry no useful information — hide the label */
 const HIDDEN_LANGS = new Set(['text', 'plain', 'txt', 'plaintext'])
+
+/**
+ * 只订阅换行开关：整份主题快照作快照会让字号、预设、自定义 CSS 等无关设置
+ * 也重渲染每个代码块。语法主题由 useSyntaxHighlight 自己的窄订阅负责。
+ */
+const selectCodeWordWrap = () => themeStore.getSnapshot().codeWordWrap
 
 const TokenSpan = memo(
   function TokenSpan({ token }: { token: HighlightTokens[number][number] }) {
@@ -60,7 +75,13 @@ function sameFlatToken(left: FlatHighlightToken, right: FlatHighlightToken | und
   return !!right && left.content === right.content && left.color === right.color
 }
 
-const StreamingCodeTokens = memo(function StreamingCodeTokens({ tokens, suffix }: { tokens: HighlightTokens; suffix: string }) {
+const StreamingCodeTokens = memo(function StreamingCodeTokens({
+  tokens,
+  suffix,
+}: {
+  tokens: HighlightTokens
+  suffix: string
+}) {
   const codeRef = useRef<HTMLElement | null>(null)
   const previousRef = useRef<FlatHighlightToken[]>([])
   const flatTokens = useMemo(() => flattenTokens(tokens, suffix), [suffix, tokens])
@@ -122,7 +143,7 @@ export const CodeBlock = memo(function CodeBlock({
   streamingHighlight = false,
   headerActions,
 }: CodeBlockProps) {
-  const { codeWordWrap } = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot)
+  const codeWordWrap = useSyncExternalStore(themeStore.subscribe, selectCodeWordWrap)
   const { preferTouchUi } = useInputCapabilities()
   const resolvedWordWrap = wordwrap ?? codeWordWrap
   const isReasoning = variant === 'reasoning'
@@ -266,11 +287,7 @@ export const CodeBlock = memo(function CodeBlock({
         <div
           className={`absolute top-2 right-2 z-10 opacity-0 group-hover/code:opacity-100 group-focus-within/code:opacity-100 ${requireTapToRevealCopy ? '[@media(hover:none)]:opacity-0' : '[@media(hover:none)]:opacity-100'} transition-opacity`}
         >
-          <CopyButton
-            text={code}
-            position="static"
-            className="!h-8 !w-8 !p-2 rounded-md bg-bg-300/70 backdrop-blur-md"
-          />
+          <CopyButton text={code} position="static" className="!h-8 !w-8 !p-2 rounded-md bg-bg-300/85" />
         </div>
       )}
 

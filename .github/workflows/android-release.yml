@@ -1,0 +1,211 @@
+name: Android Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Target tag (e.g. v0.2.0). Empty = use latest v* tag.'
+        required: false
+        type: string
+      ref:
+        description: 'Git ref to build (branch or tag). Empty = the target tag when it exists, otherwise the dispatched branch.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}-${{ github.event.inputs.tag }}-${{ github.event.inputs.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # tag 与 ref 只解析一次：android 用它决定构建哪个提交，publish 用同一个 tag
+  # 发布。手动触发时默认构建同名 tag（存在时），避免“从分支最新提交打包、
+  # 却发布到某个已有 tag”的不一致。
+  prepare:
+    name: resolve release target
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # 需要全量 tag 列表
+
+      - name: Resolve tag and ref
+        id: resolve
+        shell: bash
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_REF: ${{ github.event.inputs.ref }}
+          DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_TAG:-}" ]; then
+            TAG="$INPUT_TAG"
+          elif [[ "$DISPATCH_REF" == refs/tags/* ]]; then
+            TAG="$DISPATCH_REF_NAME"
+          else
+            TAG=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          fi
+          if [ -z "$TAG" ]; then
+            echo "no release tag found: pass the 'tag' input or push a v* tag" >&2
+            exit 1
+          fi
+          REF="${INPUT_REF:-}"
+          if [ -z "$REF" ]; then
+            if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+              REF="$TAG"
+            else
+              REF="$DISPATCH_REF"
+            fi
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "release target: tag=$TAG ref=$REF"
+
+  android:
+    name: android ${{ matrix.name }}
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: arm64, target: aarch64, rust-target: aarch64-linux-android }
+          - { name: armv7, target: armv7, rust-target: armv7-linux-androideabi }
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Drop Windows-only patch
+        run: rm -f patches/@lydell+node-pty-win32-x64+*.patch
+
+      - name: Install Android NDK
+        run: sdkmanager "ndk;29.0.14206865"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './packages/app/src-tauri -> target'
+          key: android-${{ matrix.name }}
+
+      - name: Gradle cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            packages/app/src-tauri/gen/android/.gradle
+          key: gradle-${{ matrix.name }}-${{ hashFiles('packages/app/src-tauri/gen/android/**/*.gradle*', 'packages/app/src-tauri/gen/android/**/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/prepare-tauri-mobile-resources.mjs
+
+      # gen/android 已提交进仓库（含自定义 MainActivity/沉浸式主题），
+      # 不再重新 init，避免覆盖自定义文件。
+      - name: Build Android APK
+        working-directory: packages/app
+        run: npx tauri android build --apk --target ${{ matrix.target }}
+
+      - name: Sign Android APK
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -e
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/piui.keystore"
+          UNSIGNED=$(find packages/app/src-tauri/gen/android/app/build/outputs/apk -name '*unsigned*.apk' -type f | head -1)
+          if [ -z "$UNSIGNED" ]; then
+            echo "no unsigned APK found" >&2
+            find packages/app/src-tauri/gen/android/app/build/outputs/apk -type f >&2
+            exit 1
+          fi
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          mkdir -p release-artifacts
+          ALIGNED="$RUNNER_TEMP/piui-aligned.apk"
+          "$BUILD_TOOLS/zipalign" -f -p 4 "$UNSIGNED" "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$RUNNER_TEMP/piui.keystore" \
+            --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --out "release-artifacts/piui-android-${{ matrix.name }}.apk" \
+            "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" verify --print-certs "release-artifacts/piui-android-${{ matrix.name }}.apk"
+          rm -f "$RUNNER_TEMP/piui.keystore"
+          ls -la release-artifacts
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: piui-android-${{ matrix.name }}
+          path: release-artifacts/*.apk
+          if-no-files-found: error
+
+  publish:
+    name: publish release assets
+    needs: [prepare, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # 从被构建的那个 commit 读 CHANGELOG，与产物保持一致
+          # （tag 不存在时 prepare 会退回分支）。
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: piui-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Extract changelog for tag
+        id: changelog
+        shell: bash
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          BODY=$(sed -n "/^## \[${TAG}\]/,/^## \[/{ /^## \[${TAG}\]/d; /^## \[/d; p; }" CHANGELOG.md 2>/dev/null || true)
+          BODY=$(echo "$BODY" | sed -e '/./,$!d' -e :a -e '/^\n*$/{$d;N;ba;}')
+          if [ -z "$BODY" ]; then
+            BODY="No changelog entry found for ${TAG}."
+          fi
+          echo "$BODY" > /tmp/release-body.md
+          printf '\n---\n\n**Android:** (.apk) — arm64, armeabi-v7a\n' >> /tmp/release-body.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: 'PiUI ${{ needs.prepare.outputs.tag }}'
+          body_path: /tmp/release-body.md
+          files: release-assets/**
+          draft: false
+          prerelease: ${{ contains(needs.prepare.outputs.tag, 'canary') || contains(needs.prepare.outputs.tag, 'alpha') || contains(needs.prepare.outputs.tag, 'beta') }}

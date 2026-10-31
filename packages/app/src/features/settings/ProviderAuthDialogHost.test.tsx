@@ -46,20 +46,28 @@ describe('ProviderAuthDialogHost', () => {
     render(<ProviderAuthDialogHost />)
     act(() => {
       registerProviderAuthFlow('flow-2', 'openai', 'session-1')
-      receiveProviderAuthEvent({ type: 'notification', flowId: 'flow-2', providerId: 'openai', event: { url: 'https://example.test/login' } }, 'session-1')
+      receiveProviderAuthEvent(
+        { type: 'notification', flowId: 'flow-2', providerId: 'openai', event: { url: 'https://example.test/login' } },
+        'session-1',
+      )
     })
-    expect(screen.getByRole('link', { name: 'Open authentication URL' })).toHaveAttribute('href', 'https://example.test/login')
+    expect(screen.getByRole('link', { name: 'Open authentication URL' })).toHaveAttribute(
+      'href',
+      'https://example.test/login',
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(mocks.cancel).toHaveBeenCalledWith('flow-2'))
   })
 
   it('restores an in-flight flow from the worker snapshot after a refresh', async () => {
-    mocks.listFlows.mockResolvedValue([{
-      flowId: 'flow-3',
-      providerId: 'anthropic',
-      authType: 'api_key',
-      prompts: [{ promptId: 'prompt-3', type: 'secret', message: 'Enter API key', placeholder: 'key' }],
-    }])
+    mocks.listFlows.mockResolvedValue([
+      {
+        flowId: 'flow-3',
+        providerId: 'anthropic',
+        authType: 'api_key',
+        prompts: [{ promptId: 'prompt-3', type: 'secret', message: 'Enter API key', placeholder: 'key' }],
+      },
+    ])
     render(<ProviderAuthDialogHost />)
 
     const input = await screen.findByPlaceholderText('key')

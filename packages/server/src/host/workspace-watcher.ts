@@ -1,12 +1,11 @@
-import path from "node:path"
-import chokidar, { type FSWatcher } from "chokidar"
-import { lstat, readFile, readdir } from "node:fs/promises"
-import type { JsonObject } from "@piui/protocol"
+import path from 'node:path'
+import chokidar, { type FSWatcher } from 'chokidar'
+import { lstat, readFile, readdir } from 'node:fs/promises'
 
-type WorkspaceFileChange = { path: string; kind: "created" | "changed" | "deleted"; type: "file" | "directory" }
-import type { EventHub } from "../event-hub.ts"
-import { invalidateGitCache } from "./git.ts"
-import { workspacePathKey, type WorkspaceRecord } from "./workspace-store.ts"
+type WorkspaceFileChange = { path: string; kind: 'created' | 'changed' | 'deleted'; type: 'file' | 'directory' }
+import type { EventHub } from '../event-hub.ts'
+import { invalidateGitCache } from './git.ts'
+import { workspacePathKey, type WorkspaceRecord } from './workspace-store.ts'
 
 const FLUSH_DELAY_MS = 80
 const MAX_CHANGES_PER_EVENT = 512
@@ -23,7 +22,7 @@ const WATCH_STARTUP_DELAY_MS = 3_000
 // directories), so such workspaces are not recursively watched at all.
 const MAX_WATCH_DIRECTORIES = 4_000
 const PRE_SCAN_BATCH = 64
-const SKIP_SEGMENTS = new Set(["node_modules", "dist", "build", ".next", "coverage", ".turbo", "target"])
+const SKIP_SEGMENTS = new Set(['node_modules', 'dist', 'build', '.next', 'coverage', '.turbo', 'target'])
 
 interface WatchedWorkspace {
   watcher?: FSWatcher
@@ -119,10 +118,10 @@ export class WorkspaceWatcher {
       state.watcher = undefined
       return
     }
-    state.watcher.on("all", (event, absolutePath) => {
-      const relative = path.relative(workspace.canonicalRoot, absolutePath).replace(/\\/g, "/")
-      if (!relative || relative.startsWith("../")) return
-      if (relative === ".git" || relative.startsWith(".git/")) {
+    state.watcher.on('all', (event, absolutePath) => {
+      const relative = path.relative(workspace.canonicalRoot, absolutePath).replace(/\\/g, '/')
+      if (!relative || relative.startsWith('../')) return
+      if (relative === '.git' || relative.startsWith('.git/')) {
         state.gitDirty = true
         this.schedule(workspace, state)
         return
@@ -134,12 +133,12 @@ export class WorkspaceWatcher {
       else state.rescan = true
       this.schedule(workspace, state)
     })
-    state.watcher.on("ready", () => {
+    state.watcher.on('ready', () => {
       state.rescan = true
       state.gitDirty = true
       this.schedule(workspace, state)
     })
-    state.watcher.on("error", error => {
+    state.watcher.on('error', error => {
       const message = error instanceof Error ? error.message : String(error)
       console.error(`[piui-server] workspace watcher failed for ${workspace.canonicalRoot}: ${message}`)
       state.rescan = true
@@ -149,40 +148,43 @@ export class WorkspaceWatcher {
   }
 
   private async attachLinkedGitWatcher(workspace: WorkspaceRecord, state: WatchedWorkspace): Promise<void> {
-    const dotGit = path.join(workspace.canonicalRoot, ".git")
+    const dotGit = path.join(workspace.canonicalRoot, '.git')
     try {
       if (!(await lstat(dotGit)).isFile()) return
-      const definition = await readFile(dotGit, "utf8")
+      const definition = await readFile(dotGit, 'utf8')
       const match = definition.match(/^gitdir:\s*(.+)\s*$/im)
       if (!match) return
       const gitDir = path.resolve(workspace.canonicalRoot, match[1]!)
       let commonDir = gitDir
       try {
-        const common = (await readFile(path.join(gitDir, "commondir"), "utf8")).trim()
+        const common = (await readFile(path.join(gitDir, 'commondir'), 'utf8')).trim()
         if (common) commonDir = path.resolve(gitDir, common)
       } catch {
         /* standalone git dir */
       }
-      const watcher = chokidar.watch([
-        path.join(gitDir, "HEAD"),
-        path.join(gitDir, "index"),
-        path.join(commonDir, "packed-refs"),
-        path.join(commonDir, "refs"),
-      ], { ignoreInitial: true, persistent: true, followSymlinks: false, atomic: true })
+      const watcher = chokidar.watch(
+        [
+          path.join(gitDir, 'HEAD'),
+          path.join(gitDir, 'index'),
+          path.join(commonDir, 'packed-refs'),
+          path.join(commonDir, 'refs'),
+        ],
+        { ignoreInitial: true, persistent: true, followSymlinks: false, atomic: true },
+      )
       if (this.watched.get(workspacePathKey(workspace.canonicalRoot)) !== state) {
         await watcher.close()
         return
       }
       state.gitWatcher = watcher
-      watcher.on("all", () => {
+      watcher.on('all', () => {
         state.gitDirty = true
         this.schedule(workspace, state)
       })
-      watcher.on("ready", () => {
+      watcher.on('ready', () => {
         state.gitDirty = true
         this.schedule(workspace, state)
       })
-      watcher.on("error", error => {
+      watcher.on('error', error => {
         const message = error instanceof Error ? error.message : String(error)
         console.error(`[piui-server] linked worktree watcher failed for ${workspace.canonicalRoot}: ${message}`)
         state.gitDirty = true
@@ -219,24 +221,19 @@ export class WorkspaceWatcher {
       state.timer = undefined
       state.revision++
       if (state.pending.size > 0 || state.rescan) {
-        this.eventHub.publish(
-          { kind: "workspace", id: workspace.canonicalRoot },
-          "workspace.files",
-          {
-            workspacePath: workspace.canonicalRoot,
-            revision: state.revision,
-            changes: state.rescan ? [] : [...state.pending.values()],
-            rescan: state.rescan,
-          },
-        )
+        this.eventHub.publish({ kind: 'workspace', id: workspace.canonicalRoot }, 'workspace.files', {
+          workspacePath: workspace.canonicalRoot,
+          revision: state.revision,
+          changes: state.rescan ? [] : [...state.pending.values()],
+          rescan: state.rescan,
+        })
       }
       if (state.gitDirty) {
         invalidateGitCache(workspace.canonicalRoot)
-        this.eventHub.publish(
-          { kind: "workspace", id: workspace.canonicalRoot },
-          "workspace.git",
-          { workspacePath: workspace.canonicalRoot, revision: state.revision },
-        )
+        this.eventHub.publish({ kind: 'workspace', id: workspace.canonicalRoot }, 'workspace.git', {
+          workspacePath: workspace.canonicalRoot,
+          revision: state.revision,
+        })
       }
       state.pending.clear()
       state.gitDirty = false
@@ -247,15 +244,15 @@ export class WorkspaceWatcher {
 }
 
 function shouldIgnore(root: string, candidate: string): boolean {
-  const relative = path.relative(root, candidate).replace(/\\/g, "/")
+  const relative = path.relative(root, candidate).replace(/\\/g, '/')
   if (!relative) return false
-  if (/(?:^|\/)\.[^/]+\.piui-[^/]+\.tmp$/.test(relative) ||
-    /(?:^|\/)[^/]+\.piui-backup-[^/]+$/.test(relative)) return true
-  const segments = relative.split("/")
+  if (/(?:^|\/)\.[^/]+\.piui-[^/]+\.tmp$/.test(relative) || /(?:^|\/)[^/]+\.piui-backup-[^/]+$/.test(relative))
+    return true
+  const segments = relative.split('/')
   if (segments.some(segment => SKIP_SEGMENTS.has(segment))) return true
-  if (segments[0] !== ".git") return false
-  if (relative === ".git") return false
-  if (relative === ".git/refs" || relative === ".git/logs") return false
+  if (segments[0] !== '.git') return false
+  if (relative === '.git') return false
+  if (relative === '.git/refs' || relative === '.git/logs') return false
   return !isGitMetadata(relative)
 }
 
@@ -300,18 +297,21 @@ export async function countWatchableDirectories(root: string, cap: number): Prom
 }
 
 function isGitMetadata(relative: string): boolean {
-  return relative === ".git" || relative === ".git/HEAD" || relative === ".git/index" || relative === ".git/packed-refs" ||
-    relative.startsWith(".git/refs/") || relative === ".git/logs/HEAD"
+  return (
+    relative === '.git' ||
+    relative === '.git/HEAD' ||
+    relative === '.git/index' ||
+    relative === '.git/packed-refs' ||
+    relative.startsWith('.git/refs/') ||
+    relative === '.git/logs/HEAD'
+  )
 }
 
-function toChange(
-  event: string,
-  relative: string,
-): WorkspaceFileChange | null {
-  if (event === "add") return { path: relative, kind: "created", type: "file" }
-  if (event === "addDir") return { path: relative, kind: "created", type: "directory" }
-  if (event === "change") return { path: relative, kind: "changed", type: "file" }
-  if (event === "unlink") return { path: relative, kind: "deleted", type: "file" }
-  if (event === "unlinkDir") return { path: relative, kind: "deleted", type: "directory" }
+function toChange(event: string, relative: string): WorkspaceFileChange | null {
+  if (event === 'add') return { path: relative, kind: 'created', type: 'file' }
+  if (event === 'addDir') return { path: relative, kind: 'created', type: 'directory' }
+  if (event === 'change') return { path: relative, kind: 'changed', type: 'file' }
+  if (event === 'unlink') return { path: relative, kind: 'deleted', type: 'file' }
+  if (event === 'unlinkDir') return { path: relative, kind: 'deleted', type: 'directory' }
   return null
 }

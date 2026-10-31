@@ -7,11 +7,9 @@ import { flattenSessionHierarchy } from '../../../pi/sessionHierarchy'
 interface SessionChildrenSlotProps {
   parentSession: UiSession
   selectedSessionId: string | null
-  fetchAll?: boolean
   children?: UiSession[]
   childrenByParent?: Map<string, UiSession[]>
   onSelect: (session: UiSession) => void
-  onDeleteSelected?: () => void
   isEditMode?: boolean
   selectedSessionIds?: Set<string>
   onToggleSessionSelection?: (sessionId: string, options?: { shiftKey?: boolean }) => void
@@ -41,10 +39,12 @@ export function SessionChildrenSlot({
         const isChecked = selectedSessionIds?.has(row.session.id) ?? false
         const previous = rows[index - 1]
         const next = rows[index + 1]
-        const prevChecked = isEditMode && previous?.visualDepth === row.visualDepth &&
+        const prevChecked =
+          isEditMode &&
+          previous?.visualDepth === row.visualDepth &&
           (selectedSessionIds?.has(previous.session.id) ?? false)
-        const nextChecked = isEditMode && next?.visualDepth === row.visualDepth &&
-          (selectedSessionIds?.has(next.session.id) ?? false)
+        const nextChecked =
+          isEditMode && next?.visualDepth === row.visualDepth && (selectedSessionIds?.has(next.session.id) ?? false)
         const hierarchyTitle = row.truncated
           ? `Fork depth ${row.depth}; deeper descendants hidden`
           : row.depth > row.visualDepth
@@ -72,9 +72,7 @@ export function SessionChildrenSlot({
               checkedPrev={prevChecked}
               checkedNext={nextChecked}
               onToggleCheck={
-                onToggleSessionSelection
-                  ? options => onToggleSessionSelection(row.session.id, options)
-                  : undefined
+                onToggleSessionSelection ? options => onToggleSessionSelection(row.session.id, options) : undefined
               }
             />
           </div>

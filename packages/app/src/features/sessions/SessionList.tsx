@@ -1,6 +1,15 @@
 import { useRef, useEffect, useCallback, useState, useMemo, useSyncExternalStore, type PointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { SearchIcon, PencilIcon, TrashIcon, ComposeIcon, PinIcon, MessageSquareIcon, GitBranchIcon } from '../../components/Icons'
+import {
+  SearchIcon,
+  PencilIcon,
+  TrashIcon,
+  ComposeIcon,
+  PinIcon,
+  MessageSquareIcon,
+  GitBranchIcon,
+  ChevronRightIcon,
+} from '../../components/Icons'
 import { getSelectionRoundClass } from './selectionRound'
 import { formatRelativeTime } from '../../utils/dateUtils'
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
@@ -8,48 +17,15 @@ import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 import { useSessionActiveEntry } from '../../store/activeSessionStore'
 import { notificationStore, useHasUnreadCompletedNotification } from '../../store/notificationStore'
 import { SessionChildrenSlot } from '../chat/sidebar/SessionChildrenSlot'
+import { sessionChildrenExpansionStore, useExpandedParentIds } from '../../store/sessionChildrenExpansionStore'
 import type { UiSession } from '../../types/session'
 import { startInternalDrag } from '../../lib/internalDragCore'
-import { pinnedSessionsStore, type PinnedSessionEntry } from '../../store/pinnedSessionsStore'
+import { pinnedSessionsStore } from '../../store/pinnedSessionsStore'
 import { usePiCapabilities } from '../../pi/capabilities'
+import { makeSessionKey, splitSessionKey } from '../../utils/sessionKey'
 
-interface SessionListProps {
-  sessions: UiSession[]
-  selectedId: string | null
-  isLoading: boolean
-  isLoadingMore: boolean
-  hasMore: boolean
-  search: string
-  onSearchChange: (search: string) => void
-  onSelect: (session: UiSession) => void
-  onDelete: (sessionId: string) => void
-  onRename: (sessionId: string, newTitle: string) => void
-  onLoadMore: () => void
-  onNewChat: () => void
-  showHeader?: boolean
-  grouped?: boolean
-  density?: 'default' | 'compact' | 'minimal'
-  showDirectory?: boolean
-  /** 拉 /children 全量展示的父 session ID */
-  expandedChildSessionIds?: Set<string>
-  /** 按父 ID 分组的直接挂出来的子 session */
-  inlineChildSessions?: Map<string, UiSession[]>
-  onSelectChildSession?: (session: UiSession) => void
-  pinnedDividerAfterIds?: Set<string>
-  /** 拉不到的置顶（灰色展示，可取消） */
-  unavailablePinnedEntries?: PinnedSessionEntry[]
-  /** SidePanel 排好的可用置顶数量（flat 列表里用来定位插入点） */
-  availablePinnedCount?: number
-  // ---- 编辑模式 ----
-  isEditMode?: boolean
-  selectedSessionIds?: Set<string>
-  onToggleSessionSelection?: (sessionId: string, options?: { shiftKey?: boolean }) => void
-}
-
-// 时间分组类型
-type TimeGroup = 'today' | 'yesterday' | 'previous7Days' | 'previous30Days' | 'older'
-
-const SESSION_GROUP_ORDER: TimeGroup[] = ['today', 'yesterday', 'previous7Days', 'previous30Days', 'older']
+import { LoadingSpinner, UnavailablePinnedSessionItem } from './sessionListChrome'
+import { SESSION_GROUP_ORDER, type SessionListProps, type TimeGroup } from './sessionListModel'
 
 export function SessionList({
   sessions,
@@ -68,7 +44,6 @@ export function SessionList({
   grouped = true,
   density = 'default',
   showDirectory = false,
-  expandedChildSessionIds,
   inlineChildSessions,
   onSelectChildSession,
   pinnedDividerAfterIds,
@@ -82,6 +57,7 @@ export function SessionList({
   const { preferTouchUi } = useInputCapabilities()
   const listRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const expandedParentIds = useExpandedParentIds()
   const hasUnavailablePinned = unavailablePinnedEntries.length > 0
   // SidePanel 把可用置顶排在 sessions[0..availablePinnedCount)；不可用接在这段后面
   const lastAvailablePinnedIndex = availablePinnedCount > 0 ? availablePinnedCount - 1 : -1
@@ -224,6 +200,9 @@ export function SessionList({
                         isEditMode &&
                         index < groupSessions.length - 1 &&
                         (selectedSessionIds?.has(groupSessions[index + 1].id) ?? false)
+                      const groupChildren = inlineChildSessions?.get(session.id)
+                      const groupChildCount = onSelectChildSession ? (groupChildren?.length ?? 0) : 0
+                      const groupExpanded = expandedParentIds.has(session.id)
                       return (
                         <div key={session.id}>
                           <SessionListItem
@@ -244,24 +223,24 @@ export function SessionList({
                                 ? options => onToggleSessionSelection(session.id, options)
                                 : undefined
                             }
+                            childCount={groupChildCount}
+                            childrenExpanded={groupExpanded}
+                            onToggleChildren={
+                              groupChildCount > 0 ? () => sessionChildrenExpansionStore.toggle(session.id) : undefined
+                            }
                           />
-                          {onSelectChildSession &&
-                            (expandedChildSessionIds?.has(session.id) || inlineChildSessions?.has(session.id)) && (
-                              <SessionChildrenSlot
-                                parentSession={session}
-                                selectedSessionId={selectedId}
-                                fetchAll={
-                                  !inlineChildSessions?.has(session.id) &&
-                                  expandedChildSessionIds?.has(session.id)
-                                }
-                                children={inlineChildSessions?.get(session.id)}
-                                childrenByParent={inlineChildSessions}
-                                onSelect={onSelectChildSession}
-                                isEditMode={isEditMode}
-                                selectedSessionIds={selectedSessionIds}
-                                onToggleSessionSelection={onToggleSessionSelection}
-                              />
-                            )}
+                          {groupChildCount > 0 && groupExpanded && onSelectChildSession && (
+                            <SessionChildrenSlot
+                              parentSession={session}
+                              selectedSessionId={selectedId}
+                              children={groupChildren}
+                              childrenByParent={inlineChildSessions}
+                              onSelect={onSelectChildSession}
+                              isEditMode={isEditMode}
+                              selectedSessionIds={selectedSessionIds}
+                              onToggleSessionSelection={onToggleSessionSelection}
+                            />
+                          )}
                         </div>
                       )
                     })}
@@ -283,14 +262,12 @@ export function SessionList({
             )}
             {sessions.map((session, index) => {
               const inlineChildren = inlineChildSessions?.get(session.id)
-              const hasInlineChildren = Boolean(inlineChildren && inlineChildren.length > 0)
-              const shouldFetchAll = !hasInlineChildren && expandedChildSessionIds?.has(session.id)
-              const hasChildren = shouldFetchAll || hasInlineChildren
+              const childCountForRow = onSelectChildSession ? (inlineChildren?.length ?? 0) : 0
+              const childrenExpanded = expandedParentIds.has(session.id)
               const showPinnedDivider = pinnedDividerAfterIds?.has(session.id)
               const showUnavailableAfter = hasUnavailablePinned && index === lastAvailablePinnedIndex
               const isChecked = selectedSessionIds?.has(session.id) ?? false
-              const prevChecked =
-                isEditMode && index > 0 && (selectedSessionIds?.has(sessions[index - 1].id) ?? false)
+              const prevChecked = isEditMode && index > 0 && (selectedSessionIds?.has(sessions[index - 1].id) ?? false)
               const nextChecked =
                 isEditMode &&
                 index < sessions.length - 1 &&
@@ -314,12 +291,16 @@ export function SessionList({
                     onToggleCheck={
                       onToggleSessionSelection ? options => onToggleSessionSelection(session.id, options) : undefined
                     }
+                    childCount={childCountForRow}
+                    childrenExpanded={childrenExpanded}
+                    onToggleChildren={
+                      childCountForRow > 0 ? () => sessionChildrenExpansionStore.toggle(session.id) : undefined
+                    }
                   />
-                  {hasChildren && onSelectChildSession && (
+                  {childCountForRow > 0 && childrenExpanded && onSelectChildSession && (
                     <SessionChildrenSlot
                       parentSession={session}
                       selectedSessionId={selectedId}
-                      fetchAll={shouldFetchAll}
                       children={inlineChildren}
                       childrenByParent={inlineChildSessions}
                       onSelect={onSelectChildSession}
@@ -385,6 +366,10 @@ export interface SessionListItemProps {
   /** 下一项也选中时，去掉下圆角 */
   checkedNext?: boolean
   onToggleCheck?: (options?: { shiftKey?: boolean }) => void
+  /** 收在父会话下的子代理数量（0/未传时不显示折叠开关） */
+  childCount?: number
+  childrenExpanded?: boolean
+  onToggleChildren?: () => void
 }
 
 export function SessionListItem({
@@ -401,6 +386,9 @@ export function SessionListItem({
   checkedPrev = false,
   checkedNext = false,
   onToggleCheck,
+  childCount = 0,
+  childrenExpanded = false,
+  onToggleChildren,
 }: SessionListItemProps) {
   const { t } = useTranslation(['commands', 'common', 'chat'])
   const { sessionRename: canRename, sessionDelete: canDelete } = usePiCapabilities()
@@ -429,20 +417,22 @@ export function SessionListItem({
   const itemPaddingClass = isCompact ? 'pl-[6px] pr-3 py-2' : 'px-3 py-2.5'
   const pinnedEntries = useSyncExternalStore(
     pinnedSessionsStore.subscribe,
-    pinnedSessionsStore.getSnapshot,
-    pinnedSessionsStore.getSnapshot,
+    pinnedSessionsStore.getScopedSnapshot,
+    pinnedSessionsStore.getScopedSnapshot,
   )
-  const isPinned = useMemo(
-    () => pinnedEntries.some(entry => entry.sessionId === session.id),
-    [pinnedEntries, session.id],
-  )
+  const isPinned = useMemo(() => {
+    const target = splitSessionKey(session.id)
+    return pinnedEntries.some(entry => entry.sessionId === makeSessionKey(target.serverId, target.sessionId))
+  }, [pinnedEntries, session.id])
   const sessionTitleDetails = [
     session.title,
     session.isNamed && session.firstMessage ? session.firstMessage : undefined,
     session.parentSessionPath ? `Forked from ${session.forkParentTitle || 'another session'}` : undefined,
     session.directory,
     typeof session.messageCount === 'number' ? `${session.messageCount} messages` : undefined,
-  ].filter(Boolean).join('\n')
+  ]
+    .filter(Boolean)
+    .join('\n')
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -577,14 +567,11 @@ export function SessionListItem({
     if (isEditMode || isEditing) {
       return
     }
-    startInternalDrag(
-      e,
-      {
-        kind: 'session',
-        sessionId: session.id,
-        directory: session.directory,
-      },
-    )
+    startInternalDrag(e, {
+      kind: 'session',
+      sessionId: session.id,
+      directory: session.directory,
+    })
   }
 
   const isDraggable = !isEditMode && !isEditing
@@ -626,7 +613,8 @@ export function SessionListItem({
   // 标题 + 时间 + 活跃状态圆点
   // ============================================
   if (isMinimal) {
-    const statusIndicatorTitle = activeStatus?.label ||
+    const statusIndicatorTitle =
+      activeStatus?.label ||
       (hasUnreadCompletedNotification ? t('chat:notification.completed') : undefined) ||
       (session.parentSessionPath ? `Forked from ${session.forkParentTitle || 'another session'}` : undefined)
 
@@ -655,7 +643,32 @@ export function SessionListItem({
         } ${showActions && !isEditMode ? 'bg-bg-200/40' : ''}`}
       >
         <span className="relative shrink-0 flex items-center justify-center size-5" title={statusIndicatorTitle}>
-          {activeStatus ? (
+          {childCount > 0 && onToggleChildren ? (
+            <button
+              type="button"
+              onClick={e => {
+                e.stopPropagation()
+                onToggleChildren()
+              }}
+              className="flex items-center justify-center size-5 rounded text-text-500 hover:text-text-200 focus-visible:ring-1 focus-visible:ring-border-200 focus-visible:ring-inset"
+              title={
+                childrenExpanded
+                  ? t('chat:sidebar.subagentsCollapse', { defaultValue: 'Hide subagents' })
+                  : t('chat:sidebar.subagentsExpand', { defaultValue: 'Show subagents' })
+              }
+              aria-label={
+                childrenExpanded
+                  ? t('chat:sidebar.subagentsCollapse', { defaultValue: 'Hide subagents' })
+                  : t('chat:sidebar.subagentsExpand', { defaultValue: 'Show subagents' })
+              }
+              aria-expanded={childrenExpanded}
+            >
+              <ChevronRightIcon
+                size={12}
+                className={`transition-transform duration-150 ${childrenExpanded ? 'rotate-90' : ''}`}
+              />
+            </button>
+          ) : activeStatus ? (
             <>
               <span className={`absolute w-1.5 h-1.5 rounded-full ${activeStatus.dot}`} />
               {activeStatus.pulse && (
@@ -690,6 +703,18 @@ export function SessionListItem({
             >
               {session.title || t('sessions.untitledChat')}
             </span>
+
+            {childCount > 0 && (
+              <span
+                className="shrink-0 rounded px-1 text-[length:var(--fs-xxs)] text-text-500 bg-bg-300/60"
+                title={t('chat:sidebar.subagentsCount', {
+                  count: childCount,
+                  defaultValue: '{{count}} subagents',
+                })}
+              >
+                {childCount}
+              </span>
+            )}
 
             {session.updatedAt > 0 && (
               <div
@@ -778,6 +803,32 @@ export function SessionListItem({
             : 'hover:bg-bg-200/50'
       } ${showActions && !isEditMode ? 'bg-bg-200/50' : ''}`}
     >
+      {childCount > 0 && onToggleChildren && (
+        <button
+          type="button"
+          onClick={e => {
+            e.stopPropagation()
+            onToggleChildren()
+          }}
+          className="mt-0.5 mr-1 flex size-4 shrink-0 items-center justify-center rounded text-text-500 hover:text-text-200 focus-visible:ring-1 focus-visible:ring-border-200 focus-visible:ring-inset"
+          title={
+            childrenExpanded
+              ? t('chat:sidebar.subagentsCollapse', { defaultValue: 'Hide subagents' })
+              : t('chat:sidebar.subagentsExpand', { defaultValue: 'Show subagents' })
+          }
+          aria-label={
+            childrenExpanded
+              ? t('chat:sidebar.subagentsCollapse', { defaultValue: 'Hide subagents' })
+              : t('chat:sidebar.subagentsExpand', { defaultValue: 'Show subagents' })
+          }
+          aria-expanded={childrenExpanded}
+        >
+          <ChevronRightIcon
+            size={12}
+            className={`transition-transform duration-150 ${childrenExpanded ? 'rotate-90' : ''}`}
+          />
+        </button>
+      )}
       <button
         type="button"
         onPointerDown={isDraggable ? handleSessionPointerDown : undefined}
@@ -791,16 +842,27 @@ export function SessionListItem({
         <div
           className={`flex-1 min-w-0 transition-[padding] duration-200 ${showActions ? 'pr-[88px]' : 'pr-1 group-hover:pr-[88px]'}`}
         >
-          <p
-            className={`${isCompact ? 'text-[length:var(--fs-md)]' : 'text-[length:var(--fs-base)]'} truncate font-medium ${
-              (isEditMode ? isChecked : isSelected)
-                ? 'text-text-100'
-                : 'text-text-200 group-hover:text-text-100'
-            }`}
-            title={sessionTitleDetails || t('sessions.untitledChat')}
-          >
-            {session.title || t('sessions.untitledChat')}
-          </p>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <p
+              className={`${isCompact ? 'text-[length:var(--fs-md)]' : 'text-[length:var(--fs-base)]'} min-w-0 flex-1 truncate font-medium ${
+                (isEditMode ? isChecked : isSelected) ? 'text-text-100' : 'text-text-200 group-hover:text-text-100'
+              }`}
+              title={sessionTitleDetails || t('sessions.untitledChat')}
+            >
+              {session.title || t('sessions.untitledChat')}
+            </p>
+            {childCount > 0 && (
+              <span
+                className="shrink-0 rounded px-1 text-[length:var(--fs-xxs)] text-text-500 bg-bg-300/60"
+                title={t('chat:sidebar.subagentsCount', {
+                  count: childCount,
+                  defaultValue: '{{count}} subagents',
+                })}
+              >
+                {childCount}
+              </span>
+            )}
+          </div>
 
           <div
             className={`flex items-center ${isCompact ? 'mt-1' : 'mt-1.5'} h-4 text-[length:var(--fs-xxs)] text-text-400 gap-1 overflow-hidden`}
@@ -843,7 +905,10 @@ export function SessionListItem({
             {typeof session.messageCount === 'number' && session.messageCount > 0 && (
               <>
                 <span className="opacity-30 shrink-0">·</span>
-                <span className="flex shrink-0 items-center gap-0.5 opacity-55" title={`${session.messageCount} messages`}>
+                <span
+                  className="flex shrink-0 items-center gap-0.5 opacity-55"
+                  title={`${session.messageCount} messages`}
+                >
                   <MessageSquareIcon size={10} aria-hidden="true" />
                   <span>{session.messageCount}</span>
                 </span>
@@ -909,60 +974,4 @@ export function SessionListItem({
       )}
     </div>
   )
-}
-
-// ============================================
-// Unavailable pinned (gray title, unpin only)
-// ============================================
-
-function UnavailablePinnedSessionItem({
-  entry,
-  density = 'default',
-}: {
-  entry: PinnedSessionEntry
-  density?: 'default' | 'compact' | 'minimal'
-}) {
-  const { t } = useTranslation(['commands'])
-  const title = entry.title || entry.sessionId.slice(0, 12) + '...'
-  const isCompact = density === 'compact'
-  const padding = isCompact ? 'pl-[6px] pr-3 py-2' : 'px-3 py-2.5'
-
-  return (
-    <div className={`group relative flex items-start ${padding} border border-transparent`}>
-      <div className="flex-1 min-w-0 mr-1 group-hover:mr-8 transition-[margin] duration-200">
-        <p
-          className={`${isCompact ? 'text-[length:var(--fs-md)]' : 'text-[length:var(--fs-base)]'} truncate font-medium text-text-500`}
-          title={title}
-        >
-          {title}
-        </p>
-        <div className={`flex items-center ${isCompact ? 'mt-1' : 'mt-1.5'} h-4 text-[length:var(--fs-xxs)] text-text-500`}>
-          <span>{t('sessions.unavailable')}</span>
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={e => {
-          e.stopPropagation()
-          pinnedSessionsStore.unpin(entry.sessionId)
-        }}
-        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-accent-main-100 hover:text-accent-main-200 opacity-0 group-hover:opacity-100 transition-colors"
-        title={t('sessions.unpin')}
-        aria-label={t('sessions.unpin')}
-      >
-        <PinIcon className="w-3.5 h-3.5" />
-      </button>
-    </div>
-  )
-}
-
-// ============================================
-// Loading Spinner
-// ============================================
-
-import { SpinnerIcon } from '../../components/Icons'
-
-function LoadingSpinner({ size = 'md' }: { size?: 'sm' | 'md' }) {
-  const sizeClass = size === 'sm' ? 'w-3 h-3' : 'w-5 h-5'
-  return <SpinnerIcon className={`animate-spin text-text-400 ${sizeClass}`} size={size === 'sm' ? 12 : 20} />
 }

@@ -14,6 +14,7 @@ import type {
   PiUnknownItem,
 } from '../domain/index.js'
 import { piSessionInfoStore } from '../state/index.js'
+import { applySubagentNotices } from './subagentNotices.js'
 
 /**
  * Select Pi session rows from raw session info.
@@ -148,6 +149,11 @@ export function buildPiHistoryItems(branch: PiBranchPage): PiTimelineItem[] {
       } as PiBranchSummaryItem)
       lastBashGroup = undefined
     } else if (entry.type === 'custom_message') {
+      // display=false：注入模型上下文、不进对话流（与 TUI 一致）。
+      // 若把它当条目渲染，它会成为壳/turn 的分隔符，把助手消息挤出壳并排到
+      // 所有用户消息之前。不重置 lastBashGroup：它对用户不可见，不该断开
+      // 相邻 bash 工具组。
+      if (entry.display !== true) continue
       items.push({
         kind: 'custom_message',
         entryId: entry.id,
@@ -187,7 +193,9 @@ export function buildPiHistoryItems(branch: PiBranchPage): PiTimelineItem[] {
     }
   }
 
-  return items
+  // 后台 agent 的终态只出现在插件的 subagent-result 通知里：并进卡片，
+  // 否则卡片会一直停在 running（停止按钮不消失），下面还多一张重复结果卡。
+  return applySubagentNotices(items).items
 }
 
 /**
@@ -219,17 +227,19 @@ export function buildPiLiveItems(branch: PiBranchPage): PiTimelineItem[] {
   // 不再渲染 live 行——否则 live 行与条目同时存在、同 key，React 报
   // "two children with the same key" 且 DOM 错乱。条目可见前仍渲染
   // persisting live，避免消息短暂消失（branchMerge 保留 checkpoint 的初衷）。
-  const persistedVisible = live != null
-    && branch.client?.stableEntryIds != null
-    && Object.values(branch.client.stableEntryIds).includes(live.id)
+  const persistedVisible =
+    live != null &&
+    branch.client?.stableEntryIds != null &&
+    Object.values(branch.client.stableEntryIds).includes(live.id)
   if (live && !persistedVisible && live.message.role === 'user' && live.phase === 'streaming') {
     const message = live.message
-    const text = typeof message.content === 'string'
-      ? message.content
-      : message.content
-          .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
-          .map(block => block.text)
-          .join('')
+    const text =
+      typeof message.content === 'string'
+        ? message.content
+        : message.content
+            .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
+            .map(block => block.text)
+            .join('')
     if (text.trim()) {
       items.push({
         kind: 'user_message',
@@ -261,13 +271,17 @@ export function buildPiLiveItems(branch: PiBranchPage): PiTimelineItem[] {
 /**
  * Select composer mode from session runtime state.
  */
-export function selectPiComposerMode(state: { isStreaming?: boolean; steeringMode?: string; followUpMode?: string } | null): { type: 'idle' } | { type: 'streaming'; mode: 'steering' | 'followUp'; queueMode: 'all' | 'one-at-a-time' } {
+export function selectPiComposerMode(
+  state: { isStreaming?: boolean; steeringMode?: string; followUpMode?: string } | null,
+): { type: 'idle' } | { type: 'streaming'; mode: 'steering' | 'followUp'; queueMode: 'all' | 'one-at-a-time' } {
   if (!state) return { type: 'idle' }
   if (state.isStreaming) {
     return {
       type: 'streaming',
       mode: state.steeringMode === 'one-at-a-time' ? 'steering' : 'followUp',
-      queueMode: (state.steeringMode === 'one-at-a-time' ? state.steeringMode : state.followUpMode) as 'all' | 'one-at-a-time' || 'all',
+      queueMode:
+        ((state.steeringMode === 'one-at-a-time' ? state.steeringMode : state.followUpMode) as
+          'all' | 'one-at-a-time') || 'all',
     }
   }
   return { type: 'idle' }
@@ -276,7 +290,9 @@ export function selectPiComposerMode(state: { isStreaming?: boolean; steeringMod
 /**
  * Select current model info from session runtime state.
  */
-export function selectPiCurrentModel(state: { model?: { provider: string; modelId: string }; thinkingLevel?: string } | null): { provider: string; modelId: string; thinkingLevel?: ThinkingLevel } | null {
+export function selectPiCurrentModel(
+  state: { model?: { provider: string; modelId: string }; thinkingLevel?: string } | null,
+): { provider: string; modelId: string; thinkingLevel?: ThinkingLevel } | null {
   if (!state?.model) return null
   return {
     provider: state.model.provider,

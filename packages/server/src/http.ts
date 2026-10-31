@@ -1,5 +1,8 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
-import { networkInterfaces } from "node:os"
+import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { networkInterfaces } from 'node:os'
+import { gzipSync } from 'node:zlib'
 import {
   PI_PARITY_SDK_VERSION,
   PROTOCOL_VERSION,
@@ -9,34 +12,127 @@ import {
   type HealthResponse,
   type JsonObject,
   type ShareInfo,
-} from "@piui/protocol"
-import { EventHub } from "./event-hub.ts"
-import { RuntimeSupervisor } from "./pi/supervisor.ts"
-import { SessionHost } from "./pi/session-host.ts"
-import { WorkspaceStore } from "./host/workspace-store.ts"
-import { WorkspaceWatcher } from "./host/workspace-watcher.ts"
-import { MAX_JSON_BODY_BYTES, requestHasAllowedOrigin, requestHasValidToken } from "./host/security.ts"
-import { resolveAuthToken } from "./host/auth-token.ts"
-import { PathSafetyError } from "./host/path-safety.ts"
-import { defaultWorkspaceRoot, HostRuntime } from "./host/command-table.ts"
-import { TerminalManager } from "./host/terminal-manager.ts"
-import { createStaticServer } from "./static.ts"
+} from '@piui/protocol'
+import { EventHub } from './event-hub.ts'
+import { RuntimeSupervisor } from './pi/supervisor.ts'
+import { SessionHost } from './pi/session-host.ts'
+import { WorkspaceStore, type WorkspaceRecord } from './host/workspace-store.ts'
+import { WorkspaceWatcher } from './host/workspace-watcher.ts'
+import {
+  MAX_JSON_BODY_BYTES,
+  requestHasAllowedOrigin,
+  requestHasValidToken,
+  timingSafeTokenEquals,
+} from './host/security.ts'
+import { openFileForDownload, type DownloadTarget } from './host/files.ts'
+import { resolveAuthToken } from './host/auth-token.ts'
+import { reportClientErrors } from './host/client-log.ts'
+import { PathSafetyError } from './host/path-safety.ts'
+import { HostRuntime } from './host/command-table.ts'
+import { TerminalManager } from './host/terminal-manager.ts'
+import { createStaticServer } from './static.ts'
 
 const CORS_HEADERS: Record<string, string> = {
-  "access-control-allow-methods": "GET,POST,OPTIONS",
-  "access-control-allow-headers": "content-type,authorization,if-match",
+  'access-control-allow-methods': 'GET,POST,OPTIONS',
+  'access-control-allow-headers': 'content-type,authorization,if-match',
+}
+
+/** 流式下载：唯一一条允许 query token 的路径（给 <a download> 用）。 */
+const DOWNLOAD_PATH = '/api/v1/host/files/download'
+
+/** 小于该阈值的 JSON 不压缩：gzip 头 + 缩小收益抵不过 CPU 与流控开销。 */
+const GZIP_MIN_BYTES = 1024
+
+/**
+ * sendJson 只拿到 res，但编码协商和条件请求都要看请求头。请求进入时把
+ * req 挂在这里，调用点签名保持不变（WeakMap 随 res 回收，无泄漏）。
+ */
+const responseRequests = new WeakMap<ServerResponse, IncomingMessage>()
+
+function acceptsGzip(req: IncomingMessage | undefined): boolean {
+  const header = req?.headers['accept-encoding']
+  if (!header) return false
+  for (const part of header.split(',')) {
+    const [rawName, ...params] = part.split(';')
+    const name = rawName!.trim().toLowerCase()
+    if (name !== 'gzip' && name !== '*') continue
+    const q = params.map(p => p.trim()).find(p => /^q=/i.test(p))
+    if (q) {
+      const weight = Number.parseFloat(q.slice(2))
+      // q=0 是显式拒绝；畸形 q 按不可接受处理，回退明文
+      if (!Number.isFinite(weight) || weight <= 0) continue
+    }
+    return true
+  }
+  return false
+}
+
+/**
+ * 强 ETag：内容 sha1 的 base64url（27 字符，正好覆盖 20 字节摘要）。
+ * 压缩与明文是两个不同的表示，必须给不同的验证器，否则拿到 gzip 实体
+ * 的客户端会用它去命中明文，反之亦然。
+ */
+function etagFor(payload: Buffer, gzipped: boolean): string {
+  const digest = createHash('sha1').update(payload).digest('base64url')
+  return `"${digest}${gzipped ? '-gzip' : ''}"`
+}
+
+function matchesIfNoneMatch(header: string | undefined, etag: string): boolean {
+  if (!header) return false
+  for (const candidate of header.split(',')) {
+    const value = candidate.trim()
+    if (!value) continue
+    if (value === '*') return true
+    // If-None-Match 用弱比较：忽略 W/ 前缀
+    if ((value.startsWith('W/') ? value.slice(2) : value) === etag) return true
+  }
+  return false
+}
+
+/** 合并已有 Vary（例如鉴权前写入的 Origin），不覆盖。 */
+function mergedVary(res: ServerResponse, ...values: string[]): string | undefined {
+  const existing = res.getHeader('vary')
+  const tokens = new Set<string>()
+  for (const raw of [...(existing === undefined ? [] : String(existing).split(',')), ...values]) {
+    const token = raw.trim()
+    if (token) tokens.add(token)
+  }
+  return tokens.size > 0 ? [...tokens].join(', ') : undefined
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): boolean {
   if (res.destroyed || res.writableEnded) return false
-  const data = JSON.stringify(body)
+  const req = responseRequests.get(res)
+  const data = Buffer.from(JSON.stringify(body), 'utf8')
+  // 204/304 没有 body，压缩与内容校验器都无意义；304 也是这里自己产出的
+  const bodyStatus = status !== 204 && status !== 304
+  const gzipped = bodyStatus && data.length >= GZIP_MIN_BYTES && acceptsGzip(req)
+  // POST 命令接口不是幂等读，ETag 语义不成立：只有 GET 200 带验证器
+  const validators = bodyStatus && status === 200 && req?.method === 'GET'
+  const headers: Record<string, string | number> = {
+    'content-type': 'application/json; charset=utf-8',
+    ...CORS_HEADERS,
+  }
+  if (gzipped) headers['content-encoding'] = 'gzip'
+  const vary = mergedVary(res, ...(gzipped ? ['Accept-Encoding'] : []))
+  if (vary) headers.vary = vary
   try {
-    res.writeHead(status, {
-      "content-type": "application/json; charset=utf-8",
-      "content-length": Buffer.byteLength(data),
-      ...CORS_HEADERS,
-    })
-    res.end(data)
+    const etag = validators ? etagFor(data, gzipped) : undefined
+    if (etag) {
+      headers.etag = etag
+      // no-cache 让客户端保存实体但每次重校验：命中即 304，省掉整个 body
+      headers['cache-control'] = 'no-cache'
+      if (matchesIfNoneMatch(req?.headers['if-none-match'], etag)) {
+        // 304 保留 CORS / ETag / Vary，但不带 body 也不带 content-length
+        res.writeHead(304, headers)
+        res.end()
+        return true
+      }
+    }
+    const payload = gzipped ? gzipSync(data) : data
+    headers['content-length'] = payload.length
+    res.writeHead(status, headers)
+    res.end(payload)
     return true
   } catch {
     return false
@@ -45,34 +141,98 @@ function sendJson(res: ServerResponse, status: number, body: unknown): boolean {
 
 function sendProblem(res: ServerResponse, status: number, error: unknown): boolean {
   const p = problemFromError(error)
-  return sendJson(res, status, problem(isErrorCode(p.code) ? p.code : "INTERNAL", p.message))
+  return sendJson(res, status, problem(isErrorCode(p.code) ? p.code : 'INTERNAL', p.message))
 }
 
-async function readBody(req: IncomingMessage, signal?: AbortSignal, maxBytes = MAX_JSON_BODY_BYTES): Promise<JsonObject> {
+/**
+ * 下载路径的鉴权：header 或 query 任一有效。仅此一条路径调用，
+ * 其它端点仍然由上面的 requestHasValidToken 统一把守。
+ */
+function downloadHasValidToken(req: IncomingMessage, url: URL, token: string | null): boolean {
+  if (requestHasValidToken(req, token)) return true
+  if (token === null) return false
+  const fromQuery = url.searchParams.get('token')
+  return fromQuery !== null && timingSafeTokenEquals(fromQuery, token)
+}
+
+/** 与 host 命令同一套工作区语义：重启后内存注册表为空，真实目录足以重新登记。 */
+function downloadWorkspace(store: WorkspaceStore, rootPath: string): WorkspaceRecord {
+  if (store.isClosed(rootPath)) {
+    throw Object.assign(new Error('workspace not found'), { code: 'WORKSPACE_NOT_FOUND' })
+  }
+  const found = store.find(rootPath) ?? store.resolve(rootPath)
+  store.assertCurrent(found)
+  return found
+}
+
+/**
+ * 流式发送：整个文件不经过内存，也不走 sendJson（那条路径会 gzip、加 ETag、
+ * 并发 content-length）。客户端断开时必须销毁读流，否则 fd 泄漏。
+ */
+function streamDownload(res: ServerResponse, signal: AbortSignal, target: DownloadTarget): Promise<void> {
+  res.writeHead(200, {
+    'content-type': target.mimeType,
+    'content-length': target.size,
+    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(target.fileName)}`,
+    'cache-control': 'no-store',
+  })
+  return new Promise<void>(resolve => {
+    const stream = createReadStream(target.absolute)
+    let settled = false
+    const settle = () => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener('abort', onAbort)
+      res.removeListener('close', onClose)
+      resolve()
+    }
+    const onAbort = () => stream.destroy()
+    const onClose = () => {
+      // 提前断开时 res 不会 finish，只能按 closed 处理
+      if (!res.writableFinished) stream.destroy()
+      settle()
+    }
+    signal.addEventListener('abort', onAbort)
+    res.once('close', onClose)
+    res.once('finish', settle)
+    stream.once('error', () => {
+      // 头已经发出去了，换不了状态码：只能掐断连接，让客户端看到截断
+      res.destroy()
+      settle()
+    })
+    stream.pipe(res)
+  })
+}
+
+async function readBody(
+  req: IncomingMessage,
+  signal?: AbortSignal,
+  maxBytes = MAX_JSON_BODY_BYTES,
+): Promise<JsonObject> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of req as AsyncIterable<Buffer>) {
     throwIfAborted(signal)
     size += chunk.length
-    if (size > maxBytes) throw Object.assign(new Error("request body too large"), { code: "INVALID_REQUEST" })
+    if (size > maxBytes) throw Object.assign(new Error('request body too large'), { code: 'INVALID_REQUEST' })
     chunks.push(chunk)
   }
-  const raw = Buffer.concat(chunks).toString("utf8")
+  const raw = Buffer.concat(chunks).toString('utf8')
   let body: unknown
   try {
-    body = JSON.parse(raw || "{}")
+    body = JSON.parse(raw || '{}')
   } catch {
-    throw Object.assign(new Error("invalid json"), { code: "INVALID_REQUEST" })
+    throw Object.assign(new Error('invalid json'), { code: 'INVALID_REQUEST' })
   }
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw Object.assign(new Error("json body must be an object"), { code: "INVALID_REQUEST" })
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw Object.assign(new Error('json body must be an object'), { code: 'INVALID_REQUEST' })
   }
   return body as JsonObject
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (!signal?.aborted) return
-  throw Object.assign(new Error("request aborted"), { code: "REQUEST_ABORTED" })
+  throw Object.assign(new Error('request aborted'), { code: 'REQUEST_ABORTED' })
 }
 
 function requestScope(req: IncomingMessage, res: ServerResponse): { signal: AbortSignal; cleanup: () => void } {
@@ -85,26 +245,28 @@ function requestScope(req: IncomingMessage, res: ServerResponse): { signal: Abor
   const abortIncompleteResponse = () => {
     if (!responseFinished && !res.writableFinished) controller.abort()
   }
-  const markFinished = () => { responseFinished = true }
-  req.once("aborted", abort)
-  req.once("close", abortIncompleteRequest)
-  res.once("finish", markFinished)
-  res.once("close", abortIncompleteResponse)
+  const markFinished = () => {
+    responseFinished = true
+  }
+  req.once('aborted', abort)
+  req.once('close', abortIncompleteRequest)
+  res.once('finish', markFinished)
+  res.once('close', abortIncompleteResponse)
   return {
     signal: controller.signal,
     cleanup: () => {
-      req.removeListener("aborted", abort)
-      req.removeListener("close", abortIncompleteRequest)
-      res.removeListener("finish", markFinished)
-      res.removeListener("close", abortIncompleteResponse)
+      req.removeListener('aborted', abort)
+      req.removeListener('close', abortIncompleteRequest)
+      res.removeListener('finish', markFinished)
+      res.removeListener('close', abortIncompleteResponse)
     },
   }
 }
 
 function parseUrl(req: IncomingMessage): URL | null {
-  const host = req.headers.host ?? "127.0.0.1"
+  const host = req.headers.host ?? '127.0.0.1'
   try {
-    return new URL(req.url ?? "/", `http://${host}`)
+    return new URL(req.url ?? '/', `http://${host}`)
   } catch {
     // Malformed Host header (e.g. invalid port) or invalid URL -> 400.
     return null
@@ -112,7 +274,7 @@ function parseUrl(req: IncomingMessage): URL | null {
 }
 
 function invalidRequest(message: string): Error {
-  return Object.assign(new Error(message), { code: "INVALID_REQUEST" })
+  return Object.assign(new Error(message), { code: 'INVALID_REQUEST' })
 }
 
 function safeDecode(value: string): string {
@@ -127,14 +289,14 @@ function safeDecode(value: string): string {
 export function firstLanAddress(): string | undefined {
   for (const infos of Object.values(networkInterfaces())) {
     for (const info of infos ?? []) {
-      if (info.family === "IPv4" && !info.internal) return info.address
+      if (info.family === 'IPv4' && !info.internal) return info.address
     }
   }
   return undefined
 }
 
 function commandParams(body: JsonObject): JsonObject | undefined {
-  if (body.params && typeof body.params === "object" && !Array.isArray(body.params)) {
+  if (body.params && typeof body.params === 'object' && !Array.isArray(body.params)) {
     return body.params as JsonObject
   }
   const { id: _id, ...params } = body
@@ -142,7 +304,7 @@ function commandParams(body: JsonObject): JsonObject | undefined {
 }
 
 function isSubmittedCommand(value: unknown): value is { record: unknown; promise: Promise<unknown> } {
-  return !!value && typeof value === "object" && "record" in value && "promise" in value
+  return !!value && typeof value === 'object' && 'record' in value && 'promise' in value
 }
 
 export interface CreateAppServerOptions {
@@ -180,7 +342,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
   const watcher = new WorkspaceWatcher(hub)
   const terminals = new TerminalManager({
     publish: (workspacePath, channel, payload) => {
-      hub.publish({ kind: "workspace", id: workspacePath }, channel, payload)
+      hub.publish({ kind: 'workspace', id: workspacePath }, channel, payload)
     },
   })
   const host = new HostRuntime({ store, watcher, sessions, terminals })
@@ -197,38 +359,60 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
 
   const server = createServer(async (req, res) => {
     const scope = requestScope(req, res)
+    responseRequests.set(res, req)
     try {
       const url = parseUrl(req)
       if (!url) {
-        return sendProblem(res, 400, Object.assign(new Error("malformed request URL"), { code: "INVALID_REQUEST" }))
+        return sendProblem(res, 400, Object.assign(new Error('malformed request URL'), { code: 'INVALID_REQUEST' }))
       }
-      const method = req.method ?? "GET"
+      const method = req.method ?? 'GET'
       const p = url.pathname
 
       // Web 客户端静态托管：/api 之外的 GET/HEAD 不走 token——页面本身必须
       // 公开可达，鉴权由 API 层把守（token 通过分享链接带进客户端）
-       if (staticServer && (method === "GET" || method === "HEAD") && p !== "/api" && !p.startsWith("/api/")) {
+      if (staticServer && (method === 'GET' || method === 'HEAD') && p !== '/api' && !p.startsWith('/api/')) {
         if (staticServer.serve(req, res, p)) return
-        return sendProblem(res, 404, Object.assign(new Error("not found"), { code: "NOT_FOUND" }))
+        return sendProblem(res, 404, Object.assign(new Error('not found'), { code: 'NOT_FOUND' }))
       }
 
       if (!requestHasAllowedOrigin(req)) {
-        return sendProblem(res, 403, Object.assign(new Error("origin not allowed"), { code: "FORBIDDEN" }))
+        return sendProblem(res, 403, Object.assign(new Error('origin not allowed'), { code: 'FORBIDDEN' }))
       }
-      if (typeof req.headers.origin === "string") {
-        res.setHeader("access-control-allow-origin", req.headers.origin)
-        res.setHeader("vary", "Origin")
+      if (typeof req.headers.origin === 'string') {
+        res.setHeader('access-control-allow-origin', req.headers.origin)
+        res.setHeader('vary', 'Origin')
       }
-      if (method === "OPTIONS") {
+      if (method === 'OPTIONS') {
         res.writeHead(204, CORS_HEADERS)
         res.end()
         return
       }
+
+      // 文件下载：浏览器 <a download> / WebView 无法自定义请求头，所以只有这条
+      // 路径额外接受 ?token=（全局认证仍然只认 authorization，别在这里放松）。
+      if (method === 'GET' && p === DOWNLOAD_PATH) {
+        if (!downloadHasValidToken(req, url, authToken)) {
+          return sendProblem(
+            res,
+            401,
+            Object.assign(new Error('missing or invalid authorization token'), { code: 'UNAUTHORIZED' }),
+          )
+        }
+        const workspacePath = url.searchParams.get('workspacePath')
+        if (!workspacePath) throw invalidRequest('workspacePath is required')
+        const record = downloadWorkspace(store, workspacePath)
+        const target = await openFileForDownload(record, url.searchParams.get('path') ?? '')
+        return await streamDownload(res, scope.signal, target)
+      }
       if (!requestHasValidToken(req, authToken)) {
-        return sendProblem(res, 401, Object.assign(new Error("missing or invalid authorization token"), { code: "UNAUTHORIZED" }))
+        return sendProblem(
+          res,
+          401,
+          Object.assign(new Error('missing or invalid authorization token'), { code: 'UNAUTHORIZED' }),
+        )
       }
 
-      if (method === "GET" && p === "/api/v1/host/health") {
+      if (method === 'GET' && p === '/api/v1/host/health') {
         // health 是高频只读探测：只读 worker 握手的同步快照（未就绪返回
         // undefined，回退 parity 常量），绝不在请求路径上孵化/等待 worker
         // ——worker 冷启动动辄数秒，等握手会把「活着」的服务误判为不可达。
@@ -237,7 +421,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         const body: HealthResponse = {
           ok: true,
           protocolVersion: PROTOCOL_VERSION,
-          service: "piui-server",
+          service: 'piui-server',
           piSdkVersion: handshake?.piSdkVersion ?? PI_PARITY_SDK_VERSION,
           piSdkVerified: handshake?.piSdkVerified,
           piSdkFallback: handshake?.piSdkFallback ?? null,
@@ -246,45 +430,55 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         return sendJson(res, 200, body)
       }
 
-      if (method === "POST" && p === "/api/v1/host/shutdown") {
+      if (method === 'POST' && p === '/api/v1/host/shutdown') {
         // 先 flush 响应再触发关闭：进程退出不能让客户端读不到 200。
         sendJson(res, 200, { ok: true })
         if (options.onShutdown) {
           setImmediate(() => {
             Promise.resolve(options.onShutdown!()).catch(error => {
-              console.error("[piui-server] graceful shutdown hook failed", error)
-              process.kill(process.pid, "SIGTERM")
+              console.error('[piui-server] graceful shutdown hook failed', error)
+              process.kill(process.pid, 'SIGTERM')
             })
           })
         } else {
-          setImmediate(() => process.kill(process.pid, "SIGTERM"))
+          setImmediate(() => process.kill(process.pid, 'SIGTERM'))
         }
         return
       }
 
-      if (method === "GET" && p === "/api/v1/host/share") {
+      if (method === 'GET' && p === '/api/v1/host/share') {
         if (!options.share || !authToken) {
-          return sendProblem(res, 501, Object.assign(new Error("sharing is unavailable"), { code: "CAPABILITY_DISABLED" }))
+          return sendProblem(
+            res,
+            501,
+            Object.assign(new Error('sharing is unavailable'), { code: 'CAPABILITY_DISABLED' }),
+          )
         }
         const shareHost = options.share.host
-        const lan = shareHost !== "127.0.0.1" && shareHost !== "::1" && shareHost !== "localhost"
-        const urlHost = shareHost === "0.0.0.0" || shareHost === "::" ? (firstLanAddress() ?? shareHost) : shareHost
+        const lan = shareHost !== '127.0.0.1' && shareHost !== '::1' && shareHost !== 'localhost'
+        const urlHost = shareHost === '0.0.0.0' || shareHost === '::' ? (firstLanAddress() ?? shareHost) : shareHost
         const url = `http://${urlHost}:${options.share.port}`
         const link = `piui://connect?url=${encodeURIComponent(url)}&token=${encodeURIComponent(authToken)}`
         const body: ShareInfo = { url, token: authToken, link, lan }
         return sendJson(res, 200, body)
       }
 
-      if (method === "GET" && p === "/api/v1/host/registry") {
+      if (method === 'POST' && p === '/api/v1/host/client-log') {
+        // app 侧错误上报：只落日志文件，不入命令表（不需要 worker，也不该被注册表看见）。
+        const body = await readBody(req, scope.signal, MAX_JSON_BODY_BYTES)
+        return sendJson(res, 200, { ok: true, accepted: reportClientErrors(body) })
+      }
+
+      if (method === 'GET' && p === '/api/v1/host/registry') {
         return sendJson(res, 200, host.registry())
       }
 
-      if (method === "GET" && p === "/api/v1/pi/registry") {
+      if (method === 'GET' && p === '/api/v1/pi/registry') {
         return sendJson(res, 200, await sessions.piRegistry(scope.signal))
       }
 
       const piCommandMatch = p.match(/^\/api\/v1\/pi\/commands\/([^/]+)$/)
-      if (piCommandMatch && method === "POST") {
+      if (piCommandMatch && method === 'POST') {
         const body = await readBody(req, scope.signal, MAX_JSON_BODY_BYTES * 24)
         const name = safeDecode(piCommandMatch[1]!)
         const data = await sessions.executeGlobalCommand(name, commandParams(body), { signal: scope.signal })
@@ -292,12 +486,14 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
       }
 
       const piSessionCommandMatch = p.match(/^\/api\/v1\/pi\/sessions\/([^/]+)\/commands\/([^/]+)$/)
-      if (piSessionCommandMatch && method === "POST") {
+      if (piSessionCommandMatch && method === 'POST') {
         const body = await readBody(req, scope.signal, MAX_JSON_BODY_BYTES * 24)
         const sessionId = safeDecode(piSessionCommandMatch[1]!)
         const name = safeDecode(piSessionCommandMatch[2]!)
-        const id = typeof body.id === "string" && body.id ? body.id : undefined
-        const result = await sessions.executeSessionCommand(sessionId, name, commandParams(body), id, { signal: scope.signal })
+        const id = typeof body.id === 'string' && body.id ? body.id : undefined
+        const result = await sessions.executeSessionCommand(sessionId, name, commandParams(body), id, {
+          signal: scope.signal,
+        })
         if (isSubmittedCommand(result)) {
           void result.promise.catch(() => undefined)
           return sendJson(res, 202, { command: result.record })
@@ -306,27 +502,30 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
       }
 
       const commandMatch = p.match(/^\/api\/v1\/host\/commands\/([^/]+)$/)
-      if (commandMatch && method === "GET") {
-        const data = await host.execute("commands.get", { id: safeDecode(commandMatch[1]!) }, { signal: scope.signal })
+      if (commandMatch && method === 'GET') {
+        const data = await host.execute('commands.get', { id: safeDecode(commandMatch[1]!) }, { signal: scope.signal })
         return sendJson(res, 200, data ?? null)
       }
-      if (commandMatch && method === "POST") {
+      if (commandMatch && method === 'POST') {
         const body = await readBody(req, scope.signal, MAX_JSON_BODY_BYTES * 24)
-        const data = await host.execute(safeDecode(commandMatch[1]!), commandParams(body) ?? {}, { signal: scope.signal })
+        const data = await host.execute(safeDecode(commandMatch[1]!), commandParams(body) ?? {}, {
+          signal: scope.signal,
+        })
         return sendJson(res, 200, { data: data ?? null })
       }
 
       const allowedMethods = allowedMethodsForPath(p)
       if (allowedMethods) {
-        res.setHeader("allow", allowedMethods)
-        return sendProblem(res, 405, Object.assign(new Error("method not allowed"), { code: "METHOD_NOT_ALLOWED" }))
+        res.setHeader('allow', allowedMethods)
+        return sendProblem(res, 405, Object.assign(new Error('method not allowed'), { code: 'METHOD_NOT_ALLOWED' }))
       }
-      return sendProblem(res, 404, Object.assign(new Error("not found"), { code: "NOT_FOUND" }))
+      return sendProblem(res, 404, Object.assign(new Error('not found'), { code: 'NOT_FOUND' }))
     } catch (error) {
       if (scope.signal.aborted || res.destroyed || res.writableEnded) return
       const status = statusForError(error)
       return sendProblem(res, status, error)
     } finally {
+      responseRequests.delete(res)
       scope.cleanup()
     }
   })
@@ -352,77 +551,87 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
 }
 
 function allowedMethodsForPath(pathname: string): string | undefined {
-  if (pathname === "/api/v1/host/health" || pathname === "/api/v1/host/share" ||
-    pathname === "/api/v1/host/registry" || pathname === "/api/v1/pi/registry") return "GET"
-  if (pathname === "/api/v1/host/shutdown") return "POST"
-  if (/^\/api\/v1\/pi\/commands\/[^/]+$/.test(pathname) ||
-    /^\/api\/v1\/pi\/sessions\/[^/]+\/commands\/[^/]+$/.test(pathname)) return "POST"
-  if (/^\/api\/v1\/host\/commands\/[^/]+$/.test(pathname)) return "GET, POST"
+  if (
+    pathname === '/api/v1/host/health' ||
+    pathname === '/api/v1/host/share' ||
+    pathname === DOWNLOAD_PATH ||
+    pathname === '/api/v1/host/registry' ||
+    pathname === '/api/v1/pi/registry'
+  )
+    return 'GET'
+  if (pathname === '/api/v1/host/shutdown') return 'POST'
+  if (pathname === '/api/v1/host/client-log') return 'POST'
+  if (
+    /^\/api\/v1\/pi\/commands\/[^/]+$/.test(pathname) ||
+    /^\/api\/v1\/pi\/sessions\/[^/]+\/commands\/[^/]+$/.test(pathname)
+  )
+    return 'POST'
+  if (/^\/api\/v1\/host\/commands\/[^/]+$/.test(pathname)) return 'GET, POST'
   return undefined
 }
 
 export function statusForError(error: unknown): number {
   if (error instanceof PathSafetyError) {
-    return error.code === "INVALID_REQUEST" ? 400 : 403
+    return error.code === 'INVALID_REQUEST' ? 400 : 403
   }
-  const code = error && typeof error === "object" && "code" in error ? String(error.code) : "INTERNAL"
+  const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'INTERNAL'
   switch (code) {
-    case "INVALID_REQUEST":
-    case "STALE_CURSOR":
+    case 'INVALID_REQUEST':
+    case 'STALE_CURSOR':
       return 400
-    case "UNAUTHORIZED":
-    case "AUTH_REQUIRED":
+    case 'UNAUTHORIZED':
+    case 'AUTH_REQUIRED':
       return 401
-    case "FORBIDDEN":
-    case "PATH_OUTSIDE_WORKSPACE":
-    case "SYMLINK_ESCAPE":
-    case "PROJECT_TRUST_REQUIRED":
+    case 'FORBIDDEN':
+    case 'PATH_OUTSIDE_WORKSPACE':
+    case 'SYMLINK_ESCAPE':
+    case 'PROJECT_TRUST_REQUIRED':
       return 403
-    case "NOT_FOUND":
-    case "UNKNOWN_COMMAND":
-    case "SESSION_NOT_FOUND":
-    case "WORKSPACE_NOT_FOUND":
-    case "TERMINAL_NOT_FOUND":
+    case 'NOT_FOUND':
+    case 'UNKNOWN_COMMAND':
+    case 'SESSION_NOT_FOUND':
+    case 'WORKSPACE_NOT_FOUND':
+    case 'TERMINAL_NOT_FOUND':
       return 404
-    case "TERMINAL_CURSOR_EXPIRED":
+    case 'TERMINAL_CURSOR_EXPIRED':
       return 409
-    case "TERMINAL_EXITED":
+    case 'TERMINAL_EXITED':
       return 409
-    case "TERMINAL_LIMIT_REACHED":
-    case "TERMINAL_START_FAILED":
+    case 'TERMINAL_LIMIT_REACHED':
+    case 'TERMINAL_START_FAILED':
       return 503
-    case "FILE_TOO_LARGE":
-    case "GIT_OUTPUT_LIMIT":
+    case 'FILE_TOO_LARGE':
+    case 'GIT_OUTPUT_LIMIT':
       return 413
-    case "GIT_TIMEOUT":
+    case 'GIT_TIMEOUT':
       return 504
-    case "GIT_BASE_NOT_FOUND":
-    case "EXTENSION_UI_CANCELLED":
+    case 'GIT_BASE_NOT_FOUND':
+    case 'EXTENSION_UI_CANCELLED':
       return 409
-    case "EXTENSION_UI_TUI_ONLY":
+    case 'EXTENSION_UI_TUI_ONLY':
       return 501
-    case "PI_SDK_VERSION_MISMATCH":
+    case 'PI_SDK_VERSION_MISMATCH':
       return 503
-    case "HOST_CALL_TIMEOUT":
+    case 'HOST_CALL_TIMEOUT':
       return 504
-    case "REGISTRY_UNAVAILABLE":
-    case "DRIVER_UNAVAILABLE":
-    case "WORKER_RESULT_UNKNOWN":
+    case 'REGISTRY_UNAVAILABLE':
+    case 'DRIVER_UNAVAILABLE':
+    case 'WORKER_RESULT_UNKNOWN':
       return 503
-    case "METHOD_NOT_ALLOWED":
+    case 'METHOD_NOT_ALLOWED':
       return 405
-    case "SESSION_BUSY":
-    case "WORKSPACE_BUSY":
-    case "COMMAND_ALREADY_ACCEPTED":
-    case "FILE_CONFLICT":
-    case "SESSION_CONFLICT":
-    case "SESSION_IDENTITY_MISMATCH":
-    case "RUNTIME_REPLACED":
-    case "RUNTIME_CLOSING":
-    case "WORKSPACE_REPLACED":
-    case "STALE_REVISION":
+    case 'SESSION_BUSY':
+    case 'WORKSPACE_BUSY':
+    case 'COMMAND_ALREADY_ACCEPTED':
+    case 'FILE_CONFLICT':
+    case 'SESSION_CONFLICT':
+    case 'SESSION_IDENTITY_MISMATCH':
+    case 'RUNTIME_REPLACED':
+    case 'RUNTIME_CLOSING':
+    case 'WORKSPACE_REPLACED':
+    case 'STALE_REVISION':
       return 409
-    case "CAPABILITY_DISABLED":
+    case 'CAPABILITY_DISABLED':
       return 501
     default:
       return 500

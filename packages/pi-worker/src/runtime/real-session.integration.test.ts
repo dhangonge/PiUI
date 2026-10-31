@@ -1,47 +1,272 @@
-import assert from "node:assert/strict"
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import path from "node:path"
-import { describe, it } from "node:test"
-import {
-  createAgentSessionFromServices,
-  createExtensionRuntime,
-  ModelRuntime,
-  SessionManager,
-  SettingsManager,
-  type AgentSessionServices,
-  type CreateAgentSessionRuntimeFactory,
-  type ResourceLoader,
-} from "@earendil-works/pi-coding-agent"
-import { RealPiSession } from "./real-session.ts"
-import { PiCatalog } from "./catalog.ts"
-import { loadPiSdk } from "../sdk-host.ts"
+import assert from 'node:assert/strict'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { describe, it } from 'node:test'
+import { SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent'
+import { RealPiSession } from './real-session.ts'
+import { loadPiSdk } from '../sdk-host.ts'
+import { PiCatalog } from './catalog.ts'
+import { AnyRecord, loadPiAiFromPinnedSdk } from '../../test-support/real-session.ts'
 
 await loadPiSdk()
 
-type AnyRecord = Record<string, any>
+// 子代理落盘桥会把 SessionManager.inMemory 换成落盘会话；本文件测的是通用
+// 会话语义（含真正的内存态会话），所以关掉桥。桥本身由 subagent-sessions.test.ts 覆盖。
 
-function allEntries(session: RealPiSession): AnyRecord[] {
-  return session.getEntriesPage(undefined, 100_000, 256 * 1024 * 1024).items as AnyRecord[]
+process.env.PIUI_SUBAGENT_SESSIONS = 'off'
+
+describe('RealPiSession with the Pi SDK', () => {
+  it('reads a session persisted by SDK 0.84.2 without rewriting its history', () => {
+    const fixture = new URL('./fixtures/session-sdk-0.84.2.jsonl', import.meta.url)
+    const source = readFileSync(fixture, 'utf8')
+    const entries = source
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line))
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-sdk-upgrade-'))
+    try {
+      const file = path.join(root, 'legacy.jsonl')
+      writeFileSync(file, source)
+      const manager = SessionManager.open(file, root)
+      assert.deepEqual(manager.getEntries(), entries.slice(1))
+      assert.equal(readFileSync(file, 'utf8'), source)
+      assert.ok(manager.buildSessionContext().messages.some(message => message.role === 'user'))
+      manager.appendCustomEntry('piui.upgrade-check', { sdk: '1.0.3' })
+      assert.deepEqual(SessionManager.open(file, root).getEntries().slice(0, -1), entries.slice(1))
+      assert.equal(readFileSync(fixture, 'utf8'), source)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('loads a configured custom theme and keeps SDK-bound UI references live', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-theme-context-'))
+    const agentDir = path.join(root, 'agent')
+    mkdirSync(path.join(agentDir, 'themes'), { recursive: true })
+    mkdirSync(path.join(agentDir, 'extensions'))
+    const theme = JSON.parse(
+      readFileSync(
+        new URL('./modes/interactive/theme/dark.json', import.meta.resolve('@earendil-works/pi-coding-agent')),
+        'utf8',
+      ),
+    )
+    theme.name = 'custom-fixture'
+    writeFileSync(path.join(agentDir, 'themes/custom-fixture.json'), JSON.stringify(theme))
+    writeFileSync(path.join(agentDir, 'settings.json'), JSON.stringify({ theme: 'custom-fixture' }))
+    writeFileSync(
+      path.join(agentDir, 'extensions/probe.js'),
+      `
+export default function (pi) {
+  let capturedTheme;
+  pi.on("session_start", (_event, ctx) => {
+    capturedTheme = ctx.ui.theme;
+    ctx.ui.onTerminalInput(() => undefined)();
+    ctx.ui.setStatus("initial-theme", capturedTheme.name);
+    ctx.ui.setWidget("todo-like", (_tui, factoryTheme) => ({
+      render: () => [ctx.ui.theme.fg("accent", factoryTheme.name)], invalidate() {}
+    }));
+  });
+  pi.registerCommand("swap-theme", { handler: async (_args, ctx) => {
+    if (!ctx.ui.setTheme("light").success) throw new Error("theme unavailable");
+    ctx.ui.setStatus("changed-theme", capturedTheme.name + ":" + ctx.ui.theme.name);
+  } });
 }
+`,
+    )
+    let session: RealPiSession | undefined
+    try {
+      session = await RealPiSession.open(root, undefined, { agentDir })
+      await session.initializeExtensions()
+      await session.invokeCommand('swap-theme')
+      const patches = session.extensionUi.getStateMirror().patches
+      assert.ok(
+        patches.some(
+          patch => patch.kind === 'status' && patch.key === 'initial-theme' && patch.text === 'custom-fixture',
+        ),
+      )
+      assert.ok(
+        patches.some(patch => patch.kind === 'status' && patch.key === 'changed-theme' && patch.text === 'light:light'),
+      )
+      assert.ok(session.extensionUi.listTuiPanels().some(panel => panel.key === 'todo-like'))
+    } finally {
+      await session?.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 
-function activeBranchEntries(session: RealPiSession): AnyRecord[] {
-  return session.getBranchPage(undefined, 100_000, 256 * 1024 * 1024).items as AnyRecord[]
+  it('reports load, setup and action failures safely and rebinds diagnostics on reload', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-extension-errors-'))
+    const agentDir = path.join(root, 'agent')
+    const extensionsDir = path.join(agentDir, 'extensions')
+    mkdirSync(extensionsDir, { recursive: true })
+    writeFileSync(
+      path.join(extensionsDir, 'broken.js'),
+      'throw new Error("private-load-sentinel"); export default function() {}',
+    )
+    writeFileSync(
+      path.join(extensionsDir, 'events.js'),
+      `
+export default function (pi) {
+  pi.on("session_start", () => {
+    pi.appendEntry("start-counter", {});
+    throw new Error("private-setup-sentinel");
+  });
+  pi.registerCommand("bad-command", { handler: async () => { throw new Error("private-command-sentinel") } });
+  pi.registerCommand("good-command", { handler: async (_args, ctx) => { ctx.ui.setStatus("alive", "yes") } });
+  pi.registerTool({ name: "bad_tool", label: "Bad tool", description: "Fault fixture", parameters: { type: "object", properties: {} },
+    execute: async () => { throw new Error("private-tool-sentinel") } });
 }
+`,
+    )
+    let session: RealPiSession | undefined
+    try {
+      session = await RealPiSession.open(root, undefined, { agentDir })
+      await session.initializeExtensions()
+      const initial = JSON.stringify(session.extensionUi.getStateMirror())
+      assert.ok(initial.includes('broken.js failed during load'))
+      assert.ok(initial.includes('events.js failed during session_start'))
+      await assert.rejects(session.invokeCommand('bad-command'), /Extension action failed/)
+      await assert.rejects(session.invokeTool('bad_tool'), /Extension action failed/)
+      await session.invokeCommand('good-command')
+      assert.ok(JSON.stringify(session.extensionUi.getStateMirror()).includes('"text":"yes"'))
+      assert.ok(!JSON.stringify(session.extensionUi.getStateMirror()).includes('sentinel'))
+      await session.reload()
+      const reloaded = JSON.stringify(session.extensionUi.getStateMirror())
+      assert.ok(reloaded.includes('events.js failed during session_start'))
+      assert.ok(reloaded.includes('broken.js failed during load'))
+      assert.equal(
+        session.getEntriesPage(undefined, 100, 100_000).items.filter(entry => entry.customType === 'start-counter')
+          .length,
+        2,
+      )
+    } finally {
+      await session?.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 
-function sessionTree(session: RealPiSession): AnyRecord[] {
-  return session.getTree() as AnyRecord[]
+  it('supplies tool context and preserves the SDK guard on manual nested calls', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-tool-context-'))
+    const agentDir = path.join(root, 'agent')
+    const extensions = path.join(agentDir, 'extensions')
+    mkdirSync(extensions, { recursive: true })
+    writeFileSync(
+      path.join(extensions, 'nested.js'),
+      `
+export default function (pi) {
+  pi.registerTool({ name: "child", description: "fixture", parameters: { type: "object", properties: {} },
+    execute: async () => ({ content: [{ type: "text", text: "nested result" }], details: {} }) })
+  pi.registerTool({ name: "parent", description: "fixture", parameters: { type: "object", properties: {} },
+    execute: async (_id, _args, _signal, _update, ctx) => {
+      if (!ctx.tools.some(tool => tool.name === "child")) throw new Error("missing tool catalog")
+      const outcome = await ctx.executeTool("child", {})
+      return { ...outcome.result, details: { nestedIsError: outcome.isError } }
+    } })
 }
+`,
+    )
+    let session: RealPiSession | undefined
+    try {
+      session = await RealPiSession.open(root, undefined, { agentDir })
+      await session.initializeExtensions()
+      const result = (await session.invokeTool('parent')) as {
+        content: Array<{ text: string }>
+        details: { nestedIsError: boolean }
+      }
+      assert.equal(result.details.nestedIsError, true)
+      assert.match(result.content[0]?.text ?? '', /No assistant message issued this call/)
+    } finally {
+      await session?.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 
-describe("RealPiSession with the Pi SDK", () => {
-  it("uses the configured sessionDir for creation and discovery", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-session-dir-"))
-    const cwd = path.join(root, "workspace")
-    const agentDir = path.join(root, "agent")
-    const sessionDir = path.join(root, "sessions")
+  it('forwards the subagent-integration child-session announcements from pi.events', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-child-bus-'))
+    const agentDir = path.join(root, 'agent')
+    const extensions = path.join(agentDir, 'extensions')
+    mkdirSync(extensions, { recursive: true })
+    // 频道名与 payload 是 subagent-integration 约定，pi-subagents-lite 就是
+    // 用这两个值发公告的；这里用最小 fixture 复现同样的调用。
+    writeFileSync(
+      path.join(extensions, 'announce.js'),
+      `
+export default function (pi) {
+  pi.registerTool({ name: "announce", description: "fixture", parameters: { type: "object", properties: {} },
+    execute: async () => {
+      for (const channel of ["subagents:child:session-created", "subagents:child:bound", "subagents:child:disposed"]) {
+        pi.events.emit(channel, { sessionId: "child-1", parentSessionId: "parent-1" })
+      }
+      return { content: [{ type: "text", text: "announced" }], details: {} }
+    } })
+}
+`,
+    )
+    let session: RealPiSession | undefined
+    try {
+      session = await RealPiSession.open(root, undefined, { agentDir })
+      await session.initializeExtensions()
+      const events: AnyRecord[] = []
+      const off = session.onChildSession(event => events.push(event as AnyRecord))
+      await session.invokeTool('announce')
+      off()
+
+      assert.deepEqual(
+        events.map(event => event.phase),
+        ['created', 'bound', 'disposed'],
+      )
+      assert.equal(events[0]?.sessionId, 'child-1')
+      assert.equal(events[0]?.parentSessionId, 'parent-1')
+      // owningSessionId 由 worker 自己盖章，用来对账多会话共进程的情况
+      assert.equal(events[0]?.owningSessionId, session.getSessionId())
+    } finally {
+      await session?.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('drops announcements when the tool emits on a channel nobody listens to', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-child-bus-mute-'))
+    const agentDir = path.join(root, 'agent')
+    const extensions = path.join(agentDir, 'extensions')
+    mkdirSync(extensions, { recursive: true })
+    writeFileSync(
+      path.join(extensions, 'announce.js'),
+      `
+export default function (pi) {
+  pi.registerTool({ name: "announce", description: "fixture", parameters: { type: "object", properties: {} },
+    execute: async () => {
+      pi.events.emit("subagents:child:session-created", { parentSessionId: "parent-1" })
+      return { content: [{ type: "text", text: "announced" }], details: {} }
+    } })
+}
+`,
+    )
+    let session: RealPiSession | undefined
+    try {
+      session = await RealPiSession.open(root, undefined, { agentDir })
+      await session.initializeExtensions()
+      const events: AnyRecord[] = []
+      session.onChildSession(event => events.push(event as AnyRecord))
+      await session.invokeTool('announce')
+
+      // 没有 sessionId 就定位不到子会话，不能上报
+      assert.deepEqual(events, [])
+    } finally {
+      await session?.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('uses the configured sessionDir for creation and discovery', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-session-dir-'))
+    const cwd = path.join(root, 'workspace')
+    const agentDir = path.join(root, 'agent')
+    const sessionDir = path.join(root, 'sessions')
     mkdirSync(cwd)
     mkdirSync(agentDir)
-    writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ sessionDir }))
+    writeFileSync(path.join(agentDir, 'settings.json'), JSON.stringify({ sessionDir }))
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR
     process.env.PI_CODING_AGENT_DIR = agentDir
     let session: RealPiSession | undefined
@@ -49,15 +274,24 @@ describe("RealPiSession with the Pi SDK", () => {
       session = await RealPiSession.open(cwd, undefined, { agentDir })
       assert.equal(path.dirname(session.getSessionFile()!), sessionDir)
       const discoverable = SessionManager.create(cwd, sessionDir)
-      discoverable.appendMessage({ role: "user", content: "persist", timestamp: Date.now() })
+      discoverable.appendMessage({ role: 'user', content: 'persist', timestamp: Date.now() })
       const { fauxAssistantMessage } = await loadPiAiFromPinnedSdk()
-      discoverable.appendMessage(fauxAssistantMessage("persisted"))
+      discoverable.appendMessage(fauxAssistantMessage('persisted'))
       assert.equal(existsSync(discoverable.getSessionFile()!), true)
-      assert.equal((await SessionManager.list(cwd, sessionDir)).some(item => item.id === discoverable.getSessionId()), true)
+      assert.equal(
+        (await SessionManager.list(cwd, sessionDir)).some(item => item.id === discoverable.getSessionId()),
+        true,
+      )
       const catalog = new PiCatalog(agentDir)
-      assert.equal(((await catalog.listSessions(cwd)) as AnyRecord[]).some(item => item.id === discoverable.getSessionId()), true)
+      assert.equal(
+        ((await catalog.listSessions(cwd)) as AnyRecord[]).some(item => item.id === discoverable.getSessionId()),
+        true,
+      )
       assert.equal(SettingsManager.create(process.cwd(), agentDir).getSessionDir(), sessionDir)
-      assert.equal(((await catalog.listAllSessions()) as AnyRecord[]).some(item => item.id === discoverable.getSessionId()), true)
+      assert.equal(
+        ((await catalog.listAllSessions()) as AnyRecord[]).some(item => item.id === discoverable.getSessionId()),
+        true,
+      )
       await session.dispose()
       session = await RealPiSession.open(cwd, discoverable.getSessionFile(), { agentDir })
       const replacement = await session.newSession()
@@ -70,14 +304,17 @@ describe("RealPiSession with the Pi SDK", () => {
     }
   })
 
-  it("prefers the Pi session directory environment override", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-session-dir-env-"))
-    const cwd = path.join(root, "workspace")
-    const agentDir = path.join(root, "agent")
-    const sessionDir = path.join(root, "environment-sessions")
+  it('prefers the Pi session directory environment override', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-session-dir-env-'))
+    const cwd = path.join(root, 'workspace')
+    const agentDir = path.join(root, 'agent')
+    const sessionDir = path.join(root, 'environment-sessions')
     mkdirSync(cwd)
     mkdirSync(agentDir)
-    writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ sessionDir: path.join(root, "settings-sessions") }))
+    writeFileSync(
+      path.join(agentDir, 'settings.json'),
+      JSON.stringify({ sessionDir: path.join(root, 'settings-sessions') }),
+    )
     const previous = process.env.PI_CODING_AGENT_SESSION_DIR
     process.env.PI_CODING_AGENT_SESSION_DIR = sessionDir
     let session: RealPiSession | undefined
@@ -92,54 +329,48 @@ describe("RealPiSession with the Pi SDK", () => {
     }
   })
 
-  it("validates and persists every extended settings value", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-settings-"))
-    const cwd = path.join(root, "workspace")
-    const agentDir = path.join(root, "agent")
+  it('validates and persists every extended settings value', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-settings-'))
+    const cwd = path.join(root, 'workspace')
+    const agentDir = path.join(root, 'agent')
     mkdirSync(cwd)
     mkdirSync(agentDir)
     const previousHttpProxy = process.env.HTTP_PROXY
     const previousHttpsProxy = process.env.HTTPS_PROXY
     try {
       const catalog = new PiCatalog(agentDir)
-      const result = await catalog.patchSettings(cwd, {
-        defaultThinkingLevel: "max",
-        transport: "websocket-cached",
+      const result = (await catalog.patchSettings(cwd, {
+        defaultThinkingLevel: 'max',
+        transport: 'websocket-cached',
         httpIdleTimeoutMs: 1234,
-        httpProxy: " http://127.0.0.1:7890 ",
+        httpProxy: ' http://127.0.0.1:7890 ',
         shellPath: null,
-        packages: [
-          "npm:plain-package",
-          { source: "git:filtered-package", autoload: false, extensions: ["index.ts"] },
-        ],
+        packages: ['npm:plain-package', { source: 'git:filtered-package', autoload: false, extensions: ['index.ts'] }],
         warnings: { anthropicExtraUsage: false },
-      }) as AnyRecord
-      assert.equal(result.effective.defaultThinkingLevel, "max")
-      assert.equal(result.effective.transport, "websocket-cached")
+      })) as AnyRecord
+      assert.equal(result.effective.defaultThinkingLevel, 'max')
+      assert.equal(result.effective.transport, 'websocket-cached')
       assert.equal(result.effective.httpIdleTimeoutMs, 1234)
-      assert.equal(result.effective.httpProxy, "http://127.0.0.1:7890")
+      assert.equal(result.effective.httpProxy, 'http://127.0.0.1:7890')
       assert.deepEqual(result.effective.packages, [
-        "npm:plain-package",
-        { source: "git:filtered-package", autoload: false, extensions: ["index.ts"] },
+        'npm:plain-package',
+        { source: 'git:filtered-package', autoload: false, extensions: ['index.ts'] },
       ])
 
       await assert.rejects(
-        catalog.patchSettings(cwd, { packages: [{ source: "x", unknown: true }] }),
+        catalog.patchSettings(cwd, { packages: [{ source: 'x', unknown: true }] }),
         /invalid Pi setting: packages/,
       )
       await assert.rejects(
-        catalog.patchSettings(cwd, { warnings: { anthropicExtraUsage: "yes" as never } }),
+        catalog.patchSettings(cwd, { warnings: { anthropicExtraUsage: 'yes' as never } }),
         /invalid Pi setting: warnings/,
       )
       await assert.rejects(
         catalog.patchSettings(cwd, { httpIdleTimeoutMs: -1 }),
         /invalid Pi setting: httpIdleTimeoutMs/,
       )
-      await assert.rejects(
-        catalog.patchSettings(cwd, { httpProxy: 42 as never }),
-        /invalid Pi setting: httpProxy/,
-      )
-      const cleared = await catalog.patchSettings(cwd, { httpProxy: null }) as AnyRecord
+      await assert.rejects(catalog.patchSettings(cwd, { httpProxy: 42 as never }), /invalid Pi setting: httpProxy/)
+      const cleared = (await catalog.patchSettings(cwd, { httpProxy: null })) as AnyRecord
       assert.equal(cleared.effective.httpProxy, undefined)
     } finally {
       if (previousHttpProxy === undefined) delete process.env.HTTP_PROXY
@@ -150,20 +381,25 @@ describe("RealPiSession with the Pi SDK", () => {
     }
   })
 
-  it("lets global extensions decide project trust before project resources load", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-project-trust-"))
-    const cwd = path.join(root, "workspace")
-    const agentDir = path.join(root, "agent")
-    const projectExtensions = path.join(cwd, ".pi", "extensions")
+  it('lets global extensions decide project trust before project resources load', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-project-trust-'))
+    const cwd = path.join(root, 'workspace')
+    const agentDir = path.join(root, 'agent')
+    const projectExtensions = path.join(cwd, '.pi', 'extensions')
     mkdirSync(projectExtensions, { recursive: true })
     mkdirSync(agentDir)
-    const trustExtension = path.join(root, "trust-extension.js")
-    writeFileSync(trustExtension, `
+    const trustExtension = path.join(root, 'trust-extension.js')
+    writeFileSync(
+      trustExtension,
+      `
 export default function (pi) {
   pi.on("project_trust", () => ({ trusted: "yes", remember: true }))
 }
-`)
-    writeFileSync(path.join(projectExtensions, "trusted-command.js"), `
+`,
+    )
+    writeFileSync(
+      path.join(projectExtensions, 'trusted-command.js'),
+      `
 export default function (pi) {
   pi.registerCommand("trusted-project-command", { description: "trusted", handler: async () => {} })
   pi.registerTool({
@@ -173,30 +409,52 @@ export default function (pi) {
     execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
   })
 }
-`)
-    writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ extensions: [trustExtension] }))
+`,
+    )
+    writeFileSync(path.join(agentDir, 'settings.json'), JSON.stringify({ extensions: [trustExtension] }))
     let session: RealPiSession | undefined
     try {
       session = await RealPiSession.open(cwd, undefined, { agentDir })
       await session.initializeExtensions()
-      assert.equal(session.getRegistry().commands.some(command => command.name === "trusted-project-command"), true)
-      assert.equal(session.getRegistry().commands.some(command => command.name === "reload" && command.sourceInfo?.builtin === true), true)
-      assert.equal(session.getRegistry().tools.some(tool => tool.name === "trusted-project-tool" && tool.parameters && typeof tool.parameters === "object" && !Array.isArray(tool.parameters)), true)
-      assert.equal(new (await import("@earendil-works/pi-coding-agent")).ProjectTrustStore(agentDir).get(cwd), true)
+      assert.equal(
+        session.getRegistry().commands.some(command => command.name === 'trusted-project-command'),
+        true,
+      )
+      assert.equal(
+        session
+          .getRegistry()
+          .commands.some(command => command.name === 'reload' && command.sourceInfo?.builtin === true),
+        true,
+      )
+      assert.equal(
+        session
+          .getRegistry()
+          .tools.some(
+            tool =>
+              tool.name === 'trusted-project-tool' &&
+              tool.parameters &&
+              typeof tool.parameters === 'object' &&
+              !Array.isArray(tool.parameters),
+          ),
+        true,
+      )
+      assert.equal(new (await import('@earendil-works/pi-coding-agent')).ProjectTrustStore(agentDir).get(cwd), true)
     } finally {
       await session?.dispose()
       rmSync(root, { recursive: true, force: true })
     }
   })
 
-  it("round-trips native extension dialogs through the real SDK", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-real-dialog-"))
-    const cwd = path.join(root, "workspace")
-    const agentDir = path.join(root, "agent")
-    const projectExtensions = path.join(cwd, ".pi", "extensions")
+  it('round-trips native extension dialogs through the real SDK', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-real-dialog-'))
+    const cwd = path.join(root, 'workspace')
+    const agentDir = path.join(root, 'agent')
+    const projectExtensions = path.join(cwd, '.pi', 'extensions')
     mkdirSync(projectExtensions, { recursive: true })
     mkdirSync(agentDir)
-    writeFileSync(path.join(projectExtensions, "dialog-command.js"), `
+    writeFileSync(
+      path.join(projectExtensions, 'dialog-command.js'),
+      `
 export default function (pi) {
   pi.registerCommand("dialog-e2e", {
     description: "exercise extension dialogs",
@@ -211,33 +469,42 @@ export default function (pi) {
       ctx.ui.setStatus("mode", "Done")
       ctx.ui.notify("finished", "success")
       const { writeFileSync } = await import("node:fs")
-      writeFileSync(${JSON.stringify(path.join(root, "dialog-result.json"))}, JSON.stringify({ choice, ok, text, edited }))
+      writeFileSync(${JSON.stringify(path.join(root, 'dialog-result.json'))}, JSON.stringify({ choice, ok, text, edited }))
     },
   })
 }
-`)
+`,
+    )
     let session: RealPiSession | undefined
     try {
       // 预置项目信任，让 .pi/extensions 的扩展在 trust pass 后加载
-      new (await import("@earendil-works/pi-coding-agent")).ProjectTrustStore(agentDir).set(cwd, true)
+      new (await import('@earendil-works/pi-coding-agent')).ProjectTrustStore(agentDir).set(cwd, true)
       session = await RealPiSession.open(cwd, undefined, { agentDir })
       await session.initializeExtensions()
-      assert.equal(session.getRegistry().commands.some(command => command.name === "dialog-e2e"), true)
+      assert.equal(
+        session.getRegistry().commands.some(command => command.name === 'dialog-e2e'),
+        true,
+      )
 
       // 触发 command：handler 依次发起 4 个原生对话框
       const pending: Array<{ requestId: string; kind: string }> = []
       const states: string[] = []
       const notifications: string[] = []
       const off = session.onExtensionUi(event => {
-        const uiEvent = event as { type?: string; request?: { requestId?: string; kind?: string }; patch?: { kind?: string }; message?: string }
+        const uiEvent = event as {
+          type?: string
+          request?: { requestId?: string; kind?: string }
+          patch?: { kind?: string }
+          message?: string
+        }
         const request = uiEvent.request
         if (request?.requestId) pending.push({ requestId: request.requestId, kind: String(request.kind) })
-        if (uiEvent.type === "state" && uiEvent.patch?.kind === "status" && typeof uiEvent.patch.text === "string") {
+        if (uiEvent.type === 'state' && uiEvent.patch?.kind === 'status' && typeof uiEvent.patch.text === 'string') {
           states.push(uiEvent.patch.text)
         }
-        if (uiEvent.type === "notify" && typeof uiEvent.message === "string") notifications.push(uiEvent.message)
+        if (uiEvent.type === 'notify' && typeof uiEvent.message === 'string') notifications.push(uiEvent.message)
       })
-      const result = session.invokeCommand("dialog-e2e", undefined)
+      const result = session.invokeCommand('dialog-e2e', undefined)
 
       // 逐个响应：select -> confirm -> input -> editor
       const kinds: string[] = []
@@ -252,37 +519,51 @@ export default function (pi) {
         // 刷新/重连恢复：dialog 挂起期间 state.get 必须能带回未应答的
         // pending 请求（worker 侧请求仍在，扩展仍在阻塞等应答——数据没有
         // 丢）。已应答的已被 respond() 移除，所以快照只含当前未应答的。
-        const pendingState = (session.getState().pendingExtensionUiRequests ?? []) as Array<{ requestId: string; kind: string }>
+        const pendingState = (session.getState().pendingExtensionUiRequests ?? []) as Array<{
+          requestId: string
+          kind: string
+        }>
         assert.deepEqual(
           pendingState.map(request => request.kind),
           [next.kind],
         )
         assert.equal(pendingState[0]?.requestId, next.requestId)
         // 刷新/重连恢复：增量 UI 状态镜像（setStatus 的 patch）同样可见
-        const uiState = session.getState().extensionUiState as { patches?: Array<{ kind: string; key?: string; text?: string }> }
-        const statusPatches = (uiState.patches ?? []).filter(patch => patch.kind === "status")
-        assert.deepEqual(statusPatches.map(patch => patch.text), ["Planning"])
-        const response = next.kind === "select" ? { value: "beta" }
-          : next.kind === "confirm" ? { confirmed: true }
-          : next.kind === "input" ? { value: "typed" }
-          : { value: "edited!" }
+        const uiState = session.getState().extensionUiState as {
+          patches?: Array<{ kind: string; key?: string; text?: string }>
+        }
+        const statusPatches = (uiState.patches ?? []).filter(patch => patch.kind === 'status')
+        assert.deepEqual(
+          statusPatches.map(patch => patch.text),
+          ['Planning'],
+        )
+        const response =
+          next.kind === 'select'
+            ? { value: 'beta' }
+            : next.kind === 'confirm'
+              ? { confirmed: true }
+              : next.kind === 'input'
+                ? { value: 'typed' }
+                : { value: 'edited!' }
         assert.equal(await session.respondExtensionUi(next.requestId, response as never), true)
       }
-      assert.deepEqual(kinds, ["select", "confirm", "input", "editor"])
+      assert.deepEqual(kinds, ['select', 'confirm', 'input', 'editor'])
 
       await result
-      const values = JSON.parse(readFileSync(path.join(root, "dialog-result.json"), "utf8")) as Record<string, unknown>
-      assert.deepEqual(values, { choice: "beta", ok: true, text: "typed", edited: "edited!" })
+      const values = JSON.parse(readFileSync(path.join(root, 'dialog-result.json'), 'utf8')) as Record<string, unknown>
+      assert.deepEqual(values, { choice: 'beta', ok: true, text: 'typed', edited: 'edited!' })
       // 状态事件：setStatus 先后推送 Planning / Done，notify 推送 started / finished
-      assert.deepEqual(states, ["Planning", "Done"])
-      assert.deepEqual(notifications, ["started", "finished"])
+      assert.deepEqual(states, ['Planning', 'Done'])
+      assert.deepEqual(notifications, ['started', 'finished'])
       // 全部应答后 pending 清空（settled）
       assert.deepEqual(session.getState().pendingExtensionUiRequests, [])
-      // 状态镜像完整：Planning -> Done
-      const doneState = session.getState().extensionUiState as { patches?: Array<{ kind: string; key?: string; text?: string }> }
+      // Reconnect restores the latest value; the event stream above retains both transitions.
+      const doneState = session.getState().extensionUiState as {
+        patches?: Array<{ kind: string; key?: string; text?: string }>
+      }
       assert.deepEqual(
-        (doneState.patches ?? []).filter(patch => patch.kind === "status").map(patch => patch.text),
-        ["Planning", "Done"],
+        (doneState.patches ?? []).filter(patch => patch.kind === 'status').map(patch => patch.text),
+        ['Done'],
       )
       off()
     } finally {
@@ -291,14 +572,16 @@ export default function (pi) {
     }
   })
 
-  it("hosts extension component widgets and custom() offscreen through the real SDK", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-real-tui-"))
-    const cwd = path.join(root, "workspace")
-    const agentDir = path.join(root, "agent")
-    const projectExtensions = path.join(cwd, ".pi", "extensions")
+  it('hosts extension component widgets and custom() offscreen through the real SDK', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'piui-real-tui-'))
+    const cwd = path.join(root, 'workspace')
+    const agentDir = path.join(root, 'agent')
+    const projectExtensions = path.join(cwd, '.pi', 'extensions')
     mkdirSync(projectExtensions, { recursive: true })
     mkdirSync(agentDir)
-    writeFileSync(path.join(projectExtensions, "tui-command.js"), `
+    writeFileSync(
+      path.join(projectExtensions, 'tui-command.js'),
+      `
 export default function (pi) {
   pi.registerCommand("tui-e2e", {
     description: "exercise the extension TUI mirror",
@@ -316,23 +599,27 @@ export default function (pi) {
         return container
       })
       const { writeFileSync } = await import("node:fs")
-      writeFileSync(${JSON.stringify(path.join(root, "tui-result.json"))}, JSON.stringify({ result }))
+      writeFileSync(${JSON.stringify(path.join(root, 'tui-result.json'))}, JSON.stringify({ result }))
     },
   })
 }
-`)
+`,
+    )
     let session: RealPiSession | undefined
     try {
       // 预置项目信任，让 .pi/extensions 的扩展在 trust pass 后加载
-      new (await import("@earendil-works/pi-coding-agent")).ProjectTrustStore(agentDir).set(cwd, true)
+      new (await import('@earendil-works/pi-coding-agent')).ProjectTrustStore(agentDir).set(cwd, true)
       session = await RealPiSession.open(cwd, undefined, { agentDir })
       await session.initializeExtensions()
-      assert.equal(session.getRegistry().commands.some(command => command.name === "tui-e2e"), true)
+      assert.equal(
+        session.getRegistry().commands.some(command => command.name === 'tui-e2e'),
+        true,
+      )
 
       const tuiEvents: Array<{ type: string; key?: string; data?: string }> = []
       const off = session.onExtensionUi(event => {
         const tuiEvent = event as { type?: string; attach?: { key?: string }; key?: string; data?: string }
-        if (tuiEvent.type === "tuiAttach" || tuiEvent.type === "tuiDetach" || tuiEvent.type === "tuiFrame") {
+        if (tuiEvent.type === 'tuiAttach' || tuiEvent.type === 'tuiDetach' || tuiEvent.type === 'tuiFrame') {
           tuiEvents.push({
             type: String(tuiEvent.type),
             key: tuiEvent.attach?.key ?? tuiEvent.key,
@@ -341,979 +628,23 @@ export default function (pi) {
         }
       })
 
-      await session.invokeCommand("tui-e2e", undefined)
+      await session.invokeCommand('tui-e2e', undefined)
       // custom() 的 done 在 50ms 后触发，帧走 setTimeout(0) flush
       await new Promise(resolve => setTimeout(resolve, 300))
 
       // 组件 widget 与 custom() 都挂载、出帧、custom 关闭后 detach
-      assert.ok(tuiEvents.some(event => event.type === "tuiAttach" && event.key === "panel"))
-      assert.ok(tuiEvents.some(event => event.type === "tuiAttach" && event.key === "custom"))
-      assert.ok(tuiEvents.some(event => event.type === "tuiFrame" && event.data?.includes("e2e panel")))
-      assert.ok(tuiEvents.some(event => event.type === "tuiFrame" && event.data?.includes("custom e2e")))
-      assert.ok(tuiEvents.some(event => event.type === "tuiDetach" && event.key === "custom"))
+      assert.ok(tuiEvents.some(event => event.type === 'tuiAttach' && event.key === 'panel'))
+      assert.ok(tuiEvents.some(event => event.type === 'tuiAttach' && event.key === 'custom'))
+      assert.ok(tuiEvents.some(event => event.type === 'tuiFrame' && event.data?.includes('e2e panel')))
+      assert.ok(tuiEvents.some(event => event.type === 'tuiFrame' && event.data?.includes('custom e2e')))
+      assert.ok(tuiEvents.some(event => event.type === 'tuiDetach' && event.key === 'custom'))
 
-      const result = JSON.parse(readFileSync(path.join(root, "tui-result.json"), "utf8")) as Record<string, unknown>
-      assert.deepEqual(result, { result: "custom-done" })
+      const result = JSON.parse(readFileSync(path.join(root, 'tui-result.json'), 'utf8')) as Record<string, unknown>
+      assert.deepEqual(result, { result: 'custom-done' })
       off()
-    } finally {
-      await session?.dispose()
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  it("streams raw events and persists an offline faux-provider turn", async () => {
-    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-sdk-"))
-    const { fauxAssistantMessage, fauxProvider, InMemoryCredentialStore } = await loadPiAiFromPinnedSdk()
-    const faux = fauxProvider({ provider: "piui-faux", api: "piui-faux" })
-    faux.setResponses([
-      fauxAssistantMessage("offline answer"),
-      fauxAssistantMessage("idle reply"),
-      fauxAssistantMessage("", { stopReason: "error", errorMessage: "offline failure" }),
-    ])
-    const modelRuntime = await ModelRuntime.create({
-      credentials: new InMemoryCredentialStore(),
-      modelsPath: null,
-      allowModelNetwork: false,
-    })
-    modelRuntime.registerNativeProvider(faux.provider)
-    const settingsManager = SettingsManager.inMemory({
-      compaction: { enabled: false },
-      retry: { enabled: false },
-    })
-    const resourceLoader = emptyResourceLoader()
-    const createRuntime: CreateAgentSessionRuntimeFactory = async ({
-      sessionManager,
-      sessionStartEvent,
-    }) => {
-      const services: AgentSessionServices = {
-        cwd,
-        agentDir: cwd,
-        modelRuntime,
-        settingsManager,
-        resourceLoader,
-        diagnostics: [],
-      }
-      return {
-        ...(await createAgentSessionFromServices({
-          services,
-          sessionManager,
-          sessionStartEvent,
-          model: faux.getModel(),
-          thinkingLevel: "off",
-          noTools: "all",
-        })),
-        services,
-        diagnostics: [],
-      }
-    }
-
-    let session: RealPiSession | undefined
-    try {
-      session = await RealPiSession.open(cwd, undefined, {
-        agentDir: cwd,
-        createRuntime,
-        createSessionManager: runtimeCwd => SessionManager.inMemory(runtimeCwd),
-      })
-      const skippedCompaction = await session.compact()
-      assert.equal(skippedCompaction.status, "skipped")
-      const nativeEvents: Array<Record<string, unknown>> = []
-      const unsubscribeNative = session.onPiEvent(
-        event => nativeEvents.push(event as Record<string, unknown>),
-      )
-      await session.prompt("ping", [{ type: "image", mimeType: "image/png", data: "aW1hZ2U=" }])
-      unsubscribeNative()
-
-      // The authenticated client receives Pi's complete JSON event structure.
-      assert.ok(nativeEvents.length > 0)
-      for (const event of nativeEvents) {
-        assert.equal(typeof event.type, "string")
-      }
-      assert.ok(nativeEvents.some(event => {
-        const message = event.message
-        return event.type === "message_start" && message && typeof message === "object" &&
-          !Array.isArray(message) && (message as { role?: unknown }).role === "user"
-      }))
-
-      assert.equal(faux.state.callCount, 1)
-      assert.equal(session.getSessionFile(), undefined)
-      assert.equal((session.getState().model as AnyRecord)?.provider, "piui-faux")
-      const nativeEntries = allEntries(session)
-      const userEntry = nativeEntries.find(entry => entry.type === "message" && nativeRole(entry) === "user")
-      const assistantEntry = nativeEntries.find(entry => entry.type === "message" && nativeRole(entry) === "assistant")
-      assert.ok(userEntry)
-      assert.ok(assistantEntry)
-      assert.deepEqual(
-        session.getBranchPage(undefined, 100, 32 * 1024 * 1024).items,
-        activeBranchEntries(session),
-      )
-      const userMessage = userEntry.message
-      assert.ok(userMessage && typeof userMessage === "object" && !Array.isArray(userMessage))
-      assert.deepEqual(userMessage.content, [
-        { type: "text", text: "ping" },
-        { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
-      ])
-      await session.setLabel(String(assistantEntry.id), "offline checkpoint")
-      await session.setSessionName("Offline R3")
-      assert.equal(session.getState().sessionName, "Offline R3")
-      assert.equal(findTreeLabel(sessionTree(session), String(assistantEntry.id)), "offline checkpoint")
-      assert.deepEqual(findTreeNode(sessionTree(session), String(assistantEntry.id))?.entry, assistantEntry)
-      await assert.rejects(
-        session.setActiveTools(["piui-tool-that-does-not-exist"]),
-        error => (error as { code?: string }).code === "INVALID_REQUEST",
-      )
-
-      const navigation = await session.navigateTree(String(userEntry.id))
-      assert.equal(navigation.editorText, "ping")
-      const sourceSessionId = session.getSessionId()
-      const replacement = await session.fork(assistantEntry.id, "at")
-      assert.equal(replacement.sourceSessionId, sourceSessionId)
-      assert.notEqual(replacement.targetSessionId, sourceSessionId)
-      assert.equal(replacement.cancelled, false)
-
-      const uiState = session.getState()
-      assert.equal(uiState.isBashRunning, false)
-      assert.equal(uiState.hasPendingBashMessages, false)
-      assert.equal(uiState.isRetrying, false)
-      assert.equal(uiState.retryAttempt, 0)
-      assert.equal(uiState.pendingMessageCount, 0)
-      await assert.rejects(
-        session.cycleThinkingLevel(),
-        error => (error as { code?: string }).code === "CAPABILITY_DISABLED",
-      )
-
-      await session.sendUserMessage("sent while idle")
-      assert.equal(faux.state.callCount, 2)
-      assert.ok(allEntries(session).some(entry =>
-        entry.type === "message" && nativeRole(entry) === "user" && nativeMessageText(entry) === "sent while idle"
-      ))
-
-      await session.prompt("fail offline")
-      const failed = allEntries(session).filter(entry =>
-        entry.type === "message" && nativeRole(entry) === "assistant"
-      ).at(-1)
-      assert.equal(faux.state.callCount, 3)
-      assert.equal(nativeMessage(failed).stopReason, "error")
-    } finally {
-      await session?.dispose()
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it("stages imports under a unique filename before Pi can overwrite an existing session", async () => {
-    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-import-"))
-    const { fauxAssistantMessage } = await loadPiAiFromPinnedSdk()
-    const sessionDir = path.join(cwd, "sessions")
-    const inputDir = path.join(cwd, "inputs")
-    mkdirSync(inputDir)
-    const currentManager = SessionManager.create(cwd, sessionDir)
-    currentManager.appendMessage({ role: "user", content: "source content", timestamp: Date.now() } as never)
-    currentManager.appendMessage(fauxAssistantMessage("source answer") as never)
-    const importedManager = SessionManager.create(cwd, inputDir)
-    importedManager.appendMessage({ role: "user", content: "imported content", timestamp: Date.now() } as never)
-    importedManager.appendMessage(fauxAssistantMessage("imported answer") as never)
-    const sourceFile = currentManager.getSessionFile()!
-    const importedFile = importedManager.getSessionFile()!
-    const collidingInput = path.join(inputDir, path.basename(sourceFile))
-    copyFileSync(importedFile, collidingInput)
-    const modelRuntime = await ModelRuntime.create({
-      modelsPath: null,
-      allowModelNetwork: false,
-    })
-    const settingsManager = SettingsManager.inMemory()
-    const resourceLoader = emptyResourceLoader()
-    const createRuntime: CreateAgentSessionRuntimeFactory = async ({ sessionManager, sessionStartEvent }) => {
-      const services: AgentSessionServices = {
-        cwd,
-        agentDir: cwd,
-        modelRuntime,
-        settingsManager,
-        resourceLoader,
-        diagnostics: [],
-      }
-      return {
-        ...(await createAgentSessionFromServices({
-          services,
-          sessionManager,
-          sessionStartEvent,
-          noTools: "all",
-        })),
-        services,
-        diagnostics: [],
-      }
-    }
-
-    let session: RealPiSession | undefined
-    try {
-      session = await RealPiSession.open(cwd, sourceFile, {
-        agentDir: cwd,
-        createRuntime,
-        createSessionManager: () => currentManager,
-      })
-      const sourceBefore = readFileSync(sourceFile, "utf8")
-      const sourceSessionId = session.getSessionId()
-      await assert.rejects(
-        session.importSession(path.join(inputDir, "missing.jsonl"), cwd),
-        { code: "NOT_FOUND" },
-      )
-      assert.equal(session.getSessionId(), sourceSessionId)
-      assert.equal(readFileSync(sourceFile, "utf8"), sourceBefore)
-
-      const replacement = await session.importSession(collidingInput, cwd)
-      assert.equal(replacement.cancelled, false)
-      assert.notEqual(path.resolve(replacement.targetSessionFile!), path.resolve(sourceFile))
-      assert.equal(readFileSync(sourceFile, "utf8"), sourceBefore)
-      assert.match(path.basename(replacement.targetSessionFile!), /^piui-import-.*\.jsonl$/)
-    } finally {
-      await session?.dispose()
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it("keeps a live checkpoint while an extension settles message_end", async () => {
-    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-live-settlement-"))
-    let session: RealPiSession | undefined
-    let release!: () => void
-    try {
-      const opened = await openOfflineSession(cwd, {
-        provider: "piui-faux-live-settlement",
-        api: "piui-faux-live-settlement",
-        models: [{ id: "live-1", contextWindow: 4096, maxTokens: 256 }],
-      }, {
-        compaction: { enabled: false },
-        retry: { enabled: false },
-      }, api => [api.fauxAssistantMessage("settled answer")])
-      session = opened.session
-      await session.initializeExtensions()
-
-      const runner = (session as unknown as {
-        runtime: { session: { _extensionRunner?: { emitMessageEnd: (event: unknown) => Promise<unknown> } } }
-      }).runtime.session._extensionRunner
-      assert.ok(runner)
-      const originalEmitMessageEnd = runner.emitMessageEnd.bind(runner)
-      let markBlocked!: () => void
-      const blocked = new Promise<void>(resolve => { markBlocked = resolve })
-      const gate = new Promise<void>(resolve => { release = resolve })
-      runner.emitMessageEnd = async event => {
-        const message = event && typeof event === "object" && "message" in event
-          ? (event as { message?: { role?: unknown } }).message
-          : undefined
-        if (message?.role === "user") {
-          markBlocked()
-          await gate
-        }
-        return originalEmitMessageEnd(event)
-      }
-
-      const prompt = session.prompt("hold user settlement")
-      await blocked
-      const during = session.getBranchPage(undefined, 100, 32 * 1024 * 1024)
-      assert.equal(during.items.some(entry => nativeRole(entry) === "user"), false)
-      assert.equal(during.checkpoint?.liveMessage?.phase, "streaming")
-      const live = during.checkpoint?.liveMessage?.message
-      assert.ok(live && typeof live === "object" && !Array.isArray(live))
-      assert.equal(live.role, "user")
-
-      release()
-      await prompt
-      const settled = session.getBranchPage(undefined, 100, 32 * 1024 * 1024)
-      assert.equal(settled.checkpoint?.liveMessage, undefined)
-      assert.ok(settled.items.some(entry => nativeRole(entry) === "user"))
-      assert.ok(settled.items.some(entry => nativeRole(entry) === "assistant"))
-      const latest = session.getBranchPage(undefined, 1, 32 * 1024 * 1024)
-      assert.ok(latest.beforeCursor)
-      assert.ok(latest.checkpoint)
-      const older = session.getBranchPage(latest.beforeCursor, 1, 32 * 1024 * 1024)
-      assert.equal(older.checkpoint, undefined)
-      await session.sendCustomMessage("fixture.custom", [{ type: "text", text: "custom" }], { display: true })
-      assert.equal(session.getBranchPage(undefined, 100, 32 * 1024 * 1024).checkpoint?.liveMessage, undefined)
-    } finally {
-      release?.()
-      await session?.dispose()
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it("samples the native streaming message while a message_start extension is blocked", async () => {
-    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-live-start-"))
-    let session: RealPiSession | undefined
-    let release!: () => void
-    try {
-      const opened = await openOfflineSession(cwd, {
-        provider: "piui-faux-live-start",
-        api: "piui-faux-live-start",
-        models: [{ id: "live-start-1", contextWindow: 4096, maxTokens: 256 }],
-      }, {
-        compaction: { enabled: false },
-        retry: { enabled: false },
-      }, api => [api.fauxAssistantMessage("answer")])
-      session = opened.session
-      await session.initializeExtensions()
-      const runner = (session as unknown as {
-        runtime: { session: { _extensionRunner?: { emit: (event: { type?: string }) => Promise<unknown> } } }
-      }).runtime.session._extensionRunner
-      assert.ok(runner)
-      const originalEmit = runner.emit.bind(runner)
-      let markBlocked!: () => void
-      const blocked = new Promise<void>(resolve => { markBlocked = resolve })
-      const gate = new Promise<void>(resolve => { release = resolve })
-      let held = false
-      runner.emit = async event => {
-        if (!held && event.type === "message_start") {
-          held = true
-          markBlocked()
-          await gate
-        }
-        return originalEmit(event)
-      }
-      const eventLiveIds: string[] = []
-      const off = session.onPiEvent((event, meta) => {
-        if (event && typeof event === "object" && !Array.isArray(event) && event.type === "message_start" && meta.liveMessage) {
-          eventLiveIds.push(meta.liveMessage.id)
-        }
-      })
-
-      const prompt = session.prompt("blocked start")
-      await blocked
-      const during = session.getBranchPage(undefined, 100, 32 * 1024 * 1024)
-      const provisionalId = during.checkpoint?.liveMessage?.id
-      assert.ok(provisionalId)
-      const provisional = during.checkpoint?.liveMessage?.message
-      assert.ok(provisional && typeof provisional === "object" && !Array.isArray(provisional))
-      assert.equal(provisional.role, "user")
-
-      release()
-      await prompt
-      off()
-      assert.equal(eventLiveIds[0], provisionalId)
-    } finally {
-      release?.()
-      await session?.dispose()
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it("keeps the live id while a message_update extension is blocked", async () => {
-    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-live-update-"))
-    let session: RealPiSession | undefined
-    let release!: () => void
-    try {
-      const answer = "streaming answer ".repeat(20)
-      const opened = await openOfflineSession(cwd, {
-        provider: "piui-faux-live-update",
-        api: "piui-faux-live-update",
-        models: [{ id: "live-update-1", contextWindow: 4096, maxTokens: 256 }],
-        tokensPerSecond: 200,
-        tokenSize: { min: 1, max: 1 },
-      }, {
-        compaction: { enabled: false },
-        retry: { enabled: false },
-      }, api => [api.fauxAssistantMessage(answer)])
-      session = opened.session
-      await session.initializeExtensions()
-      const runner = (session as unknown as {
-        runtime: { session: { _extensionRunner?: { emit: (event: { type?: string }) => Promise<unknown> } } }
-      }).runtime.session._extensionRunner
-      assert.ok(runner)
-      const originalEmit = runner.emit.bind(runner)
-      let markBlocked!: () => void
-      const blocked = new Promise<void>(resolve => { markBlocked = resolve })
-      const gate = new Promise<void>(resolve => { release = resolve })
-      let held = false
-      runner.emit = async event => {
-        if (!held && event.type === "message_update") {
-          held = true
-          markBlocked()
-          await gate
-        }
-        return originalEmit(event)
-      }
-      let assistantStartId: string | undefined
-      let assistantUpdateId: string | undefined
-      const off = session.onPiEvent((event, meta) => {
-        if (!event || typeof event !== "object" || Array.isArray(event)) return
-        const message = event.message
-        if (!message || typeof message !== "object" || Array.isArray(message) || message.role !== "assistant") return
-        if (event.type === "message_start") assistantStartId = meta.liveMessage?.id
-        if (event.type === "message_update") assistantUpdateId = meta.liveMessage?.id
-      })
-
-      const prompt = session.prompt("blocked update")
-      await blocked
-      const during = session.getBranchPage(undefined, 100, 32 * 1024 * 1024)
-      const provisionalId = during.checkpoint?.liveMessage?.id
-      assert.ok(assistantStartId)
-      assert.equal(provisionalId, assistantStartId)
-      assert.ok((during.checkpoint?.liveMessage?.revision ?? 0) > 1)
-
-      release()
-      await prompt
-      off()
-      assert.equal(assistantUpdateId, assistantStartId)
-    } finally {
-      release?.()
-      await session?.dispose()
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it("keeps steer and follow-up in independent native queues during a streamed turn", async () => {
-    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-control-"))
-    const slowText = "streaming content ".repeat(12)
-    let session: RealPiSession | undefined
-    try {
-      const opened = await openOfflineSession(cwd, {
-        provider: "piui-faux-control",
-        api: "piui-faux-control",
-        models: [{ id: "control-1", contextWindow: 4096, maxTokens: 256 }],
-        tokensPerSecond: 200,
-        tokenSize: { min: 1, max: 1 },
-      }, {
-        compaction: { enabled: false },
-        retry: { enabled: false },
-        steeringMode: "all",
-        followUpMode: "all",
-      }, api => [
-        api.fauxAssistantMessage(slowText),
-        api.fauxAssistantMessage("steering handled"),
-        api.fauxAssistantMessage("follow-up handled"),
-      ])
-      session = opened.session
-      const nativeEvents: Array<Record<string, unknown>> = []
-      let resolvePartial!: () => void
-      const partialStarted = new Promise<void>(resolve => { resolvePartial = resolve })
-      const offNative = session.onPiEvent(event => {
-        if (!event || typeof event !== "object" || Array.isArray(event)) return
-        nativeEvents.push(event)
-        if (event.type !== "message_update") return
-        const message = event.message
-        if (!message || typeof message !== "object" || Array.isArray(message)) return
-        const text = nativeContentText(message.content)
-        return text.length > 0 && text.length < slowText.length
-          ? resolvePartial()
-          : undefined
-      })
-
-      const prompt = session.prompt("initial")
-      await partialStarted
-      const livePage = session.getBranchPage(undefined, 100, 32 * 1024 * 1024)
-      const liveMessage = livePage.checkpoint?.liveMessage?.message
-      assert.ok(liveMessage && typeof liveMessage === "object" && !Array.isArray(liveMessage))
-      assert.equal(liveMessage.role, "assistant")
-      assert.ok(nativeContentText(liveMessage.content).length > 0)
-      assert.ok(nativeContentText(liveMessage.content).length < slowText.length)
-      await session.steer("steer now")
-      await session.followUp("follow up later")
-      assert.deepEqual((session.getState().queue as AnyRecord).steering, ["steer now"])
-      assert.deepEqual((session.getState().queue as AnyRecord).followUp, ["follow up later"])
-
-      await prompt
-      offNative()
-      assert.equal(opened.faux.state.callCount, 3)
-      assert.equal(opened.faux.getPendingResponseCount(), 0)
-      assert.deepEqual((session.getState().queue as AnyRecord).steering, [])
-      assert.deepEqual((session.getState().queue as AnyRecord).followUp, [])
-      const answers = allEntries(session)
-        .filter(entry => entry.type === "message" && nativeRole(entry) === "assistant")
-        .map(nativeMessageText)
-      assert.deepEqual(answers, [slowText, "steering handled", "follow-up handled"])
-      assert.ok(nativeEvents.some(event => event.type === "message_update" && "message" in event))
-    } finally {
-      await session?.dispose()
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it("reports native auto-retry phases and the final result", async () => {
-    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-retry-"))
-    let session: RealPiSession | undefined
-    try {
-      const opened = await openOfflineSession(cwd, {
-        provider: "piui-faux-retry",
-        api: "piui-faux-retry",
-        models: [{ id: "retry-1", contextWindow: 4096, maxTokens: 256 }],
-      }, {
-        compaction: { enabled: false },
-        retry: { enabled: true, maxRetries: 1, baseDelayMs: 10 },
-      }, api => [
-        api.fauxAssistantMessage("", { stopReason: "error", errorMessage: "503 overloaded" }),
-        api.fauxAssistantMessage("retry recovered"),
-      ])
-      session = opened.session
-      const phases: string[] = []
-      const off = session.onPiEvent(() => {
-        const phase = String((session.getState().retry as AnyRecord).phase)
-        if (phases.at(-1) !== phase) phases.push(phase)
-      })
-      await session.prompt("retry this")
-      off()
-
-      const waiting = phases.indexOf("waiting")
-      const running = phases.indexOf("running")
-      const finished = phases.indexOf("finished")
-      assert.ok(waiting >= 0)
-      assert.ok(running > waiting)
-      assert.ok(finished > running)
-      const retry = session.getState().retry as AnyRecord
-      assert.equal(retry.phase, "finished")
-      if (retry.phase !== "finished") assert.fail("retry did not finish")
-      assert.equal(retry.success, true)
-      assert.equal(retry.attempt, 1)
-      assert.equal(opened.faux.state.callCount, 2)
-      assert.equal(opened.faux.getPendingResponseCount(), 0)
-    } finally {
-      await session?.dispose()
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it("returns and persists a native abandoned-branch summary", async () => {
-    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-branch-summary-"))
-    let session: RealPiSession | undefined
-    try {
-      const opened = await openOfflineSession(cwd, {
-        provider: "piui-faux-branch-summary",
-        api: "piui-faux-branch-summary",
-        models: [{ id: "branch-1", contextWindow: 4096, maxTokens: 256 }],
-      }, {
-        compaction: { enabled: false },
-        retry: { enabled: true, maxRetries: 1, baseDelayMs: 10 },
-        branchSummary: { reserveTokens: 32 },
-      }, api => [
-        api.fauxAssistantMessage("first answer"),
-        api.fauxAssistantMessage("second answer"),
-        api.fauxAssistantMessage("", { stopReason: "error", errorMessage: "503 overloaded" }),
-        api.fauxAssistantMessage("abandoned branch summary"),
-      ])
-      session = opened.session
-      const operationPhases: string[] = []
-      const off = session.onPiEvent(() => {
-        const operation = (session.getState().compaction as AnyRecord).operation as AnyRecord
-        if (operation.type === "branchSummary" && operationPhases.at(-1) !== operation.phase) {
-          operationPhases.push(operation.phase)
-        }
-      })
-      await session.prompt("one")
-      await session.prompt("two")
-      const target = allEntries(session)
-        .filter(entry => entry.type === "message" && nativeRole(entry) === "assistant")
-        .at(0)
-      assert.ok(target)
-
-      const navigation = await session.navigateTree(String(target.id), {
-        summarize: true,
-        customInstructions: "Preserve the parser decision",
-      })
-      off()
-      assert.equal(navigation.cancelled, false)
-      assert.ok(!navigation.aborted)
-      const summaryEntry = navigation.summaryEntry as AnyRecord | null
-      assert.equal(summaryEntry?.type, "branch_summary")
-      if (summaryEntry?.type !== "branch_summary") assert.fail("branch summary was not persisted")
-      assert.match(String(summaryEntry.summary), /abandoned branch summary/)
-      assert.ok(allEntries(session).some(entry => entry.type === "branch_summary"))
-      assert.ok(operationPhases.includes("retrying"))
-      assert.equal(opened.faux.state.callCount, 4)
-    } finally {
-      await session?.dispose()
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it("returns and persists a manual compaction result with custom instructions", async () => {
-    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-compact-"))
-    let session: RealPiSession | undefined
-    try {
-      const opened = await openOfflineSession(cwd, {
-        provider: "piui-faux-compact",
-        api: "piui-faux-compact",
-        models: [{ id: "compact-1", contextWindow: 4096, maxTokens: 256 }],
-      }, {
-        compaction: { enabled: false, reserveTokens: 32, keepRecentTokens: 1 },
-        retry: { enabled: false, maxRetries: 0, baseDelayMs: 1 },
-      }, api => [
-        api.fauxAssistantMessage("first answer"),
-        api.fauxAssistantMessage("second answer"),
-        api.fauxAssistantMessage("history summary"),
-        api.fauxAssistantMessage("turn prefix summary"),
-      ])
-      session = opened.session
-      await session.prompt("one")
-      await session.prompt("two")
-      const lastAssistant = allEntries(session)
-        .filter(entry => entry.type === "message" && nativeRole(entry) === "assistant")
-        .at(-1)
-      assert.ok(lastAssistant)
-
-      const compacted = await session.compact("preserve test checkpoints") as AnyRecord
-      assert.equal(compacted.status, "completed")
-      if (compacted.status !== "completed") assert.fail("manual compaction was skipped")
-      assert.match(compacted.result.summary, /history summary/)
-      assert.match(compacted.result.summary, /turn prefix summary/)
-      assert.equal(compacted.result.firstKeptEntryId, String(lastAssistant.id))
-      assert.ok(compacted.result.tokensBefore > 0)
-      assert.ok((compacted.result.estimatedTokensAfter ?? 0) > 0)
-      assert.equal(opened.faux.state.callCount, 4)
-      assert.equal(opened.faux.getPendingResponseCount(), 0)
-      assert.ok(allEntries(session).some(entry => entry.type === "compaction"))
-    } finally {
-      await session?.dispose()
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it("resolves and persists scoped models through the native resolver", async () => {
-    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-scoped-"))
-    let session: RealPiSession | undefined
-    try {
-      const opened = await openOfflineSession(cwd, {
-        provider: "piui-faux-scoped",
-        api: "piui-faux-scoped",
-        models: [{ id: "scoped-1", contextWindow: 4096, maxTokens: 256 }],
-      }, {
-        compaction: { enabled: false },
-        retry: { enabled: false },
-      }, api => [api.fauxAssistantMessage("scope answer")])
-      session = opened.session
-
-      // 精确 pattern 解析为 ScopedModel 并持久化到 session state
-      const diagnostics = await session.setScopedModels(["piui-faux-scoped/scoped-1"]) as AnyRecord[] | undefined
-      assert.ok(Array.isArray(diagnostics))
-      assert.deepEqual(
-        ((session.getState() as AnyRecord).scopedModels as AnyRecord[])?.map(item => item.model?.id),
-        ["scoped-1"],
-      )
-
-      // glob pattern（provider/*）同样解析
-      await session.setScopedModels(["piui-faux-scoped/*"])
-      assert.deepEqual(
-        ((session.getState() as AnyRecord).scopedModels as AnyRecord[])?.map(item => item.model?.id),
-        ["scoped-1"],
-      )
-
-      // 无法匹配的 pattern 返回 no-match 诊断，而不是抛错
-      const noMatch = await session.setScopedModels(["piui-faux-scoped/missing"]) as AnyRecord[] | undefined
-      assert.ok(Array.isArray(noMatch))
-      assert.ok(noMatch?.some((item: AnyRecord) => item.code === "no-match"))
-
-      // 清空范围
-      await session.setScopedModels([])
-      assert.deepEqual((session.getState() as AnyRecord).scopedModels, [])
-    } finally {
-      await session?.dispose()
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it("exports the native session as HTML and JSONL", async () => {
-    const cwd = mkdtempSync(path.join(tmpdir(), "piui-real-export-"))
-    const sessionDir = path.join(cwd, "sessions")
-    mkdirSync(sessionDir)
-    let session: RealPiSession | undefined
-    try {
-      const { fauxProvider, fauxAssistantMessage, InMemoryCredentialStore } = await loadPiAiFromPinnedSdk()
-      const faux = fauxProvider({ provider: "piui-faux-export", api: "piui-faux-export", models: [{ id: "export-1", contextWindow: 4096, maxTokens: 256 }] })
-      faux.setResponses([fauxAssistantMessage("exported answer")])
-      const modelRuntime = await ModelRuntime.create({
-        credentials: new InMemoryCredentialStore(),
-        modelsPath: null,
-        allowModelNetwork: false,
-      })
-      modelRuntime.registerNativeProvider(faux.provider)
-      await modelRuntime.refresh({ allowNetwork: false })
-      const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } })
-      const resourceLoader = emptyResourceLoader()
-      const createRuntime: CreateAgentSessionRuntimeFactory = async ({ sessionManager, sessionStartEvent }) => {
-        const services: AgentSessionServices = {
-          cwd,
-          agentDir: cwd,
-          modelRuntime,
-          settingsManager,
-          resourceLoader,
-          diagnostics: [],
-        }
-        return {
-          ...(await createAgentSessionFromServices({
-            services,
-            sessionManager,
-            sessionStartEvent,
-            model: faux.getModel(),
-            thinkingLevel: "off",
-            noTools: "all",
-          })),
-          services,
-          diagnostics: [],
-        }
-      }
-      session = await RealPiSession.open(cwd, undefined, {
-        agentDir: cwd,
-        createRuntime,
-        createSessionManager: runtimeCwd => SessionManager.create(runtimeCwd, sessionDir),
-      })
-      await session.prompt("export me")
-      assert.ok(session.getSessionFile())
-      // 磁盘 session 导出 JSONL：落盘且含对话
-      const jsonlPath = path.join(cwd, "export.jsonl")
-      await session.exportJsonl(jsonlPath)
-      assert.equal(existsSync(jsonlPath), true)
-      assert.match(readFileSync(jsonlPath, "utf8"), /exported answer/)
-      // 磁盘 session 导出 HTML：返回路径且落盘；SDK 把会话数据 base64 嵌入模板
-      const htmlPath = path.join(cwd, "export.html")
-      const htmlResult = await session.exportHtml(htmlPath) as AnyRecord | undefined
-      assert.equal(htmlResult?.path, htmlPath)
-      assert.equal(existsSync(htmlPath), true)
-      const html = readFileSync(htmlPath, "utf8")
-      assert.match(html, /<!DOCTYPE html>/)
-      const embedded = html.match(/id="session-data"[^>]*>([A-Za-z0-9+/=]+)</)
-      assert.ok(embedded, "html export should embed base64 session data")
-      assert.match(Buffer.from(embedded[1], "base64").toString("utf8"), /exported answer/)
-    } finally {
-      await session?.dispose()
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  })
-
-  it("exercises the native session command surface end to end", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "piui-conformance-"))
-    const cwd = path.join(root, "workspace")
-    const agentDir = path.join(root, "agent")
-    mkdirSync(cwd)
-    mkdirSync(agentDir)
-    let session: RealPiSession | undefined
-    try {
-      session = await RealPiSession.open(cwd, undefined, { agentDir })
-      await session.appendCustomEntry("conformance", { text: "hello" })
-
-      // state.get：核心状态结构
-      const state = session.getState() as AnyRecord
-      assert.equal(typeof state.sessionId, "string")
-      assert.equal(typeof state.thinkingLevel, "string")
-      assert.equal(typeof state.messageCount, "number")
-
-      // state.get：stats/context usage 来自 SDK getSessionStats/getContextUsage
-      assert.ok(state.sessionStats && typeof state.sessionStats === "object" && !Array.isArray(state.sessionStats))
-      assert.equal(typeof state.sessionStats.sessionId, "string")
-      assert.equal(typeof state.sessionStats.totalMessages, "number")
-      assert.equal(typeof state.sessionStats.cost, "number")
-      const statsTokens = state.sessionStats.tokens as AnyRecord
-      assert.equal(typeof statsTokens.input, "number")
-      assert.equal(typeof statsTokens.output, "number")
-      assert.equal(typeof statsTokens.cacheRead, "number")
-      assert.equal(typeof statsTokens.cacheWrite, "number")
-      assert.equal(typeof statsTokens.total, "number")
-      // 无 provider 时 contextUsage 可为 null 或估算结构，两种都接受
-      if (state.contextUsage != null) {
-        assert.ok(typeof state.contextUsage === "object" && !Array.isArray(state.contextUsage))
-        assert.equal(typeof state.contextUsage.contextWindow, "number")
-      }
-
-      // registry.get：tools/commands/extensions/handlers 数组
-      const registry = session.getRegistry()
-      assert.ok(Array.isArray(registry.tools))
-      assert.ok(Array.isArray(registry.commands))
-      assert.ok(Array.isArray(registry.extensions))
-      assert.ok(Array.isArray(registry.eventHandlers))
-
-      // skills.list
-      assert.ok(Array.isArray(session.listSkills()))
-
-      // prompts.list：模板结构（name/description/content/filePath）
-      const prompts = session.listPrompts() as AnyRecord[]
-      assert.ok(Array.isArray(prompts))
-      for (const prompt of prompts) {
-        assert.equal(typeof prompt.name, "string")
-        assert.equal(typeof prompt.description, "string")
-        assert.equal(typeof prompt.content, "string")
-        assert.equal(typeof prompt.filePath, "string")
-      }
-
-      // agentsFiles.list：AGENTS/CLAUDE 上下文（path/content 结构）
-      const agentsFiles = session.listAgentsFiles() as AnyRecord[]
-      assert.ok(Array.isArray(agentsFiles))
-      for (const file of agentsFiles) {
-        assert.equal(typeof file.path, "string")
-        assert.equal(typeof file.content, "string")
-      }
-
-      // entries.get / branch.get / tree.get：分页与树结构
-      const entries = session.getEntriesPage(undefined, 100, 1_000_000) as AnyRecord
-      assert.ok(Array.isArray(entries.items))
-      assert.ok(entries.items.some((item: AnyRecord) => item.type === "custom"))
-      assert.ok(entries.head)
-      const branch = session.getBranchPage(undefined, 100, 1_000_000) as AnyRecord
-      assert.ok(Array.isArray(branch.items))
-      const tree = session.getTree() as AnyRecord[]
-      assert.ok(Array.isArray(tree))
-
-      // 状态类命令：name / auto-compaction / auto-retry
-      // （thinking level 依赖模型支持，无 provider 时保持 off，不断言）
-      await session.setSessionName("conformance-session")
-      assert.equal((session.getState() as AnyRecord).sessionName, "conformance-session")
-      await session.setAutoCompaction(false)
-      await session.setAutoRetry(false)
-      const updated = session.getState() as AnyRecord
-      assert.equal(updated.autoCompactionEnabled, false)
-      assert.equal(updated.autoRetryEnabled, false)
-
-      // exportJsonl：落盘
-      const jsonlPath = path.join(root, "out.jsonl")
-      await session.exportJsonl(jsonlPath)
-      assert.equal(existsSync(jsonlPath), true)
-      assert.match(readFileSync(jsonlPath, "utf8"), /conformance/)
     } finally {
       await session?.dispose()
       rmSync(root, { recursive: true, force: true })
     }
   })
 })
-
-function findTreeLabel(
-  roots: AnyRecord[],
-  entryId: string,
-): string | undefined {
-  const node = findTreeNode(roots, entryId)
-  return typeof node?.label === "string" ? node.label : undefined
-}
-
-function findTreeNode(
-  roots: AnyRecord[],
-  entryId: string,
-): AnyRecord | undefined {
-  const stack = [...roots]
-  while (stack.length > 0) {
-    const node = stack.pop()!
-    const entry = node.entry
-    if (entry && typeof entry === "object" && !Array.isArray(entry) && entry.id === entryId) {
-      return node
-    }
-    if (Array.isArray(node.children)) {
-      stack.push(...node.children.filter(
-        (child): child is typeof node => Boolean(child) && typeof child === "object" && !Array.isArray(child),
-      ))
-    }
-  }
-  return undefined
-}
-
-function nativeRole(entry: AnyRecord): unknown {
-  const message = entry.message
-  return message && typeof message === "object" && !Array.isArray(message) ? message.role : undefined
-}
-
-function nativeMessage(entry: AnyRecord | undefined): Record<string, unknown> {
-  const message = entry?.message
-  return message && typeof message === "object" && !Array.isArray(message) ? message : {}
-}
-
-function nativeMessageText(entry: AnyRecord): string {
-  return nativeContentText(nativeMessage(entry).content)
-}
-
-function nativeContentText(content: unknown): string {
-  if (typeof content === "string") return content
-  if (!Array.isArray(content)) return ""
-  return content.flatMap(block =>
-    block && typeof block === "object" && !Array.isArray(block) && block.type === "text" && typeof block.text === "string"
-      ? [block.text]
-      : []
-  ).join("")
-}
-
-type ModelRuntimeOptions = NonNullable<Parameters<typeof ModelRuntime.create>[0]>
-type NativeProvider = Parameters<ModelRuntime["registerNativeProvider"]>[0]
-
-interface PiAiTestApi {
-  InMemoryCredentialStore: new () => NonNullable<ModelRuntimeOptions["credentials"]>
-  fauxAssistantMessage(text: string, options?: { stopReason?: string; errorMessage?: string }): unknown
-  fauxProvider(options: {
-    provider: string
-    api: string
-    models?: Array<{ id: string; contextWindow?: number; maxTokens?: number }>
-    tokensPerSecond?: number
-    tokenSize?: { min?: number; max?: number }
-  }): {
-    provider: NativeProvider
-    state: { callCount: number }
-    setResponses(responses: unknown[]): void
-    getModel(): ReturnType<ModelRuntime["getModel"]> & object
-    getPendingResponseCount(): number
-  }
-}
-
-async function openOfflineSession(
-  cwd: string,
-  fauxOptions: Parameters<PiAiTestApi["fauxProvider"]>[0],
-  settings: Parameters<typeof SettingsManager.inMemory>[0],
-  responses: (api: PiAiTestApi) => unknown[],
-): Promise<{
-  session: RealPiSession
-  faux: ReturnType<PiAiTestApi["fauxProvider"]>
-}> {
-  const api = await loadPiAiFromPinnedSdk()
-  const faux = api.fauxProvider(fauxOptions)
-  faux.setResponses(responses(api))
-  const modelRuntime = await ModelRuntime.create({
-    credentials: new api.InMemoryCredentialStore(),
-    modelsPath: null,
-    allowModelNetwork: false,
-  })
-  modelRuntime.registerNativeProvider(faux.provider)
-  await modelRuntime.refresh({ allowNetwork: false })
-  const settingsManager = SettingsManager.inMemory(settings)
-  const resourceLoader = emptyResourceLoader()
-  const createRuntime: CreateAgentSessionRuntimeFactory = async ({ sessionManager, sessionStartEvent }) => {
-    const services: AgentSessionServices = {
-      cwd,
-      agentDir: cwd,
-      modelRuntime,
-      settingsManager,
-      resourceLoader,
-      diagnostics: [],
-    }
-    return {
-      ...(await createAgentSessionFromServices({
-        services,
-        sessionManager,
-        sessionStartEvent,
-        model: faux.getModel(),
-        thinkingLevel: "off",
-        noTools: "all",
-      })),
-      services,
-      diagnostics: [],
-    }
-  }
-  return {
-    session: await RealPiSession.open(cwd, undefined, {
-      agentDir: cwd,
-      createRuntime,
-      createSessionManager: runtimeCwd => SessionManager.inMemory(runtimeCwd),
-    }),
-    faux,
-  }
-}
-
-async function loadPiAiFromPinnedSdk(): Promise<PiAiTestApi> {
-  let piAiEntry: string
-  try {
-    piAiEntry = import.meta.resolve("@earendil-works/pi-ai")
-  } catch {
-    const codingAgentEntry = import.meta.resolve("@earendil-works/pi-coding-agent")
-    piAiEntry = new URL("../node_modules/@earendil-works/pi-ai/dist/index.js", codingAgentEntry).href
-  }
-  return await import(piAiEntry) as unknown as PiAiTestApi
-}
-
-function emptyResourceLoader(): ResourceLoader {
-  const extensions = { extensions: [], errors: [], runtime: createExtensionRuntime() }
-  return {
-    getExtensions: () => extensions,
-    getSkills: () => ({ skills: [], diagnostics: [] }),
-    getPrompts: () => ({ prompts: [], diagnostics: [] }),
-    getThemes: () => ({ themes: [], diagnostics: [] }),
-    getAgentsFiles: () => ({ agentsFiles: [] }),
-    getSystemPrompt: () => "",
-    getAppendSystemPrompt: () => [],
-    extendResources: () => {},
-    reload: async () => {},
-  }
-}

@@ -23,6 +23,7 @@ import { layoutStore, useLayoutStore } from '../../store/layoutStore'
 import { usePiSessionTitle } from '../../pi/hooks/index.js'
 import { renamePiSession, loadPiSessions } from '../../pi/controllers/index.js'
 import { uiErrorHandler } from '../../utils'
+import { sessionKeyToServerId } from '../../utils/sessionKey'
 import { useChatViewport, canUseSplitPane } from './chatViewport'
 import { usePiCapabilities } from '../../pi/capabilities'
 import {
@@ -104,7 +105,7 @@ export function PaneHeader({
     }
     try {
       await renamePiSession(sessionId, editValue.trim())
-      void loadPiSessions().catch(() => undefined)
+      void loadPiSessions(undefined, sessionKeyToServerId(sessionId)).catch(() => undefined)
     } catch (e) {
       uiErrorHandler('rename session', e)
     } finally {
@@ -130,10 +131,7 @@ export function PaneHeader({
     (e: React.PointerEvent<HTMLDivElement>) => {
       const target = e.target as HTMLElement
       if (target.closest('button, input')) return
-      startInternalDrag(
-        e,
-        { kind: 'pane', paneId },
-      )
+      startInternalDrag(e, { kind: 'pane', paneId })
     },
     [paneId],
   )
@@ -144,8 +142,8 @@ export function PaneHeader({
       setIsDragOver(
         Boolean(
           active?.payload.kind === 'pane' &&
-            active.payload.paneId !== paneId &&
-            isPointInsideElement(active.current, headerRef.current),
+          active.payload.paneId !== paneId &&
+          isPointInsideElement(active.current, headerRef.current),
         ),
       )
     })
@@ -265,7 +263,7 @@ export function PaneHeader({
         </div>
 
         {isFocused && (
-        <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
             {showSidebarButton && onOpenSidebar && (
               <IconButton
                 size="sm"
@@ -319,7 +317,10 @@ export function PaneHeader({
         )}
       </div>
 
-      <div data-chat-header-shadow className="absolute top-full left-0 right-0 h-8 bg-gradient-to-b from-bg-100 to-transparent pointer-events-none z-10" />
+      <div
+        data-chat-header-shadow
+        className="absolute top-full left-0 right-0 h-8 bg-bg-100 pointer-events-none z-10 [-webkit-mask-image:linear-gradient(to_bottom,black,transparent)] [mask-image:linear-gradient(to_bottom,black,transparent)]"
+      />
     </div>
   )
 }

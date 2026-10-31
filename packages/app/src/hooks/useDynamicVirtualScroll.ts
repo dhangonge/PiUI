@@ -166,34 +166,37 @@ export function useDynamicVirtualScroll({
     setScrollTop(e.currentTarget.scrollTop)
   }, [])
 
-  const measureRef = useCallback((index: number, el: HTMLDivElement | null) => {
-    if (!el) return
-    const h = el.offsetHeight
-    if (h <= 0) return
-    const sourceHeights = pendingHeightsRef.current ?? measuredHeights
-    const current = sourceHeights[index] || getEstimatedHeight(index)
-    const next = h
-    if (Math.abs(current - next) > 0.5) {
-      // lineCount can grow after mount (async diff loads, expanding folds);
-      // grow the buffer so measured rows beyond the old length aren't dropped.
-      const nextHeights = new Float32Array(Math.max(sourceHeights.length, index + 1))
-      nextHeights.set(sourceHeights)
-      nextHeights[index] = next
-      pendingHeightsRef.current = nextHeights
-      if (!pendingMeasureRef.current) {
-        pendingMeasureRef.current = true
-        measureFrameRef.current = requestAnimationFrame(() => {
-          measureFrameRef.current = null
-          pendingMeasureRef.current = false
-          const bufferedHeights = pendingHeightsRef.current
-          pendingHeightsRef.current = null
-          if (bufferedHeights) {
-            setMeasuredHeights(bufferedHeights)
-          }
-        })
+  const measureRef = useCallback(
+    (index: number, el: HTMLDivElement | null) => {
+      if (!el) return
+      const h = el.offsetHeight
+      if (h <= 0) return
+      const sourceHeights = pendingHeightsRef.current ?? measuredHeights
+      const current = sourceHeights[index] || getEstimatedHeight(index)
+      const next = h
+      if (Math.abs(current - next) > 0.5) {
+        // lineCount can grow after mount (async diff loads, expanding folds);
+        // grow the buffer so measured rows beyond the old length aren't dropped.
+        const nextHeights = new Float32Array(Math.max(sourceHeights.length, index + 1))
+        nextHeights.set(sourceHeights)
+        nextHeights[index] = next
+        pendingHeightsRef.current = nextHeights
+        if (!pendingMeasureRef.current) {
+          pendingMeasureRef.current = true
+          measureFrameRef.current = requestAnimationFrame(() => {
+            measureFrameRef.current = null
+            pendingMeasureRef.current = false
+            const bufferedHeights = pendingHeightsRef.current
+            pendingHeightsRef.current = null
+            if (bufferedHeights) {
+              setMeasuredHeights(bufferedHeights)
+            }
+          })
+        }
       }
-    }
-  }, [getEstimatedHeight, measuredHeights])
+    },
+    [getEstimatedHeight, measuredHeights],
+  )
 
   return {
     containerRef,

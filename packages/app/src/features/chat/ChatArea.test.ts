@@ -3,7 +3,6 @@ import {
   buildChatPages,
   buildExpandedPageSelection,
   buildPageRenderSegments,
-  buildProcessTimeline,
   buildTurnDurationMap,
   buildTurnLatestAssistantIdSet,
   computeAnchorRestoreScrollDelta,
@@ -12,15 +11,18 @@ import {
   expandSelectionWithPageKeys,
   findMessageSequenceOffset,
   reconcileStableChatPages,
-  reuseProcessTimelineItems,
   seedMeasuredPageHeightsFromPreviousPages,
 } from './chatPageModel'
 import { getStreamingHotIndexes, getTimelineRowYClass, mergeVirtualRangeIndexes } from './chatAreaUtils'
-import { buildVisibleTimelineEntries, getVisibleTimelineForkTargetId, clearVisibleTimelineMergeCache } from './chatAreaVisibility'
+import { FAR_FROM_BOTTOM_PX, NEAR_BOTTOM_PX, resolveAtBottom } from './virtual/atBottomHysteresis'
+import {
+  buildVisibleTimelineEntries,
+  getVisibleTimelineForkTargetId,
+  clearVisibleTimelineMergeCache,
+} from './chatAreaVisibility'
+import { createAssistantItem, createTextBlock, createToolCall, createUserItem } from '../../test/chatTimelineFixtures'
 import type { Message, MessageError, Part } from '../../types/message'
-import type { SessionMessageEntry } from '@earendil-works/pi-coding-agent'
-import type { ToolCall, ToolResultMessage } from '@earendil-works/pi-ai'
-import type { PiAssistantMessageItem, PiUserMessageItem } from '../../pi/domain/index.js'
+import type { PiAssistantMessageItem } from '../../pi/domain/index.js'
 
 function createUserMessage(id: string, created: number): Message {
   return {
@@ -68,80 +70,6 @@ function createAssistantMessage(
     parts,
     isStreaming: false,
   }
-}
-
-// ─── Pi timeline fixtures ───────────────────────────────────────
-
-function rawEntry(id: string, timestamp = 1): SessionMessageEntry {
-  return {
-    type: 'message',
-    id,
-    parentId: null,
-    timestamp: new Date(timestamp).toISOString(),
-    message: { role: 'user', content: '', timestamp },
-  }
-}
-
-function createUserItem(id: string, created: number): PiUserMessageItem {
-  return {
-    kind: 'user_message',
-    entryId: id,
-    timestamp: created,
-    rawEntry: rawEntry(id, created),
-    message: { role: 'user', content: '', timestamp: created },
-    blocks: [],
-  }
-}
-
-function toolResultFor(call: ToolCall, timestamp = 2): ToolResultMessage {
-  return {
-    role: 'toolResult',
-    toolCallId: call.id,
-    toolName: call.name,
-    content: [{ type: 'text', text: '/workspace' }],
-    isError: false,
-    timestamp,
-  }
-}
-
-function createAssistantItem(
-  id: string,
-  blocks: PiAssistantMessageItem['blocks'],
-  created = 1,
-  completed?: number,
-  error?: { stopReason: 'error' | 'aborted'; errorMessage: string },
-): PiAssistantMessageItem {
-  const toolCalls = blocks.filter((b): b is ToolCall => b.type === 'toolCall')
-  const toolResults: Record<string, ToolResultMessage> = {}
-  for (const call of toolCalls) toolResults[call.id] = toolResultFor(call)
-  return {
-    kind: 'assistant_message',
-    entryId: id,
-    timestamp: created,
-    rawEntry: rawEntry(id, created),
-    message: {
-      role: 'assistant',
-      content: blocks,
-      api: 'anthropic-messages',
-      provider: 'anthropic',
-      model: 'model-1',
-      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-      stopReason: error?.stopReason ?? 'stop',
-      errorMessage: error?.errorMessage,
-      timestamp: completed ?? created,
-    },
-    blocks,
-    toolResults,
-    isStreaming: completed == null ? undefined : undefined,
-  }
-}
-
-function createToolCall(id: string): ToolCall {
-  return { type: 'toolCall', id: `call-${id}`, name: 'bash', arguments: { command: 'pwd' } }
-}
-
-function createTextBlock(text: string): Extract<PiAssistantMessageItem['blocks'][number], { type: 'text' }> {
-  return { type: 'text', text }
 }
 
 function createTextPart(id: string, messageID: string, text: string): Part {
@@ -215,13 +143,10 @@ describe('buildVisibleTimelineEntries', () => {
   })
 
   it('keeps aborted assistant messages that already have renderable blocks', () => {
-    const item = createAssistantItem(
-      'assistant-aborted-with-tool',
-      [createToolCall('tool-1')],
-      1,
-      2,
-      { stopReason: 'aborted', errorMessage: 'Aborted' },
-    )
+    const item = createAssistantItem('assistant-aborted-with-tool', [createToolCall('tool-1')], 1, 2, {
+      stopReason: 'aborted',
+      errorMessage: 'Aborted',
+    })
 
     const entries = buildVisibleTimelineEntries([item])
 
@@ -358,357 +283,6 @@ describe('getTimelineRowYClass', () => {
   })
 })
 
-describe('reuseProcessTimelineItems', () => {
-  const hasProcess = (item: PiAssistantMessageItem) =>
-    item.blocks.some(b => b.type === 'toolCall' || b.type === 'thinking')
-  const hasFinal = (item: PiAssistantMessageItem) => item.blocks.some(b => b.type === 'text')
-
-  it('keeps historical timeline item identity when only the last message streams', () => {
-    const items = [
-      { ...createUserItem('user-1', 1), blocks: [{ type: 'text' as const, text: 'prompt' }] },
-      createAssistantItem('assistant-1', [createTextBlock('old')], 2, 3),
-      { ...createUserItem('user-2', 4), blocks: [{ type: 'text' as const, text: 'next' }] },
-      createAssistantItem('assistant-2', [createTextBlock('hello')], 5),
-    ]
-
-    const first = buildProcessTimeline(items, {
-      turnDurationMap: new Map([['assistant-1', 1000]]),
-      sessionIsStreaming: true,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-    })
-
-    const streamingItem = items[items.length - 1] as PiAssistantMessageItem
-    const nextItems = [
-      ...items.slice(0, -1),
-      { ...streamingItem, blocks: [createTextBlock('hello world')] },
-    ]
-    const rebuilt = buildProcessTimeline(nextItems, {
-      turnDurationMap: new Map([['assistant-1', 1000]]),
-      sessionIsStreaming: true,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-    })
-    const reused = reuseProcessTimelineItems(first, rebuilt)
-
-    expect(reused.length).toBe(first.length)
-    for (let i = 0; i < reused.length - 1; i++) {
-      expect(reused[i]).toBe(first[i])
-    }
-    expect(reused.at(-1)).not.toBe(first.at(-1))
-    expect(reused.at(-1)?.key).toBe(first.at(-1)?.key)
-  })
-
-  it('returns the previous array reference when nothing changed', () => {
-    const items = [
-      { ...createUserItem('user-1', 1), blocks: [{ type: 'text' as const, text: 'prompt' }] },
-      createAssistantItem('assistant-1', [createTextBlock('done')], 2, 3),
-    ]
-    const first = buildProcessTimeline(items, {
-      turnDurationMap: new Map([['assistant-1', 500]]),
-      sessionIsStreaming: false,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-    })
-    const rebuilt = buildProcessTimeline(items, {
-      turnDurationMap: new Map([['assistant-1', 500]]),
-      sessionIsStreaming: false,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-    })
-    expect(reuseProcessTimelineItems(first, rebuilt)).toBe(first)
-  })
-})
-
-describe('buildProcessTimeline', () => {
-  const hasProcess = (item: PiAssistantMessageItem) =>
-    item.blocks.some(b => b.type === 'toolCall' || b.type === 'thinking')
-  const hasFinal = (item: PiAssistantMessageItem) =>
-    item.blocks.some(b => b.type === 'text')
-
-  it('delays empty Working shell until entry-ready gate opens', () => {
-    const items = [createUserItem('user-1', 1000)]
-    // ChatArea 会在 user 入场完成后再额外 delay，再把 id 放进 ready 集合
-    const ready = new Set<string>()
-    const early = buildProcessTimeline(items, {
-      turnDurationMap: new Map(),
-      sessionIsStreaming: true,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-      isUserEntryReady: id => ready.has(id),
-    })
-    expect(early).toHaveLength(1)
-    expect(early[0]).toMatchObject({ kind: 'message', key: 'user-1' })
-
-    ready.add('user-1')
-    const after = buildProcessTimeline(items, {
-      turnDurationMap: new Map(),
-      sessionIsStreaming: true,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-      isUserEntryReady: id => ready.has(id),
-    })
-    expect(after).toHaveLength(2)
-    expect(after[1]).toMatchObject({
-      kind: 'process-shell',
-      isActive: true,
-      startedAt: 1000,
-      children: [],
-    })
-  })
-
-  it('shows Working shell immediately once any assistant content exists', () => {
-    const mid: PiAssistantMessageItem = { ...createAssistantItem('assistant-1', [createToolCall('tool-1')], 1001), isStreaming: true }
-    const items = [createUserItem('user-1', 1000), mid]
-    const timeline = buildProcessTimeline(items, {
-      turnDurationMap: new Map(),
-      sessionIsStreaming: true,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-      // 用户入场未完成也不拦：有 assistant 就立刻挂
-      isUserEntryReady: () => false,
-    })
-    const shell = timeline.find(item => item.kind === 'process-shell')
-    expect(shell).toBeTruthy()
-    if (shell?.kind === 'process-shell') {
-      expect(shell.children.map(c => c.item.entryId)).toEqual(['assistant-1'])
-    }
-  })
-
-  it('drops empty Working shell after abort when no assistant ever arrived', () => {
-    const items = [createUserItem('user-1', 1000)]
-    const timeline = buildProcessTimeline(items, {
-      turnDurationMap: new Map(),
-      sessionIsStreaming: false,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-    })
-
-    expect(timeline).toHaveLength(1)
-    expect(timeline[0]).toMatchObject({ kind: 'message', key: 'user-1' })
-  })
-
-  it('keeps only the earliest pending Working shell when a later user is queued', () => {
-    // 第一轮仍 live，第二轮 user 已发出 → 只挂 user-1 的 Working，user-2 暂不挂空壳
-    const mid: PiAssistantMessageItem = { ...createAssistantItem('assistant-1', [createToolCall('tool-1')], 1001), isStreaming: true }
-    const items = [
-      createUserItem('user-1', 1000),
-      mid,
-      createUserItem('user-2', 2000),
-    ]
-    const timeline = buildProcessTimeline(items, {
-      turnDurationMap: new Map(),
-      sessionIsStreaming: true,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-      isUserEntryReady: id => id === 'user-2',
-    })
-
-    const shells = timeline.filter(item => item.kind === 'process-shell')
-    expect(shells).toHaveLength(1)
-    expect(shells[0]).toMatchObject({
-      kind: 'process-shell',
-      isActive: true,
-      userMessageId: 'user-1',
-    })
-    if (shells[0].kind === 'process-shell') {
-      expect(shells[0].children.map(c => c.item.entryId)).toEqual(['assistant-1'])
-    }
-    // user-2 只作为消息出现，不挂 Working
-    expect(timeline.some(i => i.kind === 'message' && i.key === 'user-2')).toBe(true)
-  })
-
-  it('only arms the earliest empty turn when multiple users are pending', () => {
-    // 快速连发：两轮都还没 assistant → 只在最早 user 下挂 Working
-    const items = [
-      createUserItem('user-1', 1000),
-      createUserItem('user-2', 1500),
-    ]
-    const ready = new Set(['user-1', 'user-2'])
-    const timeline = buildProcessTimeline(items, {
-      turnDurationMap: new Map(),
-      sessionIsStreaming: true,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-      isUserEntryReady: id => ready.has(id),
-    })
-
-    const shells = timeline.filter(item => item.kind === 'process-shell')
-    expect(shells).toHaveLength(1)
-    expect(shells[0]).toMatchObject({
-      kind: 'process-shell',
-      isActive: true,
-      userMessageId: 'user-1',
-      children: [],
-    })
-    expect(timeline.filter(i => i.kind === 'message').map(i => i.key)).toEqual(['user-1', 'user-2'])
-  })
-
-  it('closes earlier turn when later turn gets SSE live, even if earlier still looks live', () => {
-    // 关键竞态：前轮 completed 常晚到；后轮 live 一到，前轮立刻 Worked
-    const earlierStillFlaggedLive: PiAssistantMessageItem = {
-      ...createAssistantItem('assistant-1', [createToolCall('tool-1')], 1001),
-      isStreaming: true,
-    }
-    const laterLive: PiAssistantMessageItem = {
-      ...createAssistantItem('assistant-2', [createToolCall('tool-2')], 2001),
-      isStreaming: true,
-    }
-    const items = [
-      createUserItem('user-1', 1000),
-      earlierStillFlaggedLive,
-      createUserItem('user-2', 2000),
-      laterLive,
-    ]
-    const timeline = buildProcessTimeline(items, {
-      turnDurationMap: new Map(),
-      sessionIsStreaming: true,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-    })
-
-    const shells = timeline.filter(item => item.kind === 'process-shell')
-    expect(shells).toHaveLength(2)
-    expect(shells[0]).toMatchObject({ userMessageId: 'user-1', isActive: false })
-    expect(shells[1]).toMatchObject({ userMessageId: 'user-2', isActive: true })
-  })
-
-  it('does not reopen a completed turn when session becomes busy before the next user lands', () => {
-    // 发送瞬间：streaming 已 true，新 user 还没进列表 → 已 Worked 的回合不能闪回 Working
-    const settled = createAssistantItem(
-      'assistant-1',
-      [createToolCall('tool-1'), createTextBlock('done')],
-      1001,
-      1500,
-    )
-    const items = [createUserItem('user-1', 1000), settled]
-    const timeline = buildProcessTimeline(items, {
-      turnDurationMap: new Map([['assistant-1', 500]]),
-      sessionIsStreaming: true,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-    })
-    expect(timeline.find(item => item.kind === 'process-shell')).toMatchObject({
-      kind: 'process-shell',
-      isActive: false,
-    })
-  })
-
-  it('settles shell with process inside and final answer outside', () => {
-    const processOnly = createAssistantItem(
-      'assistant-1',
-      [createToolCall('tool-1')],
-      1001,
-      1200,
-    )
-    const finalAnswer = createAssistantItem(
-      'assistant-2',
-      [createToolCall('tool-2'), createTextBlock('done')],
-      1201,
-      1500,
-    )
-    const items = [createUserItem('user-1', 1000), processOnly, finalAnswer]
-    const durationMap = buildTurnDurationMap(items, items)
-    const timeline = buildProcessTimeline(items, {
-      turnDurationMap: durationMap,
-      sessionIsStreaming: false,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-    })
-
-    const shell = timeline.find(item => item.kind === 'process-shell')
-    expect(shell).toBeTruthy()
-    if (shell?.kind !== 'process-shell') return
-    expect(shell.isActive).toBe(false)
-    expect(shell.durationMs).toBe(500)
-    expect(shell.children.map(c => [c.item.entryId, c.processContentScope])).toEqual([
-      ['assistant-1', 'inline'],
-      ['assistant-2', 'process'],
-    ])
-    expect(shell.finalItem?.entryId).toBe('assistant-2')
-  })
-
-  it('does not reopen an aborted empty turn when streaming starts before the next user lands', () => {
-    // 用户发了第一条、打断、再发：streaming 先 true，新 user 未入列，最新仍是空的 user-1
-    // 若 isUserEntryReady(user-1) 仍 true（上次 Working 闸门残留），旧空壳会瞬间闪一下
-    const items = [createUserItem('user-1', 1000)]
-    const staleReady = new Set(['user-1'])
-    const timeline = buildProcessTimeline(items, {
-      turnDurationMap: new Map(),
-      sessionIsStreaming: true,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-      // 模拟 idle 后闸门已清空：旧 user 不应再 armed
-      isUserEntryReady: id => staleReady.has(id) && false,
-    })
-    expect(timeline).toHaveLength(1)
-    expect(timeline[0]).toMatchObject({ kind: 'message', key: 'user-1' })
-
-    // 闸门未清空时的错误形态（回归文档）：ready 仍在 → 会挂空壳
-    const leaked = buildProcessTimeline(items, {
-      turnDurationMap: new Map(),
-      sessionIsStreaming: true,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-      isUserEntryReady: id => staleReady.has(id),
-    })
-    // 有 ready 时仍允许挂（当前发送周期内合法）；关键是 ChatArea idle 时清空 ready
-    // 这里只断言：无 ready 时绝不挂
-    expect(timeline.some(i => i.kind === 'process-shell')).toBe(false)
-    expect(leaked.some(i => i.kind === 'process-shell')).toBe(true)
-  })
-
-  it('does not wrap pure final answer turns in an empty process shell', () => {
-    const plain = createAssistantItem(
-      'assistant-1',
-      [createTextBlock('hello')],
-      1001,
-      1100,
-    )
-    const items = [createUserItem('user-1', 1000), plain]
-    const timeline = buildProcessTimeline(items, {
-      turnDurationMap: new Map([['assistant-1', 100]]),
-      sessionIsStreaming: false,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-    })
-
-    expect(timeline.map(item => item.kind)).toEqual(['message', 'message'])
-    expect(timeline[1]).toMatchObject({ kind: 'message', key: 'process-shell:user-1' })
-  })
-
-  it('keeps a pure text response row key stable when streaming settles', () => {
-    const liveUser = createUserItem('live-user', 1000)
-    const streaming = {
-      ...createAssistantItem('assistant-1', [createTextBlock('hello')], 1001),
-      isStreaming: true,
-    }
-    const active = buildProcessTimeline([liveUser, streaming], {
-      turnDurationMap: new Map(),
-      sessionIsStreaming: true,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-    })
-    const persistedUser = {
-      ...createUserItem('user-1', 1000),
-      renderKey: liveUser.entryId,
-    }
-    const completed = buildProcessTimeline([
-      persistedUser,
-      createAssistantItem('assistant-1', [createTextBlock('hello')], 1001, 1200),
-    ], {
-      turnDurationMap: new Map([['assistant-1', 200]]),
-      sessionIsStreaming: false,
-      messageHasProcess: hasProcess,
-      messageHasFinal: hasFinal,
-    })
-
-    expect(active.map(item => item.key)).toEqual(['live-user', 'process-shell:live-user'])
-    expect(completed.map(item => item.key)).toEqual(active.map(item => item.key))
-    expect(completed[1]).toMatchObject({ kind: 'message', item: { entryId: 'assistant-1' } })
-  })
-})
-
 describe('buildChatPages', () => {
   it('chunks messages into render-order pages while preserving assistant groups', () => {
     const messages = [
@@ -758,14 +332,12 @@ describe('buildChatPages', () => {
 
   it('counts blank lines before fenced code independently of indentation', () => {
     const suffix = '```ts\nconst value = 1\n```'
-    const withoutIndent = createAssistantMessage(
-      'assistant-plain-lines',
-      [createTextPart('text-plain-lines', 'assistant-plain-lines', `${'\n'.repeat(100)}${suffix}`)],
-    )
-    const withIndent = createAssistantMessage(
-      'assistant-indented-lines',
-      [createTextPart('text-indented-lines', 'assistant-indented-lines', `${' \n'.repeat(100)}${suffix}`)],
-    )
+    const withoutIndent = createAssistantMessage('assistant-plain-lines', [
+      createTextPart('text-plain-lines', 'assistant-plain-lines', `${'\n'.repeat(100)}${suffix}`),
+    ])
+    const withIndent = createAssistantMessage('assistant-indented-lines', [
+      createTextPart('text-indented-lines', 'assistant-indented-lines', `${' \n'.repeat(100)}${suffix}`),
+    ])
 
     expect(estimateMessageRenderWeight(withIndent)).toBe(estimateMessageRenderWeight(withoutIndent))
   })
@@ -1172,7 +744,6 @@ describe('reconcileStableChatPages', () => {
       expect(nextPages[index]).toBe(currentPages[index])
     }
   })
-
 })
 
 describe('computeAnchorRestoreScrollDelta', () => {
@@ -1182,5 +753,34 @@ describe('computeAnchorRestoreScrollDelta', () => {
 
   it('returns a negative value when the anchor drifted upward', () => {
     expect(computeAnchorRestoreScrollDelta(180, 24)).toBe(-156)
+  })
+})
+
+describe('resolveAtBottom（输入区收起滞回）', () => {
+  // 底部附近来回蹭：dist 从 0 蹭到 20px 再回 0，信号不能翻转
+  it('keeps the previous state when the distance stays inside the hysteresis band', () => {
+    let atBottom = true
+    atBottom = resolveAtBottom(atBottom, 20, true)
+    expect(atBottom).toBe(true)
+    atBottom = resolveAtBottom(atBottom, 0, true)
+    expect(atBottom).toBe(true)
+  })
+
+  it('reports away from bottom only past the far threshold, and returns below the near threshold', () => {
+    const far = resolveAtBottom(true, FAR_FROM_BOTTOM_PX + 12, true)
+    expect(far).toBe(false)
+    expect(resolveAtBottom(far, 30, true)).toBe(false)
+    expect(resolveAtBottom(far, NEAR_BOTTOM_PX - 5, true)).toBe(true)
+  })
+
+  it('treats the bottom-following state as at bottom regardless of distance', () => {
+    // userScrolled=false：程序滚动 / 流式长高那一帧 dist 越线也不算离底
+    expect(resolveAtBottom(false, 500, false)).toBe(true)
+    expect(resolveAtBottom(true, 500, false)).toBe(true)
+  })
+
+  it('accepts custom thresholds', () => {
+    expect(resolveAtBottom(true, 20, true, { nearPx: 10, farPx: 16 })).toBe(false)
+    expect(resolveAtBottom(false, 20, true, { nearPx: 24, farPx: 48 })).toBe(true)
   })
 })

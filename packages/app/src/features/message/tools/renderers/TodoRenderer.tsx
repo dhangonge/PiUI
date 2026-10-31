@@ -10,7 +10,7 @@ import { chevronClass, MessageExpandPanel, useMessageExpandRender } from '../../
 // Types
 // ============================================
 
-interface TodoItem {
+export interface TodoItem {
   id: string
   content: string
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
@@ -35,16 +35,28 @@ export function TodoRenderer({ execution, partKey }: ToolRendererProps) {
 // TodoList Component
 // ============================================
 
-function TodoList({ todos, stateKey }: { todos: TodoItem[]; stateKey: string }) {
+/** Shared presentation for tool results and the live extension todo widget. */
+export function TodoList({
+  todos,
+  stateKey,
+  counts,
+}: {
+  todos: TodoItem[]
+  stateKey: string
+  counts?: { completed: number; total: number }
+}) {
   const { t } = useTranslation('message')
   const [collapsed, setCollapsed] = useUiDisclosureState(stateKey, false)
   const shouldRenderBody = useMessageExpandRender(!collapsed)
   const { rootRef, headerRef, withScrollLock } = useDisclosureScrollLock()
-  const completed = todos.filter(t => t.status === 'completed').length
-  const total = todos.length
+  const completed = counts?.completed ?? todos.filter(t => t.status === 'completed').length
+  const total = counts?.total ?? todos.length
 
   return (
-    <div ref={rootRef} className="border border-border-200/50 rounded-md overflow-hidden bg-bg-100 text-[length:var(--fs-sm)]">
+    <div
+      ref={rootRef}
+      className="border border-border-200/50 rounded-md overflow-hidden bg-bg-100 text-[length:var(--fs-sm)]"
+    >
       {/* Header */}
       <div
         ref={headerRef}
@@ -62,27 +74,34 @@ function TodoList({ todos, stateKey }: { todos: TodoItem[]; stateKey: string }) 
 
       {/* List */}
       <MessageExpandPanel open={!collapsed} innerClassName="overflow-hidden">
-        {shouldRenderBody && (
-          <div className="divide-y divide-border-200/30">
-            {todos.map(todo => (
-              <div
-                key={todo.id}
-                className={`flex items-center gap-2 px-3 py-2 ${
-                  todo.status === 'completed' ? 'text-text-500' : 'text-text-200'
-                }`}
-              >
-                <span className="shrink-0 flex items-center">{getTodoIcon(todo.status)}</span>
-                <span className={todo.status === 'completed' ? 'line-through' : ''}>{todo.content}</span>
-                {todo.priority === 'high' && todo.status !== 'completed' && (
-                  <span className="text-[length:var(--fs-xxs)] text-warning-100 bg-warning-100/10 px-1 rounded ml-auto shrink-0">
-                    !
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {shouldRenderBody && <TodoRows todos={todos} />}
       </MessageExpandPanel>
+    </div>
+  )
+}
+
+/** Shared row list; also used by the live todo widget card. */
+export function TodoRows({ todos, compact = false }: { todos: TodoItem[]; compact?: boolean }) {
+  return (
+    <div className="divide-y divide-border-200/30">
+      {todos.map(todo => (
+        <div
+          key={todo.id}
+          className={`flex items-center gap-2 px-3 ${compact ? 'py-1.5' : 'py-2'} ${
+            todo.status === 'completed' ? 'text-text-500' : 'text-text-200'
+          }`}
+        >
+          <span className="shrink-0 flex items-center">{getTodoIcon(todo.status)}</span>
+          <span className={`min-w-0 break-words ${todo.status === 'completed' ? 'line-through' : ''}`}>
+            {todo.content}
+          </span>
+          {todo.priority === 'high' && todo.status !== 'completed' && (
+            <span className="text-[length:var(--fs-xxs)] text-warning-100 bg-warning-100/10 px-1 rounded ml-auto shrink-0">
+              !
+            </span>
+          )}
+        </div>
+      ))}
     </div>
   )
 }

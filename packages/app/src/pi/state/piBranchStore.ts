@@ -71,6 +71,13 @@ class PiBranchStore {
     this.notify()
   }
 
+  clearServer(serverId: string): void {
+    for (const id of this.bySessionId.keys()) {
+      if (id.startsWith(`${serverId}::`)) this.bySessionId.delete(id)
+    }
+    this.notify()
+  }
+
   clearAll(): void {
     this.bySessionId.clear()
     this.notify()

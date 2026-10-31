@@ -1,10 +1,19 @@
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTerminalSessionRestore } from './useTerminalSessionRestore'
 import { layoutStore } from '../store/layoutStore'
 
-const { activeServerSnapshot, listHostTerminalsMock, onServerChangeMock, resolveWorkspacePathMock, serverChangeCallback, serverHealthSnapshot, serverSnapshot, uiErrorHandlerMock } = vi.hoisted(() => ({
+const {
+  activeServerSnapshot,
+  listHostTerminalsMock,
+  onServerChangeMock,
+  resolveWorkspacePathMock,
+  serverChangeCallback,
+  serverHealthSnapshot,
+  serverSnapshot,
+  uiErrorHandlerMock,
+} = vi.hoisted(() => ({
   activeServerSnapshot: { id: 'test', url: '', token: '' },
   listHostTerminalsMock: vi.fn(),
   onServerChangeMock: vi.fn<(callback: () => void) => () => void>(() => () => {}),
@@ -25,8 +34,13 @@ vi.mock('../store/serverStore', () => ({
     subscribe: vi.fn(() => () => {}),
     getServers: vi.fn(() => serverSnapshot),
     getActiveServer: vi.fn(() => activeServerSnapshot),
+    getActiveServerId: vi.fn(() => activeServerSnapshot.id),
     getAllHealth: vi.fn(() => serverHealthSnapshot),
   },
+}))
+
+vi.mock('../pi/eventStream', () => ({
+  getPiEventStream: () => ({ connectWorkspace: vi.fn(), disconnectWorkspace: vi.fn() }),
 }))
 
 vi.mock('../pi/workspaces', () => ({
@@ -63,9 +77,9 @@ describe('useTerminalSessionRestore', () => {
     expect(result.current.normalizedDirectory).toBe('C:/p')
 
     await waitFor(() => expect(result.current.isRestoring).toBe(false))
-    expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/p')
+    expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/p', undefined, 'test')
     const tabs = layoutStore.getState().panelTabs.filter(tab => tab.type === 'terminal')
-    expect(tabs.map(tab => tab.id)).toEqual(['t-1'])
+    expect(tabs.map(tab => tab.id)).toEqual(['test::t-1'])
   })
 
   it('re-syncs when the workspace changes', async () => {
@@ -74,12 +88,12 @@ describe('useTerminalSessionRestore', () => {
       initialProps: { directory: 'C:/one' },
     })
 
-    await waitFor(() => expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/one'))
+    await waitFor(() => expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/one', undefined, 'test'))
 
     listHostTerminalsMock.mockResolvedValue({ terminals: [] })
     rerender({ directory: 'C:/two' })
 
-    await waitFor(() => expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/two'))
+    await waitFor(() => expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/two', undefined, 'test'))
     expect(layoutStore.getState().panelTabs.filter(tab => tab.type === 'terminal')).toEqual([])
   })
 
@@ -88,9 +102,9 @@ describe('useTerminalSessionRestore', () => {
     const { result } = renderHook(() => useTerminalSessionRestore(undefined))
 
     await waitFor(() => expect(result.current.isRestoring).toBe(false))
-    expect(resolveWorkspacePathMock).toHaveBeenCalledWith(undefined)
+    expect(resolveWorkspacePathMock).toHaveBeenCalledWith(undefined, 'test')
     expect(result.current.workspacePath).toBe('C:/startup')
-    expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/startup')
+    expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/startup', undefined, 'test')
     expect(layoutStore.getState().panelTabs.filter(tab => tab.type === 'terminal')).toEqual([])
   })
 
@@ -106,15 +120,17 @@ describe('useTerminalSessionRestore', () => {
     listHostTerminalsMock.mockResolvedValue({ terminals: [] })
     const { result } = renderHook(() => useTerminalSessionRestore('C:/p'))
 
-    await waitFor(() => expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/p'))
+    await waitFor(() => expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/p', undefined, 'test'))
     expect(layoutStore.getState().panelTabs.filter(tab => tab.type === 'terminal')).toEqual([])
 
     // 恢复失败会静默退避重试（500+1000+2000+4000+8000ms），终败才上报
     vi.useFakeTimers()
     try {
       listHostTerminalsMock.mockRejectedValue(new Error('boom'))
-      serverChangeCallback.current?.()
-      await vi.advanceTimersByTimeAsync(20_000)
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('piui:terminals-changed', { detail: { workspacePath: 'C:/p' } }))
+        await vi.advanceTimersByTimeAsync(20_000)
+      })
       expect(uiErrorHandlerMock).toHaveBeenCalled()
       expect(result.current.isRestoring).toBe(false)
     } finally {
@@ -127,7 +143,7 @@ describe('useTerminalSessionRestore', () => {
     listHostTerminalsMock.mockReturnValue(
       new Promise(resolve => {
         resolveRequest = resolve
-      })
+      }),
     )
     const syncSpy = vi.spyOn(layoutStore, 'syncTerminalSessions')
 
@@ -147,6 +163,6 @@ describe('useTerminalSessionRestore', () => {
     })
 
     await waitFor(() => expect(result.current.isRestoring).toBe(false))
-    expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/p')
+    expect(listHostTerminalsMock).toHaveBeenCalledWith('C:/p', undefined, 'test')
   })
 })

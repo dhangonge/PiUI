@@ -389,9 +389,19 @@ export const OutlineIndex = memo(function OutlineIndex({
   if (entries.length < 2) return null
 
   return interaction.outlineInteraction === 'touch' ? (
-    <TouchFisheye entries={entries} onSelect={onScrollToMessageId} visual={visual} ownerVisibleIndex={ownerVisibleIndex} />
+    <TouchFisheye
+      entries={entries}
+      onSelect={onScrollToMessageId}
+      visual={visual}
+      ownerVisibleIndex={ownerVisibleIndex}
+    />
   ) : (
-    <PointerFisheye entries={entries} onSelect={onScrollToMessageId} visual={visual} ownerVisibleIndex={ownerVisibleIndex} />
+    <PointerFisheye
+      entries={entries}
+      onSelect={onScrollToMessageId}
+      visual={visual}
+      ownerVisibleIndex={ownerVisibleIndex}
+    />
   )
 })
 
@@ -464,33 +474,39 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
     repaintTicks(getTicks(), -1, ownerVisibleIndexRef.current)
   }, [setZoneActive, getTicks])
 
-  const onTickEnter = useCallback((e: React.MouseEvent) => {
-    hoveringRef.current = true
-    setZoneActive(true)
-    const rail = railRef.current
-    if (!rail) return
-    cursorYRef.current = e.clientY
-    ticksRef.current = getTicks()
-    activateRail(rail, e.clientY)
-    const next = nearestIndexFromY(entriesRef.current.length, e.clientY, railCenterRef.current, fisheyeRef.current)
-    focusIdxRef.current = next
-    repaintTicks(ticksRef.current, next, ownerVisibleIndexRef.current)
-  }, [setZoneActive, getTicks])
-
-  const onZoneMove = useCallback((e: React.MouseEvent) => {
-    const rail = railRef.current
-    if (!rail) return
-    cursorYRef.current = e.clientY
-    // 主线程每帧唯一的工作：写一个变量。其余 transform 交给合成线程。
-    rail.style.setProperty('--oi-cursor-y', String(e.clientY))
-    // 算最近焦点（纯数值），仅在变化时重新着色（paint-only，非每帧）
-    const next = nearestIndexFromY(entriesRef.current.length, e.clientY, railCenterRef.current, fisheyeRef.current)
-    if (next !== focusIdxRef.current) {
-      if (ticksRef.current.length === 0) ticksRef.current = getTicks()
+  const onTickEnter = useCallback(
+    (e: React.MouseEvent) => {
+      hoveringRef.current = true
+      setZoneActive(true)
+      const rail = railRef.current
+      if (!rail) return
+      cursorYRef.current = e.clientY
+      ticksRef.current = getTicks()
+      activateRail(rail, e.clientY)
+      const next = nearestIndexFromY(entriesRef.current.length, e.clientY, railCenterRef.current, fisheyeRef.current)
       focusIdxRef.current = next
       repaintTicks(ticksRef.current, next, ownerVisibleIndexRef.current)
-    }
-  }, [getTicks])
+    },
+    [setZoneActive, getTicks],
+  )
+
+  const onZoneMove = useCallback(
+    (e: React.MouseEvent) => {
+      const rail = railRef.current
+      if (!rail) return
+      cursorYRef.current = e.clientY
+      // 主线程每帧唯一的工作：写一个变量。其余 transform 交给合成线程。
+      rail.style.setProperty('--oi-cursor-y', String(e.clientY))
+      // 算最近焦点（纯数值），仅在变化时重新着色（paint-only，非每帧）
+      const next = nearestIndexFromY(entriesRef.current.length, e.clientY, railCenterRef.current, fisheyeRef.current)
+      if (next !== focusIdxRef.current) {
+        if (ticksRef.current.length === 0) ticksRef.current = getTicks()
+        focusIdxRef.current = next
+        repaintTicks(ticksRef.current, next, ownerVisibleIndexRef.current)
+      }
+    },
+    [getTicks],
+  )
   const onZoneLeave = useCallback(() => deactivate(), [deactivate])
 
   const onZoneClick = useCallback(() => {
@@ -526,7 +542,11 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
         }}
         onMouseEnter={onTickEnter}
       >
-        <div ref={railRef} className="pointer-events-none flex flex-col items-end" style={buildRailVars(entries.length, visual.fisheye)}>
+        <div
+          ref={railRef}
+          className="pointer-events-none flex flex-col items-end"
+          style={buildRailVars(entries.length, visual.fisheye)}
+        >
           <TickRail entries={entries} visual={visual} visibleIndex={ownerVisibleIndex} />
         </div>
       </div>
@@ -590,8 +610,7 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
 
   const vibrate = useCallback(() => {
     try {
-      const bridge = (window as unknown as { __piui_android?: { vibrate?: (ms: number) => void } })
-        .__piui_android
+      const bridge = (window as unknown as { __piui_android?: { vibrate?: (ms: number) => void } }).__piui_android
       if (bridge?.vibrate) {
         bridge.vibrate(8)
         return
@@ -656,7 +675,12 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
       // 流式更新会清 prevFocusRef：用最近触点位置现算，保证松手即跳转
       let idx = prevFocusRef.current
       if (idx < 0) {
-        idx = nearestIndexFromY(entriesRef.current.length, lastTouchYRef.current, railCenterRef.current, fisheyeRef.current)
+        idx = nearestIndexFromY(
+          entriesRef.current.length,
+          lastTouchYRef.current,
+          railCenterRef.current,
+          fisheyeRef.current,
+        )
       }
       const cur = entriesRef.current
       if (idx >= 0 && idx < cur.length) onSelectRef.current(cur[idx].messageId)
@@ -708,7 +732,7 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
         className="absolute top-1/2 -translate-y-1/2 z-[15] flex flex-col items-end select-none"
         style={{ right: `${visual.rightOffset}px`, ...buildRailVars(entries.length, visual.fisheye) }}
       >
-          <TickRail entries={entries} visual={visual} visibleIndex={ownerVisibleIndex} />
+        <TickRail entries={entries} visual={visual} visibleIndex={ownerVisibleIndex} />
       </div>
     </div>
   )

@@ -1,5 +1,14 @@
 /* eslint-disable react-refresh/only-export-components -- exports viewport helpers, hooks, and provider */
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react'
 import { useSyncExternalStoreWithSelector } from 'use-sync-external-store/shim/with-selector'
 import { useInputCapabilities } from '../../hooks/useInputCapabilities'
 import { themeStore } from '../../store/themeStore'

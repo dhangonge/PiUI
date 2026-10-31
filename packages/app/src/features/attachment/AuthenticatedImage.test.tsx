@@ -26,6 +26,9 @@ describe('AuthenticatedImage', () => {
     render(<AuthenticatedImage src="/api/protected-image" requiresAuth alt="result" />)
 
     await waitFor(() => expect(screen.getByAltText('result')).toHaveAttribute('src', 'blob:authenticated-image'))
-    expect(piFetch).toHaveBeenCalledWith('/api/protected-image', expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(piFetch).toHaveBeenCalledWith(
+      '/api/protected-image',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
   })
 })

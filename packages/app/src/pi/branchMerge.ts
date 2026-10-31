@@ -48,17 +48,14 @@ export function mergeLatestBranchPage(current: PiBranchPage | null, latest: PiBr
     // branch.get can win the race with persistence. Keep the live checkpoint
     // until a matching persisted entry is visible, otherwise the message
     // briefly disappears before returning with a different React key.
-    const checkpoint = liveMessage && !persistedMatch && !page.checkpoint?.liveMessage
-      ? current.checkpoint
-      : page.checkpoint
+    const checkpoint =
+      liveMessage && !persistedMatch && !page.checkpoint?.liveMessage ? current.checkpoint : page.checkpoint
 
     if (checkpoint === page.checkpoint && Object.keys(stableEntryIds).length === 0) return page
     return {
       ...page,
       checkpoint,
-      client: Object.keys(stableEntryIds).length > 0
-        ? { ...page.client, stableEntryIds }
-        : page.client,
+      client: Object.keys(stableEntryIds).length > 0 ? { ...page.client, stableEntryIds } : page.client,
     }
   }
 

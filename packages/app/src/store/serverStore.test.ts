@@ -141,10 +141,7 @@ describe('serverStore health check', () => {
   })
 
   it('checks the local default server same-origin even with a legacy stored url', async () => {
-    localStorage.setItem(
-      'piui-servers',
-      JSON.stringify([{ id: 'local', name: 'Local', url: '/api', isDefault: true }]),
-    )
+    localStorage.setItem('piui-servers', JSON.stringify([{ id: 'local', name: 'Local', url: '/api', isDefault: true }]))
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1 }))
     const { serverStore } = await import('./serverStore')
 
@@ -163,7 +160,9 @@ describe('serverStore health check', () => {
   })
 
   it('marks a valid PiUI health response as online', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1, piSdkVersion: '0.81.1' }))
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1, piSdkVersion: '0.81.1' }),
+    )
     const { serverStore } = await import('./serverStore')
 
     const health = await serverStore.checkHealth('local')
@@ -210,7 +209,9 @@ describe('serverStore health check', () => {
     const staleResponse = createDeferred<Response>()
     vi.mocked(fetch)
       .mockImplementationOnce(() => staleResponse.promise)
-      .mockResolvedValueOnce(jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1, piSdkVersion: '0.81.1' }))
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, service: 'piui-server', protocolVersion: 1, piSdkVersion: '0.81.1' }),
+      )
 
     const { serverStore } = await import('./serverStore')
 

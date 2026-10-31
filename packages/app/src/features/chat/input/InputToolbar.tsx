@@ -140,7 +140,7 @@ export function InputToolbar({
     if (items.length === 0) return
 
     const selectedItem = menu.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="true"]')
-    const target = mode === 'first' ? items[0] : mode === 'last' ? items[items.length - 1] : selectedItem ?? items[0]
+    const target = mode === 'first' ? items[0] : mode === 'last' ? items[items.length - 1] : (selectedItem ?? items[0])
     target?.focus()
   }, [])
 
@@ -175,7 +175,12 @@ export function InputToolbar({
   }, [])
 
   const handleMenuKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>, menu: HTMLDivElement | null, onClose: () => void, trigger: HTMLButtonElement | null) => {
+    (
+      event: React.KeyboardEvent<HTMLDivElement>,
+      menu: HTMLDivElement | null,
+      onClose: () => void,
+      trigger: HTMLButtonElement | null,
+    ) => {
       const items = Array.from(menu?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"], button') ?? [])
       if (items.length === 0) {
         if (event.key === 'Escape') {
@@ -365,7 +370,12 @@ export function InputToolbar({
                 role="menu"
                 aria-label={t('inputToolbar.variantMenu')}
                 onKeyDown={event =>
-                  handleMenuKeyDown(event, variantMenuRef.current, () => setVariantMenuOpen(false), variantTriggerRef.current)
+                  handleMenuKeyDown(
+                    event,
+                    variantMenuRef.current,
+                    () => setVariantMenuOpen(false),
+                    variantTriggerRef.current,
+                  )
                 }
               >
                 {variants.map(variant => (
@@ -386,7 +396,10 @@ export function InputToolbar({
           </div>
         </AnimatedPresence>
 
-        <AnimatedPresence show={Boolean(isStreaming && (canSteer || canFollowUp))} className={isCompact ? 'shrink-0' : ''}>
+        <AnimatedPresence
+          show={Boolean(isStreaming && (canSteer || canFollowUp))}
+          className={isCompact ? 'shrink-0' : ''}
+        >
           <div className="relative">
             <button
               type="button"
@@ -432,7 +445,7 @@ export function InputToolbar({
         {/* 停止按钮条件：输入框为空（不可发送）且（压缩中 / 流式中 / 会话活跃）。
             只要输入框有内容（canSend），就显示发送按钮——停止按钮只在
             没有可发送内容时出现（中止压缩/生成）。 */}
-        {(!canSend && (isCompacting || isStreaming || sessionActive)) && !isSending ? (
+        {!canSend && (isCompacting || isStreaming || sessionActive) && !isSending ? (
           <IconButton aria-label={t('inputToolbar.stopGeneration')} variant="solid" onClick={onAbort}>
             <StopIcon />
           </IconButton>

@@ -1,4 +1,16 @@
-import { useState, useRef, useEffect, useCallback, useMemo, useSyncExternalStore, useLayoutEffect, memo, forwardRef, useImperativeHandle } from 'react'
+import {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+  useSyncExternalStore,
+  useLayoutEffect,
+  memo,
+  forwardRef,
+  useImperativeHandle,
+  type ReactNode,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { AttachmentPreview, type Attachment } from '../attachment'
 import {
@@ -18,6 +30,7 @@ import { FloatingActions, CollapsedCapsule } from './input/InputActions'
 import { useMobileCollapse } from './input/useMobileCollapse'
 import { useAttachmentRail } from './input/useAttachmentRail'
 import { useInputHistory } from './input/useInputHistory'
+import { useArgCompletions } from './input/useArgCompletions'
 import {
   TEXT_STYLE,
   bytesToDataUrl,
@@ -35,8 +48,6 @@ import type { FileCapabilities } from '../../types/ui'
 
 type ModelInfo = Model<Api>
 import { usePiCapabilities } from '../../pi/capabilities'
-import { getPiCommandCompletions } from '../../pi/transport/index.js'
-import { apiErrorHandler } from '../../utils'
 import { scrollItemIntoView } from '../../utils/scrollUtils'
 import {
   getDroppedPathsInfo,
@@ -74,19 +85,6 @@ function buildMentionText(path: string): string {
   return `@${path}`
 }
 
-/** 参数补全条目（pi TUI getArgumentCompletions 返回的 AutocompleteItem 序列化形态） */
-interface ArgCompletionItem {
-  value: string
-  label: string
-  description?: string
-}
-
-/** 当前补全上下文：命令名 + 参数起点（补全替换 [argStart, cursor) 区间） */
-interface ArgCompletionContext {
-  commandName: string
-  argStart: number
-}
-
 const TEXTAREA_MIN_HEIGHT = 24
 const TEXTAREA_VERTICAL_CHROME = 24
 const INPUT_TOOLBAR_FALLBACK_HEIGHT = 36
@@ -94,6 +92,8 @@ const INPUT_FOOTER_FALLBACK_HEIGHT = 32
 const COMPOSER_MIN_HEIGHT = 144
 const COMPOSER_DESKTOP_MAX_HEIGHT = 420
 const COMPOSER_COMPACT_MAX_HEIGHT = 320
+// 收起/展开的 opacity 过渡时长（与 wrapper 的 duration-200 对齐，留 20ms 余量）
+const DOCK_FADE_MS = 220
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
@@ -172,6 +172,8 @@ export interface InputBoxProps {
   modelSelectorRef?: React.RefObject<ModelSelectorHandle | null>
   rootPath?: string
   sessionId?: string | null
+  /** Shares composer width and moves with the collapsed input dock. */
+  aboveComposer?: ReactNode
   // Undo/Redo
   revertedText?: string
   revertedAttachments?: Attachment[]
@@ -200,48 +202,52 @@ export interface InputBoxHandle {
   setEditorText: (text: string) => void
 }
 
-const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function InputBoxComponent({
-  paneId,
-  onSend,
-  onAbort,
-  onCommand,
-  onCycleModel,
-  onCycleThinkingLevel,
-  onOpenModelSelector,
-  onNewChat,
-  disabled,
-  isStreaming,
-  sessionActive,
-  isCompacting = false,
-  variants = [],
-  selectedVariant,
-  onVariantChange,
-  supportsImages = false,
-  fileCapabilities: fileCapabilitiesProp,
-  models = [],
-  selectedModelKey = null,
-  onModelChange,
-  modelsLoading = false,
-  modelSelectorRef,
-  rootPath = '',
-  sessionId,
-  revertedText,
-  revertedAttachments,
-  restoreMode = 'replace',
-  canRedo = false,
-  revertSteps = 0,
-  onRedo,
-  onRedoAll,
-  onClearRevert,
-  registerInputBox,
-  isAtBottom = true,
-  showScrollToBottom = false,
-  onScrollToBottom,
-  collapsedPermission,
-  collapsedQuestion,
-  /** Composer text change callback (extension editor state sync) */
-  onTextChange,
-}: InputBoxProps, ref: React.Ref<InputBoxHandle>) {
+const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function InputBoxComponent(
+  {
+    paneId,
+    onSend,
+    onAbort,
+    onCommand,
+    onCycleModel,
+    onCycleThinkingLevel,
+    onOpenModelSelector,
+    onNewChat,
+    disabled,
+    isStreaming,
+    sessionActive,
+    isCompacting = false,
+    variants = [],
+    selectedVariant,
+    onVariantChange,
+    supportsImages = false,
+    fileCapabilities: fileCapabilitiesProp,
+    models = [],
+    selectedModelKey = null,
+    onModelChange,
+    modelsLoading = false,
+    modelSelectorRef,
+    rootPath = '',
+    sessionId,
+    aboveComposer,
+    revertedText,
+    revertedAttachments,
+    restoreMode = 'replace',
+    canRedo = false,
+    revertSteps = 0,
+    onRedo,
+    onRedoAll,
+    onClearRevert,
+    registerInputBox,
+    isAtBottom = true,
+    showScrollToBottom = false,
+    onScrollToBottom,
+    collapsedPermission,
+    collapsedQuestion,
+    /** Composer text change callback (extension editor state sync) */
+    onTextChange,
+  }: InputBoxProps,
+  ref: React.Ref<InputBoxHandle>,
+) {
   const { t } = useTranslation('chat')
   // 合并文件能力：优先用 fileCapabilities，回退到 supportsImages
   const fileCaps: FileCapabilities = useMemo(
@@ -263,9 +269,13 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   const [text, setText] = useState('')
 
   // 扩展 editor 命令接口（set/paste 已由 store 合并为全量文本）
-  useImperativeHandle(ref, () => ({
-    setEditorText: (next: string) => setText(next),
-  }), [])
+  useImperativeHandle(
+    ref,
+    () => ({
+      setEditorText: (next: string) => setText(next),
+    }),
+    [],
+  )
 
   // 文本变化同步（扩展 editor 状态回传）
   useEffect(() => {
@@ -276,13 +286,14 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [deliveryMode, setDeliveryMode] = useState<'steer' | 'followUp'>('followUp')
   const piCapabilities = usePiCapabilities()
-  const effectiveDeliveryMode = deliveryMode === 'steer' && piCapabilities.promptSteer
-    ? 'steer'
-    : piCapabilities.promptFollowUp
-      ? 'followUp'
-      : piCapabilities.promptSteer
-        ? 'steer'
-        : undefined
+  const effectiveDeliveryMode =
+    deliveryMode === 'steer' && piCapabilities.promptSteer
+      ? 'steer'
+      : piCapabilities.promptFollowUp
+        ? 'followUp'
+        : piCapabilities.promptSteer
+          ? 'steer'
+          : undefined
 
   // @ Mention 状态
   const [mentionOpen, setMentionOpen] = useState(false)
@@ -294,24 +305,23 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   const [slashQuery, setSlashQuery] = useState('')
   const [slashStartIndex, setSlashStartIndex] = useState(-1)
 
-  // 命令参数 Tab 补全状态（pi TUI getArgumentCompletions parity）
-  const [argCompletionOpen, setArgCompletionOpen] = useState(false)
-  const [argCompletionItems, setArgCompletionItems] = useState<ArgCompletionItem[]>([])
-  const [argCompletionIndex, setArgCompletionIndex] = useState(0)
-  const [argCompletionLoading, setArgCompletionLoading] = useState(false)
-  const argCompletionReqRef = useRef(0)
-  const argCompletionCtxRef = useRef<ArgCompletionContext | null>(null)
-  const argCompletionTimerRef = useRef<number | null>(null)
-  const argCompletionOpenRef = useRef(false)
-  useEffect(() => {
-    argCompletionOpenRef.current = argCompletionOpen
-  }, [argCompletionOpen])
-  useEffect(() => {
-    const timerRef = argCompletionTimerRef
-    return () => {
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current)
-    }
-  }, [])
+  // 命令参数 Tab 补全状态与请求（逻辑在 useArgCompletions hook 中）
+  // textarea 引用先声明于此供补全 hook 使用；其余 refs 仍在下方 Refs 区块。
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const {
+    argCompletionOpen,
+    argCompletionItems,
+    argCompletionIndex,
+    setArgCompletionIndex,
+    argCompletionLoading,
+    argCompletionMenuRef,
+    argCompletionListRef,
+    closeArgCompletions,
+    requestArgCompletions,
+    applyArgCompletion,
+    scheduleArgCompletion,
+    handleArgCompletionTab,
+  } = useArgCompletions({ text, setText, textareaRef, attachments, sessionId, slashOpen })
 
   // 拖拽状态
   const [isDragging, setIsDragging] = useState(false)
@@ -320,20 +330,20 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
   const lastTauriDropAtRef = useRef(0)
 
   const { isCompact, enableCollapsedDock } = useChatViewportSelect(
-    value => ({ isCompact: value.presentation.isCompact, enableCollapsedDock: value.interaction.enableCollapsedInputDock }),
+    value => ({
+      isCompact: value.presentation.isCompact,
+      enableCollapsedDock: value.interaction.enableCollapsedInputDock,
+    }),
     (a, b) => a.isCompact === b.isCompact && a.enableCollapsedDock === b.enableCollapsedDock,
   )
 
   // Refs
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const inputContainerRef = useRef<HTMLDivElement>(null)
   const attachmentRailRef = useRef<HTMLDivElement>(null)
   const attachmentSectionRef = useRef<HTMLDivElement>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
   const mentionMenuRef = useRef<MentionMenuHandle>(null)
   const slashMenuRef = useRef<SlashCommandMenuHandle>(null)
-  const argCompletionMenuRef = useRef<HTMLDivElement>(null)
-  const argCompletionListRef = useRef<HTMLDivElement>(null)
   const prevRevertedTextRef = useRef<string | undefined>(undefined)
   const latestDraftRef = useRef<HistoryEntry>({ text: '', attachments: [] })
   const appendedRestoreRef = useRef<string | undefined>(undefined)
@@ -377,6 +387,21 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       collapsedQuestion,
     })
 
+  // 收起/展开那一刻的 200ms 里，祖先 opacity < 1 会形成 backdrop root，
+  // 玻璃子级拿不到 backdrop-filter——背后的消息会变清晰透出，看起来像闪一下。
+  // 这段窗口把玻璃退成实色（视觉上是实心面板淡出/淡入），窗口过后复原。
+  const [dockFading, setDockFading] = useState(false)
+  const dockFadeSkippedRef = useRef(true)
+  useEffect(() => {
+    if (dockFadeSkippedRef.current) {
+      dockFadeSkippedRef.current = false
+      return
+    }
+    setDockFading(true)
+    const timer = window.setTimeout(() => setDockFading(false), DOCK_FADE_MS)
+    return () => window.clearTimeout(timer)
+  }, [isCollapsed])
+
   // 处理 revert 恢复
   useEffect(() => {
     latestDraftRef.current = { text, attachments }
@@ -389,12 +414,12 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       frameId = requestAnimationFrame(() => {
         if (restoreMode === 'append' && appendedRestoreRef.current === revertedText) return
         const current = latestDraftRef.current
-        const nextText = restoreMode === 'append' && current.text.trim()
-          ? `${current.text}\n\n${revertedText}`
-          : revertedText
-        const nextAttachments = restoreMode === 'append'
-          ? [...current.attachments, ...(revertedAttachments || [])]
-          : (revertedAttachments || [])
+        const nextText =
+          restoreMode === 'append' && current.text.trim() ? `${current.text}\n\n${revertedText}` : revertedText
+        const nextAttachments =
+          restoreMode === 'append'
+            ? [...current.attachments, ...(revertedAttachments || [])]
+            : revertedAttachments || []
         setText(nextText)
         setAttachments(nextAttachments)
         appendedRestoreRef.current = restoreMode === 'append' ? revertedText : undefined
@@ -446,10 +471,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       TEXTAREA_MIN_HEIGHT + TEXTAREA_VERTICAL_CHROME + toolbarHeight,
       nextComposerMaxHeight - footerHeight,
     )
-    const nextTextareaMaxHeight = Math.max(
-      TEXTAREA_MIN_HEIGHT,
-      nextInputContainerMaxHeight - inputContainerChrome,
-    )
+    const nextTextareaMaxHeight = Math.max(TEXTAREA_MIN_HEIGHT, nextInputContainerMaxHeight - inputContainerChrome)
 
     setComposerMaxHeight(prev => (Math.abs(prev - nextComposerMaxHeight) < 1 ? prev : nextComposerMaxHeight))
     setInputContainerMaxHeight(prev =>
@@ -667,170 +689,6 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
     [text, mentionStartIndex, mentionQuery],
   )
 
-  // ============================================
-  // 命令参数 Tab 补全（pi TUI getArgumentCompletions parity）
-  // ============================================
-
-  const closeArgCompletions = useCallback(() => {
-    if (argCompletionTimerRef.current !== null) {
-      window.clearTimeout(argCompletionTimerRef.current)
-      argCompletionTimerRef.current = null
-    }
-    setArgCompletionOpen(false)
-    setArgCompletionItems([])
-    setArgCompletionLoading(false)
-    argCompletionCtxRef.current = null
-    argCompletionReqRef.current += 1
-  }, [])
-
-  /**
-   * 解析当前输入里的命令参数上下文：
-   * 1. 优先用 command attachment（斜杠菜单选过）：光标在命令文本之后即命中
-   * 2. 否则识别行首手输的 `/name args`（slashOpen 为 false 说明命令名已完整）
-   * 返回 { commandName, argStart }，补全会替换 [argStart, cursor) 区间。
-   */
-  const resolveArgCompletionContext = useCallback(
-    (currentText: string, cursorPos: number): ArgCompletionContext | null => {
-      const commandAttachment = attachments.find(a => a.type === 'command' && a.commandName && a.textRange)
-      if (commandAttachment && commandAttachment.textRange) {
-        // 参数起点跳过命令与参数之间的分隔空白（/name <prefix>）
-        let argStart = commandAttachment.textRange.end
-        while (argStart < currentText.length && /[ \n]/.test(currentText[argStart]!)) argStart += 1
-        if (cursorPos >= argStart) {
-          return { commandName: commandAttachment.commandName!, argStart }
-        }
-      }
-      // 行首手输命令：/name 后跟空格/换行且光标在参数区
-      if (currentText.startsWith('/')) {
-        const rest = currentText.slice(1)
-        const spaceIndex = rest.search(/[ \n]/)
-        if (spaceIndex > 0 && cursorPos > spaceIndex + 1) {
-          return { commandName: rest.slice(0, spaceIndex), argStart: spaceIndex + 2 }
-        }
-      }
-      return null
-    },
-    [attachments],
-  )
-
-  /** 请求并打开参数补全菜单（prefix 为空时列出全部候选，与 TUI 一致） */
-  const requestArgCompletions = useCallback(
-    async (ctx: ArgCompletionContext, prefix: string) => {
-      if (!sessionId) {
-        closeArgCompletions()
-        return
-      }
-      const requestId = ++argCompletionReqRef.current
-      argCompletionCtxRef.current = ctx
-      if (argCompletionTimerRef.current !== null) {
-        window.clearTimeout(argCompletionTimerRef.current)
-        argCompletionTimerRef.current = null
-      }
-      // 已打开的菜单刷新时不闪 loading（首次打开才显示）
-      if (!argCompletionOpenRef.current) setArgCompletionLoading(true)
-      try {
-        const result = (await getPiCommandCompletions(sessionId, ctx.commandName, prefix)) as
-          | ArgCompletionItem[]
-          | null
-          | undefined
-        if (requestId !== argCompletionReqRef.current) return
-        const items = Array.isArray(result) ? result : []
-        if (items.length === 0) {
-          closeArgCompletions()
-          return
-        }
-        setArgCompletionItems(items)
-        setArgCompletionIndex(0)
-        setArgCompletionOpen(true)
-      } catch (error) {
-        if (requestId !== argCompletionReqRef.current) return
-        apiErrorHandler('command completions', error)
-        closeArgCompletions()
-      } finally {
-        if (requestId === argCompletionReqRef.current) {
-          setArgCompletionLoading(false)
-        }
-      }
-    },
-    [closeArgCompletions, sessionId],
-  )
-
-  /** 应用选中的补全：替换 [argStart, cursor) 为 value，光标移到 value 末尾 */
-  const applyArgCompletion = useCallback(
-    (item: ArgCompletionItem) => {
-      if (!textareaRef.current) return
-      const ctx = argCompletionCtxRef.current
-      if (!ctx) return
-      const cursorPos = textareaRef.current.selectionStart ?? text.length
-      // 参数区起点前不是空白时（用户删掉了 /command 后的空格）补一个空格，
-      // 否则补全值会直接黏在命令名后面（/permissionworkspace-write）
-      const needsSpace = ctx.argStart > 0 && !/[ \n]/.test(text[ctx.argStart - 1] ?? '')
-      const sep = needsSpace ? ' ' : ''
-      const newText = text.slice(0, ctx.argStart) + sep + item.value + text.slice(cursorPos)
-      setText(newText)
-      closeArgCompletions()
-      requestAnimationFrame(() => {
-        if (!textareaRef.current) return
-        const newCursorPos = ctx.argStart + sep.length + item.value.length
-        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
-        textareaRef.current.focus()
-      })
-    },
-    [closeArgCompletions, text],
-  )
-
-  /**
-   * 防抖调度：参数区文本变化后 120ms 合并请求（选中命令自动弹出 + 输入实时筛选）。
-   * 不在参数区时关闭菜单。
-   */
-  const scheduleArgCompletion = useCallback(
-    (currentText: string, cursorPos: number) => {
-      const ctx = resolveArgCompletionContext(currentText, cursorPos)
-      if (!ctx) {
-        closeArgCompletions()
-        return
-      }
-      if (argCompletionTimerRef.current !== null) {
-        window.clearTimeout(argCompletionTimerRef.current)
-      }
-      argCompletionTimerRef.current = window.setTimeout(() => {
-        argCompletionTimerRef.current = null
-        // 回调时用 DOM 最新值重解析，避免防抖窗口内文本再变导致 ctx 过期
-        const textarea = textareaRef.current
-        if (!textarea) return
-        const latestCursor = textarea.selectionStart ?? textarea.value.length
-        const latestCtx = resolveArgCompletionContext(textarea.value, latestCursor)
-        if (!latestCtx) return
-        const latestPrefix = textarea.value.slice(latestCtx.argStart, latestCursor)
-        void requestArgCompletions(latestCtx, latestPrefix)
-      }, 120)
-    },
-    [closeArgCompletions, requestArgCompletions, resolveArgCompletionContext],
-  )
-
-  /** Tab 键：打开/循环参数补全。返回 true 表示已处理。 */
-  const handleArgCompletionTab = useCallback((): boolean => {
-    if (!textareaRef.current) return false
-    if (argCompletionOpen) {
-      setArgCompletionIndex(prev => (prev + 1) % Math.max(argCompletionItems.length, 1))
-      return true
-    }
-    if (slashOpen) return false // 命令名菜单优先，交给 slash 分支
-    const cursorPos = textareaRef.current.selectionStart ?? text.length
-    const ctx = resolveArgCompletionContext(text, cursorPos)
-    if (!ctx) return false
-    const prefix = text.slice(ctx.argStart, cursorPos)
-    void requestArgCompletions(ctx, prefix)
-    return true
-  }, [
-    argCompletionOpen,
-    argCompletionItems.length,
-    requestArgCompletions,
-    resolveArgCompletionContext,
-    slashOpen,
-    text,
-  ])
-
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       const nativeEvent = e.nativeEvent
@@ -982,7 +840,26 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         handleSend()
       }
     },
-    [mentionOpen, slashOpen, mentionQuery, updateMentionQuery, handleSend, text, attachments, handleHistoryKeyDown, onCycleModel, onCycleThinkingLevel, onOpenModelSelector, argCompletionOpen, argCompletionItems, argCompletionIndex, applyArgCompletion, closeArgCompletions, handleArgCompletionTab],
+    [
+      mentionOpen,
+      slashOpen,
+      mentionQuery,
+      updateMentionQuery,
+      handleSend,
+      text,
+      attachments,
+      handleHistoryKeyDown,
+      onCycleModel,
+      onCycleThinkingLevel,
+      onOpenModelSelector,
+      argCompletionOpen,
+      argCompletionItems,
+      argCompletionIndex,
+      setArgCompletionIndex,
+      applyArgCompletion,
+      closeArgCompletions,
+      handleArgCompletionTab,
+    ],
   )
 
   const handleChange = useCallback(
@@ -1046,8 +923,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
           // 回车会被 slash 菜单抢走，重新插入命令并复制一个命令附件；
           // 此时参数补全（attachment 路径）仍然有效，回车应直接应用补全。
           const hasMatchingCommandAttachment = attachments.some(
-            a => a.type === 'command' && a.commandName && a.textRange &&
-              newText.startsWith(`/${a.commandName}`),
+            a => a.type === 'command' && a.commandName && a.textRange && newText.startsWith(`/${a.commandName}`),
           )
           if (!hasMatchingCommandAttachment) {
             setSlashQuery(slashTrigger.query)
@@ -1186,9 +1062,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
       // 幂等：同一命令重复选择时替换旧附件（textRange 可能随文本变化），
       // 避免输入框里累积多个相同的命令附件
       setAttachments(prev => {
-        const existingIndex = prev.findIndex(
-          a => a.type === 'command' && a.commandName === command.name,
-        )
+        const existingIndex = prev.findIndex(a => a.type === 'command' && a.commandName === command.name)
         if (existingIndex >= 0) {
           const next = [...prev]
           next[existingIndex] = attachment
@@ -1218,7 +1092,6 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
     setSlashOpen(false)
     textareaRef.current?.focus()
   }, [])
-
 
   // 通用文件上传 — 根据模型能力判断是否接受
   const handleFilesSelected = useCallback(
@@ -1386,7 +1259,10 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
     [text],
   )
 
-  const insertDraggedFile = useCallback((fileInfo: DraggedFileInfo) => insertDraggedFiles([fileInfo]), [insertDraggedFiles])
+  const insertDraggedFile = useCallback(
+    (fileInfo: DraggedFileInfo) => insertDraggedFiles([fileInfo]),
+    [insertDraggedFiles],
+  )
 
   // 命令参数补全菜单：点击外部关闭
   useEffect(() => {
@@ -1398,7 +1274,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
     }
     document.addEventListener('pointerdown', handleClickOutside)
     return () => document.removeEventListener('pointerdown', handleClickOutside)
-  }, [argCompletionOpen, closeArgCompletions])
+  }, [argCompletionOpen, argCompletionMenuRef, closeArgCompletions])
 
   // 选中项变化时滚动到可见区域（键盘 ↑↓ 选择与 slash 菜单一致，
   // 避免选中项被滚动容器裁切、只能鼠标滚轮才能看到）
@@ -1408,7 +1284,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
     if (selectedEl) {
       scrollItemIntoView(argCompletionListRef.current, selectedEl)
     }
-  }, [argCompletionOpen, argCompletionIndex, argCompletionItems])
+  }, [argCompletionOpen, argCompletionIndex, argCompletionItems, argCompletionListRef])
 
   useEffect(() => {
     const updateInternalFileDragState = () => {
@@ -1499,7 +1375,13 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         console.warn('[InputBox] Failed to process Tauri dropped paths:', err)
       }
     },
-    [buildDraggedFileInfo, createUploadAttachmentFromDroppedPath, externalFileDropMode, insertDraggedFiles, isSubmitting],
+    [
+      buildDraggedFileInfo,
+      createUploadAttachmentFromDroppedPath,
+      externalFileDropMode,
+      insertDraggedFiles,
+      isSubmitting,
+    ],
   )
 
   const handleTauriDragDropEvent = useCallback(
@@ -1581,13 +1463,12 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
     ? 'max(2rem, var(--safe-area-inset-bottom, 0px))'
     : 'max(0px, calc(var(--safe-area-inset-bottom, 0px) - 2rem))'
   // 收起态视觉下移：把 2rem 撑出的多余缓冲吃掉，只留 0.75rem(12px) 呼吸空间
-  const collapsedVisualOffset = isCollapsed
-    ? 'translateY(calc(2rem - 0.75rem))'
-    : 'none'
+  const collapsedVisualOffset = isCollapsed ? 'translateY(calc(2rem - 0.75rem))' : 'none'
 
   return (
     <div className="w-full">
       <div
+        data-composer-width
         className={`mx-auto max-w-3xl transition-[max-width] duration-300 ease-in-out ${isCompact ? 'px-2' : 'px-4'} ${
           isCollapsed ? 'pointer-events-none' : 'pointer-events-auto'
         }`}
@@ -1596,6 +1477,8 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
         <div
           ref={contentWrapRef}
           onPointerDown={handleContainerPointerDown}
+          data-composer-dock={isCollapsed ? 'collapsed' : 'expanded'}
+          data-composer-fading={dockFading ? '' : undefined}
           className={`relative flex flex-col gap-2 ${isCollapsed ? 'justify-end' : ''}`}
           style={
             isCollapsed && expandedHeight > 0
@@ -1603,6 +1486,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
               : { maxHeight: composerMaxHeight }
           }
         >
+          <ComposerAccessory collapsed={isCollapsed}>{aboveComposer}</ComposerAccessory>
           {/* FloatingActions — 
               展开态：absolute 定位在内容区上方，不占文档流，避免显隐变化影响高度导致滚动抖动
               收起态：正常文档流，紧贴胶囊上方
@@ -1680,10 +1564,14 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
               >
                 <div ref={argCompletionListRef} className="flex-1 overflow-y-auto custom-scrollbar p-1.5">
                   {argCompletionLoading && argCompletionItems.length === 0 && (
-                    <div className="px-2 py-4 text-center text-[length:var(--fs-base)] text-text-400">{t('common:loading')}</div>
+                    <div className="px-2 py-4 text-center text-[length:var(--fs-base)] text-text-400">
+                      {t('common:loading')}
+                    </div>
                   )}
                   {!argCompletionLoading && argCompletionItems.length === 0 && (
-                    <div className="px-2 py-4 text-center text-[length:var(--fs-base)] text-text-400">{t('slashCommand.noMatchingCommands')}</div>
+                    <div className="px-2 py-4 text-center text-[length:var(--fs-base)] text-text-400">
+                      {t('slashCommand.noMatchingCommands')}
+                    </div>
                   )}
                   {argCompletionItems.map((item, index) => (
                     <button
@@ -1693,11 +1581,15 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
                       onClick={() => applyArgCompletion(item)}
                       onPointerEnter={() => setArgCompletionIndex(index)}
                     >
-                      <span className={`font-mono text-[length:var(--fs-base)] flex-shrink-0 truncate leading-5 ${index === argCompletionIndex ? 'text-accent-main-100' : 'text-text-300'}`}>
+                      <span
+                        className={`font-mono text-[length:var(--fs-base)] flex-shrink-0 truncate leading-5 ${index === argCompletionIndex ? 'text-accent-main-100' : 'text-text-300'}`}
+                      >
                         {item.label}
                       </span>
                       {item.description && (
-                        <div className="flex-1 min-w-0 text-[length:var(--fs-sm)] text-text-400 truncate">{item.description}</div>
+                        <div className="flex-1 min-w-0 text-[length:var(--fs-sm)] text-text-400 truncate">
+                          {item.description}
+                        </div>
                       )}
                     </button>
                   ))}
@@ -1732,7 +1624,9 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
               {/* Drop overlay */}
               {(isDragging || isInternalFileDragging) && (
                 <div className="absolute inset-0 z-50 rounded-2xl bg-accent-main-100/5 backdrop-blur-[1px] flex items-center justify-center pointer-events-none">
-                  <span className="text-[length:var(--fs-base)] text-accent-main-100 font-medium">{t('inputBox.dropFilesHere')}</span>
+                  <span className="text-[length:var(--fs-base)] text-accent-main-100 font-medium">
+                    {t('inputBox.dropFilesHere')}
+                  </span>
                 </div>
               )}
 
@@ -1764,11 +1658,11 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
                           </div>
 
                           {attachmentsOverflowing && showAttachmentLeftFade && (
-                            <div className="pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-bg-000/50 to-transparent" />
+                            <div className="pointer-events-none absolute inset-y-0 left-0 w-8 bg-bg-000/50 [-webkit-mask-image:linear-gradient(to_right,black,transparent)] [mask-image:linear-gradient(to_right,black,transparent)]" />
                           )}
 
                           {attachmentsOverflowing && showAttachmentRightFade && (
-                            <div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-bg-000/50 to-transparent" />
+                            <div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-bg-000/50 [-webkit-mask-image:linear-gradient(to_left,black,transparent)] [mask-image:linear-gradient(to_left,black,transparent)]" />
                           )}
                         </div>
                       </div>
@@ -1803,9 +1697,6 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
                   {/* Bottom Bar -> InputToolbar */}
                   <div ref={toolbarRef}>
                     <InputToolbar
-
-
-
                       variants={variants}
                       selectedVariant={selectedVariant}
                       onVariantChange={onVariantChange}
@@ -1843,11 +1734,7 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
           className={`h-8 flex items-center justify-center ${isCollapsed ? 'hidden' : ''}`}
           aria-hidden={isCollapsed || undefined}
         >
-          <InputFooter
-            sessionId={sessionId}
-            onNewChat={onNewChat}
-            inputContainerRef={inputContainerRef}
-          />
+          <InputFooter sessionId={sessionId} onNewChat={onNewChat} inputContainerRef={inputContainerRef} />
         </div>
       </div>
     </div>
@@ -1859,3 +1746,33 @@ const InputBoxComponent = forwardRef<InputBoxHandle, InputBoxProps>(function Inp
 // ============================================
 
 export const InputBox = memo(InputBoxComponent)
+
+function ComposerAccessory({ collapsed, children }: { collapsed: boolean; children?: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const previousTop = useRef<number | undefined>(undefined)
+  const animation = useRef<Animation | undefined>(undefined)
+
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const top = element.getBoundingClientRect().top
+    const delta = previousTop.current === undefined ? 0 : previousTop.current - top
+    previousTop.current = top
+    animation.current?.cancel()
+    if (delta && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      animation.current = element.animate([{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }], {
+        duration: 260,
+        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      })
+    }
+  }, [collapsed])
+
+  useEffect(() => () => animation.current?.cancel(), [])
+
+  if (!children) return null
+  return (
+    <div ref={ref} data-composer-accessory className="shrink-0 min-w-0 pointer-events-auto">
+      {children}
+    </div>
+  )
+}

@@ -1,20 +1,29 @@
-import { constants, copyFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs"
-import { realpath } from "node:fs/promises"
-import { randomUUID } from "node:crypto"
-import path from "node:path"
+import { constants, copyFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 import type {
   AgentSessionRuntime,
   CreateAgentSessionRuntimeFactory,
-  LoadExtensionsResult,
+  EventBus,
   ModelRuntime,
-  ProjectTrustContext,
   SessionManager,
-} from "@earendil-works/pi-coding-agent"
-import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot, SessionActivityStatus } from "@piui/protocol"
-import { isJsonObject, requireJsonValue } from "@piui/protocol"
-import { getLoadedSdk } from "../sdk-host.js"
-import { configuredSessionDir, normalizeCwd, resolveUserPath } from "./catalog.js"
-import { ExtensionUiBridge } from "./extension-ui-bridge.js"
+} from '@earendil-works/pi-coding-agent'
+import type { ImageInput, JsonObject, JsonValue, RegistrySnapshot, SessionActivityStatus } from '@piui/protocol'
+import { isJsonObject, requireJsonValue } from '@piui/protocol'
+import { getLoadedSdk } from '../sdk-host.js'
+import {
+  describeSubagentSession,
+  forgetSubagentSession,
+  installSubagentSessionPersistence,
+  setSubagentParentAnchor,
+} from './subagent-sessions.js'
+import { configuredSessionDir, normalizeCwd, resolveUserPath } from './catalog.js'
+import { forwardChildSessionEvents } from './child-session-events.js'
+import { createDefaultRuntime } from './default-runtime.js'
+import { extensionActionError } from './extension-diagnostics.js'
+import { extensionBindings, type ExtensionHostActions } from './extension-host.js'
+import { ExtensionUiBridge } from './extension-ui-bridge.js'
+import { assertSessionFileInside, pathKey, stripDuplicatePartial, toJson, toJsonObject } from './native-json.js'
 import {
   entriesPageFromEntries,
   imageAttachmentFromEntry,
@@ -23,20 +32,16 @@ import {
   type EntriesPage,
   type LiveMessage,
   type SessionHead,
-} from "./pagination.js"
-import type { PiEventMeta, SessionRuntime, Unsubscribe } from "../runtime.js"
+} from './pagination.js'
+import { verifySdkSessionContract } from './sdk-contract.js'
+import type { PiEventMeta, SessionRuntime, Unsubscribe } from '../runtime.js'
 
-export interface ExtensionHostActions {
-  reserveReplacement(request: {
-    reservationId: string
-    sourceSessionId: string
-    operation: "new" | "fork" | "switch"
-    targetSessionFile?: string
-  }): Promise<void>
-  commitReplacement(reservationId: string, replacement: JsonObject): Promise<void>
-  abortReplacement(reservationId: string): Promise<void>
-  requestShutdown(sessionId: string): void
-}
+// 契约门禁、子代理频道、默认运行时、扩展宿主动作、JSON 与路径归一都拆到
+// 独立模块；公开导出仍从本文件转出，其它包按原名字引用。
+export { verifySdkSessionContract } from './sdk-contract.js'
+export { forwardChildSessionEvents, toChildSessionEvent, type ChildSessionPhase } from './child-session-events.js'
+export { stripDuplicatePartial } from './native-json.js'
+export type { ExtensionHostActions } from './extension-host.js'
 
 export interface RealPiSessionOpenOptions {
   agentDir?: string
@@ -54,263 +59,103 @@ interface LiveMessageCheckpoint {
   provisional: boolean
 }
 
-function unsupportedExtensionHostAction(action: string): never {
-  throw Object.assign(new Error(`Extension command context ${action} requires a coordinated PiUI host`), {
-    code: "CAPABILITY_DISABLED",
-  })
-}
-
-function extensionBindings(
-  uiContext: ExtensionUiBridge["context"],
-  runtime: AgentSessionRuntime,
-  navigateTree: RealPiSession["navigateTree"],
-  reload: RealPiSession["reload"],
-  hostActions?: ExtensionHostActions,
-) {
-  return {
-    mode: "rpc" as const,
-    uiContext,
-    commandContextActions: {
-      waitForIdle: () => runtime.session.waitForIdle(),
-      newSession: (options?: Parameters<AgentSessionRuntime["newSession"]>[0]) =>
-        runExtensionReplacement(runtime, hostActions, "new", undefined, () => runtime.newSession(options)),
-      fork: (entryId: string, options?: Parameters<AgentSessionRuntime["fork"]>[1]) =>
-        runExtensionReplacement(runtime, hostActions, "fork", undefined, () => runtime.fork(entryId, options)),
-      navigateTree: async (entryId: string, options?: {
-        summarize?: boolean
-        customInstructions?: string
-        replaceInstructions?: boolean
-        label?: string
-      }) => {
-        const result = await navigateTree(entryId, options)
-        return { cancelled: result.cancelled === true }
-      },
-      switchSession: (sessionPath: string, options?: Parameters<AgentSessionRuntime["switchSession"]>[1]) =>
-        runExtensionReplacement(runtime, hostActions, "switch", sessionPath, () =>
-          runtime.switchSession(sessionPath, options)),
-      reload,
-    },
-    abortHandler: () => {
-      void runtime.session.abort().catch(error => {
-        console.error(`[piui-worker] session abort failed: ${error instanceof Error ? error.message : String(error)}`)
-      })
-    },
-    shutdownHandler: () => hostActions
-      ? hostActions.requestShutdown(runtime.session.sessionManager.getSessionId())
-      : unsupportedExtensionHostAction("shutdown"),
-    onError: (error: { extensionPath: string; event: string; error: string }) => {
-      console.error(`[piui-worker] extension error (${error.event}) ${error.extensionPath}: ${error.error}`)
-    },
-  }
-}
-
-async function runExtensionReplacement(
-  runtime: AgentSessionRuntime,
-  hostActions: ExtensionHostActions | undefined,
-  operation: "new" | "fork" | "switch",
-  targetSessionFile: string | undefined,
-  replace: () => Promise<{ cancelled: boolean }>,
-): Promise<{ cancelled: boolean }> {
-  if (!hostActions) return unsupportedExtensionHostAction(operation)
-  const sourceSessionId = runtime.session.sessionManager.getSessionId()
-  if (operation === "switch" && targetSessionFile) {
-    await assertSessionFileInside(runtime.session.sessionManager.getSessionDir(), resolveUserPath(targetSessionFile))
-  }
-  const reservationId = randomUUID()
-  await hostActions.reserveReplacement({ reservationId, sourceSessionId, operation, targetSessionFile })
-  try {
-    const result = await replace()
-    if (result.cancelled) {
-      await hostActions.abortReplacement(reservationId)
-      return result
-    }
-    const replacement: JsonObject = {
-      operation,
-      sourceSessionId,
-      targetSessionId: runtime.session.sessionManager.getSessionId(),
-      targetSessionFile: runtime.session.sessionManager.getSessionFile() ?? null,
-      targetCwd: runtime.session.sessionManager.getCwd(),
-      cancelled: false,
-    }
-    await hostActions.commitReplacement(reservationId, replacement)
-    return result
-  } catch (error) {
-    await hostActions.abortReplacement(reservationId).catch(() => undefined)
-    throw error
-  }
-}
-
-/**
- * 会话实例契约门禁：PiUI 委托到的 Pi SDK 会话/运行时方法必须存在。
- * 按 SDK 版本缓存（同版本只验一次）；缺方法 → PI_SDK_INCOMPATIBLE 响亮失败，
- * 在开会话时暴露详情，而不是等用户发消息才在运行时炸。
- */
-let verifiedSessionContractSdkVersion: string | undefined
-
-export function verifySdkSessionContract(runtime: AgentSessionRuntime, version = getLoadedSdk().version): void {
-  if (verifiedSessionContractSdkVersion === version) return
-  const missing: string[] = []
-  const session = runtime.session as unknown as Record<string, unknown>
-  for (const method of [
-    "subscribe", "bindExtensions", "waitForIdle", "prompt", "steer", "followUp", "sendUserMessage",
-    "clearQueue", "abort", "setSessionName", "cycleModel", "setScopedModels", "setThinkingLevel",
-    "cycleThinkingLevel", "setSteeringMode", "setFollowUpMode", "compact", "abortBranchSummary",
-    "abortRetry", "setAutoCompactionEnabled", "setAutoRetryEnabled", "recordBashResult", "executeBash",
-    "abortBash", "getAllTools", "setActiveToolsByName", "navigateTree", "sendCustomMessage",
-    "exportToHtml", "exportToJsonl", "reload",
-  ] as const) {
-    if (typeof session[method] !== "function") missing.push(`session.${method}`)
-  }
-  for (const method of [
-    "newSession", "switchSession", "fork", "importFromJsonl", "dispose",
-    "setBeforeSessionInvalidate", "setRebindSession",
-  ] as const) {
-    if (typeof (runtime as unknown as Record<string, unknown>)[method] !== "function") missing.push(`runtime.${method}`)
-  }
-  const manager = runtime.session.sessionManager as unknown as Record<string, unknown> | undefined
-  for (const method of [
-    "getSessionId", "getSessionFile", "getCwd", "getEntries", "getTree", "getEntry",
-    "getSessionName", "getSessionDir", "appendLabelChange", "appendCustomEntry", "getLeafId",
-  ] as const) {
-    if (!manager || typeof manager[method] !== "function") missing.push(`sessionManager.${method}`)
-  }
-  const loader = runtime.session.resourceLoader as unknown as Record<string, unknown> | undefined
-  for (const method of ["getThemes", "getSkills", "getExtensions"] as const) {
-    if (!loader || typeof loader[method] !== "function") missing.push(`resourceLoader.${method}`)
-  }
-  if (missing.length > 0) {
-    throw Object.assign(
-      new Error(`Pi SDK ${version} session contract is incompatible:\n- ${missing.join("\n- ")}`),
-      { code: "PI_SDK_INCOMPATIBLE" },
-    )
-  }
-  verifiedSessionContractSdkVersion = version
-}
-
-const createDefaultRuntime = (modelRuntime?: ModelRuntime): CreateAgentSessionRuntimeFactory =>
-  async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
-    const {
-      SettingsManager,
-      createAgentSessionServices,
-      createAgentSessionFromServices,
-    } = getLoadedSdk().sdk
-    const globalSettings = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
-    const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
-    const services = await createAgentSessionServices({
-      cwd,
-      agentDir,
-      settingsManager,
-      // 共享 ModelRuntime：同一进程内所有会话复用同一个模型/认证实例
-      // （SDK 原生支持，见 createAgentSessionServices 的 modelRuntime 参数）。
-      modelRuntime,
-      resourceLoaderReloadOptions: {
-        resolveProjectTrust: async ({ extensionsResult }) => resolveProjectTrustFromExtensions(
-          cwd,
-          agentDir,
-          extensionsResult,
-          globalSettings.getDefaultProjectTrust(),
-        ),
-      },
-    })
-    return {
-      ...(await createAgentSessionFromServices({
-        services,
-        sessionManager,
-        sessionStartEvent,
-      })),
-      services,
-      diagnostics: services.diagnostics,
-    }
-  }
-
-function projectTrustContextForRpc(cwd: string): ProjectTrustContext {
-  return {
-    cwd,
-    mode: "rpc",
-    hasUI: false,
-    ui: {
-      select: async () => undefined,
-      confirm: async () => false,
-      input: async () => undefined,
-      notify: () => {},
-    },
-  }
-}
-
 export class RealPiSession implements SessionRuntime {
   private runtime: AgentSessionRuntime
   private readonly extensionUi: ExtensionUiBridge
   private extensionsInitialized = false
   private sessionUnsub: (() => void) | null = null
+  private extensionErrorUnsub?: () => void
   private readonly piEventListeners = new Set<(event: JsonObject, meta: PiEventMeta) => void>()
   private readonly activityListeners = new Set<(status: SessionActivityStatus | null) => void>()
   private readonly headListeners = new Set<(head: SessionHead) => void>()
   private readonly resourceListeners = new Set<() => void>()
+  private readonly childSessionListeners = new Set<(event: JsonObject) => void>()
+  private childSessionBusUnsubs: Array<() => void> = []
   private nativeRevision = 1
-  private nativeFingerprint = ""
+  private nativeFingerprint = ''
   private eventEpoch = randomUUID()
   private eventSequence = 0
   private liveMessage?: LiveMessageCheckpoint
   private isCompactingFlag = false
-  private retryShadow: JsonObject = { phase: "idle" }
-  private compactionShadow: JsonObject = { autoEnabled: true, operation: { type: "none" } }
+  private retryShadow: JsonObject = { phase: 'idle' }
+  private compactionShadow: JsonObject = { autoEnabled: true, operation: { type: 'none' } }
 
-  private constructor(runtime: AgentSessionRuntime, private readonly hostActions?: ExtensionHostActions) {
+  private constructor(
+    runtime: AgentSessionRuntime,
+    private readonly hostActions?: ExtensionHostActions,
+  ) {
     this.runtime = runtime
     this.extensionUi = new ExtensionUiBridge(
       () => this.runtime.session.sessionManager.getSessionId(),
       () => undefined,
-      () => this.runtime.session.resourceLoader.getThemes().themes.flatMap(theme =>
-        theme.name ? [{ name: theme.name, path: theme.sourcePath }] : []),
+      {
+        getThemes: () => this.runtime.session.resourceLoader.getThemes().themes,
+        getPreferredTheme: () => this.runtime.session.settingsManager.getTheme(),
+      },
     )
     this.nativeFingerprint = this.getNativeFingerprint()
     this.bindSessionEvents()
   }
 
-  static async open(
-    cwd: string,
-    sessionFile?: string,
-    options: RealPiSessionOpenOptions = {},
-  ): Promise<RealPiSession> {
+  static async open(cwd: string, sessionFile?: string, options: RealPiSessionOpenOptions = {}): Promise<RealPiSession> {
     const { SessionManager, createAgentSessionRuntime, getAgentDir } = getLoadedSdk().sdk
     cwd = normalizeCwd(cwd)
     if (sessionFile && !existsSync(sessionFile)) {
-      throw Object.assign(new Error("Pi session file no longer exists"), { code: "SESSION_NOT_FOUND" })
+      throw Object.assign(new Error('Pi session file no longer exists'), { code: 'SESSION_NOT_FOUND' })
     }
     const agentDir = options.agentDir ?? getAgentDir()
     const sessionDir = configuredSessionDir(cwd, agentDir)
     if (sessionFile && !options.createSessionManager) await assertSessionFileInside(sessionDir, sessionFile)
     const sessionManager = (options.createSessionManager?.(cwd, sessionFile) ??
       (sessionFile
-        ? sessionDir ? SessionManager.open(sessionFile, sessionDir) : SessionManager.open(sessionFile)
+        ? sessionDir
+          ? SessionManager.open(sessionFile, sessionDir)
+          : SessionManager.open(sessionFile)
         : SessionManager.create(cwd, sessionDir))) as SessionManager
     if (sessionFile && pathKey(sessionManager.getCwd()) !== pathKey(cwd)) {
-      throw Object.assign(new Error("Pi session workspace does not match the selected workspace"), {
-        code: "SESSION_IDENTITY_MISMATCH",
+      throw Object.assign(new Error('Pi session workspace does not match the selected workspace'), {
+        code: 'SESSION_IDENTITY_MISMATCH',
       })
     }
-    const runtime = await createAgentSessionRuntime(options.createRuntime ?? createDefaultRuntime(options.modelRuntime), {
-      cwd: sessionManager.getCwd(),
-      agentDir,
-      sessionManager,
-    })
+    // 子代理公告总线：插件从 pi.events 发 `subagents:child:*`，不传自有总线
+    // 时每个 resource loader 各建一条，worker 就收不到。外部注入的
+    // createRuntime（集成测试）自行负责总线，这里就不再订阅。
+    const childSessionBus = options.createRuntime ? undefined : getLoadedSdk().sdk.createEventBus()
+    const runtime = await createAgentSessionRuntime(
+      options.createRuntime ?? createDefaultRuntime(options.modelRuntime, childSessionBus),
+      {
+        cwd: sessionManager.getCwd(),
+        agentDir,
+        sessionManager,
+      },
+    )
     verifySdkSessionContract(runtime)
 
     const result = new RealPiSession(runtime, options.hostActions)
+    // 子代理会话落盘桥：把插件的 `SessionManager.inMemory` 换成落盘会话，
+    // 让子代理转录成为真会话（左侧会话管理可见、点开可读）。安装失败时
+    // 插件行为与打补丁前一致。anchor 必须在 spawn 之前指向父会话。
+    installSubagentSessionPersistence()
+    result.anchorSubagentParent()
+    result.bindChildSessionBus(childSessionBus)
     runtime.setBeforeSessionInvalidate(() => result.detachSessionSubscriptions())
     runtime.setRebindSession(async session => {
-      result.extensionUi.cancelAll("session_replaced")
+      result.extensionUi.cancelAll('session_replaced')
       result.resetSessionShadowState()
       result.nativeRevision += 1
       result.nativeFingerprint = result.getNativeFingerprint()
       if (result.extensionsInitialized) {
-        await session.bindExtensions(extensionBindings(
-          result.extensionUi.context,
-          result.runtime,
-          result.navigateTree.bind(result),
-          result.reload.bind(result),
-          result.hostActions,
-        ))
+        result.bindExtensionErrors()
+        await session.bindExtensions(
+          extensionBindings(
+            result.extensionUi,
+            result.runtime,
+            result.navigateTree.bind(result),
+            result.reload.bind(result),
+            result.hostActions,
+          ),
+        )
+        result.reportExtensionLoadErrors()
       }
       result.bindSessionEvents()
     })
@@ -319,26 +164,45 @@ export class RealPiSession implements SessionRuntime {
 
   async initializeExtensions(): Promise<void> {
     if (this.extensionsInitialized) return
-    await this.runtime.session.bindExtensions(extensionBindings(
-      this.extensionUi.context,
-      this.runtime,
-      this.navigateTree.bind(this),
-      this.reload.bind(this),
-      this.hostActions,
-    ))
+    this.bindExtensionErrors()
+    await this.runtime.session.bindExtensions(
+      extensionBindings(
+        this.extensionUi,
+        this.runtime,
+        this.navigateTree.bind(this),
+        this.reload.bind(this),
+        this.hostActions,
+      ),
+    )
     this.extensionsInitialized = true
+    this.reportExtensionLoadErrors()
+  }
+
+  private bindExtensionErrors(): void {
+    this.extensionErrorUnsub?.()
+    const reportFailure = this.extensionUi.captureFailureReporter()
+    this.extensionErrorUnsub = this.runtime.session.extensionRunner?.onError(error => {
+      reportFailure(error.extensionPath, error.event)
+    })
+  }
+
+  private reportExtensionLoadErrors(): void {
+    for (const error of this.runtime.session.resourceLoader.getExtensions().errors) {
+      this.extensionUi.reportFailure(error.path, 'load')
+    }
   }
 
   private bindSessionEvents(): void {
     this.sessionUnsub?.()
     this.sessionUnsub = this.runtime.session.subscribe(event => {
       const nativeEvent = toJsonObject(event)
+      stripDuplicatePartial(nativeEvent)
       this.trackShadowState(event)
       const meta = this.captureEvent(event, nativeEvent)
       for (const listener of this.piEventListeners) listener(nativeEvent, meta)
       this.emitHeadIfChanged()
       this.emitActivityIfChanged()
-      if (event.type === "message_end" || event.type === "agent_settled" || event.type === "entry_appended") {
+      if (event.type === 'message_end' || event.type === 'agent_settled' || event.type === 'entry_appended') {
         queueMicrotask(() => {
           // dispose() nulls sessionUnsub before tearing down the runtime; skip
           // the deferred bookkeeping if we were disposed in between.
@@ -361,25 +225,30 @@ export class RealPiSession implements SessionRuntime {
     const streaming = Boolean(session.isStreaming)
     const retrying = Boolean(session.isRetrying)
     const compacting = Boolean(session.isCompacting) || this.isCompactingFlag
-    if (streaming === this.lastActivity.streaming && retrying === this.lastActivity.retrying &&
-      compacting === this.lastActivity.compacting) return
+    if (
+      streaming === this.lastActivity.streaming &&
+      retrying === this.lastActivity.retrying &&
+      compacting === this.lastActivity.compacting
+    )
+      return
     this.lastActivity = { streaming, retrying, compacting }
 
     let status: SessionActivityStatus | null = null
     if (retrying) {
-      const nextAtIso = typeof this.retryShadow.nextAttemptAt === "string" ? this.retryShadow.nextAttemptAt : undefined
+      const nextAtIso = typeof this.retryShadow.nextAttemptAt === 'string' ? this.retryShadow.nextAttemptAt : undefined
       const nextAt = nextAtIso ? Date.parse(nextAtIso) : 0
       status = {
-        type: "retry",
-        attempt: typeof this.retryShadow.attempt === "number" ? this.retryShadow.attempt : Number(session.retryAttempt ?? 1),
-        message: typeof this.retryShadow.errorMessage === "string" ? this.retryShadow.errorMessage : "",
+        type: 'retry',
+        attempt:
+          typeof this.retryShadow.attempt === 'number' ? this.retryShadow.attempt : Number(session.retryAttempt ?? 1),
+        message: typeof this.retryShadow.errorMessage === 'string' ? this.retryShadow.errorMessage : '',
         next: Number.isFinite(nextAt) ? nextAt : 0,
       }
     } else if (streaming) {
-      status = { type: "busy" }
+      status = { type: 'busy' }
     } else if (compacting) {
       // 压缩中没有 LLM 流，但会话确实在干活——让宿主把它标为工作中
-      status = { type: "compacting" }
+      status = { type: 'compacting' }
     }
     for (const listener of this.activityListeners) listener(status)
   }
@@ -388,28 +257,32 @@ export class RealPiSession implements SessionRuntime {
 
   private trackShadowState(event: { type: string; [key: string]: unknown }): void {
     const session = this.runtime.session
-    if (event.type === "compaction_start") {
+    if (event.type === 'compaction_start') {
       this.isCompactingFlag = true
       this.compactionShadow = {
         autoEnabled: session.autoCompactionEnabled,
         operation: {
-          type: "compaction", phase: "running", reason: toJson(event.reason) ?? null,
+          type: 'compaction',
+          phase: 'running',
+          reason: toJson(event.reason) ?? null,
         },
-        lastAborted: null, lastError: null, lastNotice: null,
+        lastAborted: null,
+        lastError: null,
+        lastNotice: null,
       }
-    } else if (event.type === "compaction_end") {
+    } else if (event.type === 'compaction_end') {
       this.isCompactingFlag = false
       this.compactionShadow = {
         ...this.compactionShadow,
         autoEnabled: session.autoCompactionEnabled,
-        operation: { type: "none" },
+        operation: { type: 'none' },
         lastResult: toJson(event.result) ?? this.compactionShadow.lastResult ?? null,
         lastAborted: Boolean(event.aborted),
         lastError: toJson(event.errorMessage) ?? null,
       }
-    } else if (event.type === "auto_retry_start") {
+    } else if (event.type === 'auto_retry_start') {
       this.retryShadow = {
-        phase: "waiting",
+        phase: 'waiting',
         autoEnabled: session.autoRetryEnabled,
         attempt: Number(event.attempt),
         maxAttempts: Number(event.maxAttempts),
@@ -417,31 +290,31 @@ export class RealPiSession implements SessionRuntime {
         nextAttemptAt: new Date(Date.now() + Number(event.delayMs)).toISOString(),
         errorMessage: toJson(event.errorMessage) ?? null,
       }
-    } else if (event.type === "agent_start" && this.retryShadow.phase === "waiting") {
+    } else if (event.type === 'agent_start' && this.retryShadow.phase === 'waiting') {
       this.retryShadow = {
-        phase: "running",
+        phase: 'running',
         autoEnabled: session.autoRetryEnabled,
         attempt: this.retryShadow.attempt ?? 0,
         maxAttempts: this.retryShadow.maxAttempts ?? 0,
       }
-    } else if (event.type === "agent_start" && this.retryShadow.phase === "finished") {
-      this.retryShadow = { phase: "idle", autoEnabled: session.autoRetryEnabled }
-    } else if (event.type === "auto_retry_end") {
+    } else if (event.type === 'agent_start' && this.retryShadow.phase === 'finished') {
+      this.retryShadow = { phase: 'idle', autoEnabled: session.autoRetryEnabled }
+    } else if (event.type === 'auto_retry_end') {
       this.retryShadow = {
-        phase: "finished",
+        phase: 'finished',
         autoEnabled: session.autoRetryEnabled,
         success: Boolean(event.success),
         attempt: Number(event.attempt),
         finalError: toJson(event.finalError) ?? null,
       }
-    } else if (event.type === "summarization_retry_scheduled") {
+    } else if (event.type === 'summarization_retry_scheduled') {
       const operation = isJsonObject(this.compactionShadow.operation) ? this.compactionShadow.operation : undefined
-      if (operation && operation.type !== "none") {
+      if (operation && operation.type !== 'none') {
         this.compactionShadow = {
           ...this.compactionShadow,
           operation: {
             ...operation,
-            phase: "retrying",
+            phase: 'retrying',
             attempt: Number(event.attempt),
             maxAttempts: Number(event.maxAttempts),
             delayMs: Number(event.delayMs),
@@ -449,43 +322,47 @@ export class RealPiSession implements SessionRuntime {
           },
         }
       }
-    } else if (event.type === "summarization_retry_attempt_start") {
+    } else if (event.type === 'summarization_retry_attempt_start') {
       const operation = isJsonObject(this.compactionShadow.operation) ? this.compactionShadow.operation : undefined
-      if (operation && operation.type !== "none") {
+      if (operation && operation.type !== 'none') {
         this.compactionShadow = {
           ...this.compactionShadow,
-          operation: { ...operation, phase: "running" },
+          operation: { ...operation, phase: 'running' },
         }
       }
     }
   }
 
-  private captureEvent(
-    event: { type: string; message?: unknown },
-    nativeEvent: JsonObject,
-  ): PiEventMeta {
+  private captureEvent(event: { type: string; message?: unknown }, nativeEvent: JsonObject): PiEventMeta {
     const position = { epoch: this.eventEpoch, sequence: ++this.eventSequence }
     const nativeMessage = isJsonObject(nativeEvent.message) ? nativeEvent.message : undefined
     const nativeRole = nativeMessage?.role
     const current = this.liveMessage
-    const trackedMessage = nativeRole === "user" || nativeRole === "assistant" || nativeRole === "toolResult"
-    if (trackedMessage && (event.type === "message_start" || event.type === "message_update" || event.type === "message_end")) {
-      const isStart = event.type === "message_start"
+    const trackedMessage = nativeRole === 'user' || nativeRole === 'assistant' || nativeRole === 'toolResult'
+    if (
+      trackedMessage &&
+      (event.type === 'message_start' || event.type === 'message_update' || event.type === 'message_end')
+    ) {
+      const isStart = event.type === 'message_start'
       const currentMessage = current && isJsonObject(current.value.message) ? current.value.message : undefined
       const currentRole = currentMessage?.role
-      const reusedCheckpoint = current && currentRole === nativeRole && current.value.phase === "streaming" &&
+      const reusedCheckpoint =
+        current &&
+        currentRole === nativeRole &&
+        current.value.phase === 'streaming' &&
         (current.provisional || !isStart)
       this.liveMessage = {
         value: {
           id: reusedCheckpoint ? current.value.id : randomUUID(),
           revision: reusedCheckpoint ? current.value.revision + 1 : 1,
-          phase: event.type === "message_end" ? "persisting" : "streaming",
+          phase: event.type === 'message_end' ? 'persisting' : 'streaming',
           message: nativeMessage ?? null,
         },
         messageIdentity: event.message,
-        entriesBeforeEnd: event.type === "message_end"
-          ? this.runtime.session.sessionManager.getEntries().length
-          : current?.entriesBeforeEnd ?? this.runtime.session.sessionManager.getEntries().length,
+        entriesBeforeEnd:
+          event.type === 'message_end'
+            ? this.runtime.session.sessionManager.getEntries().length
+            : (current?.entriesBeforeEnd ?? this.runtime.session.sessionManager.getEntries().length),
         provisional: false,
       }
     }
@@ -501,19 +378,24 @@ export class RealPiSession implements SessionRuntime {
     const messageIdentity = this.runtime.session.agent.state.streamingMessage
     const message = toJson(messageIdentity)
     const role = isJsonObject(message) ? message.role : undefined
-    if (!messageIdentity || !isJsonObject(message) ||
-      (role !== "user" && role !== "assistant" && role !== "toolResult")) return
+    if (
+      !messageIdentity ||
+      !isJsonObject(message) ||
+      (role !== 'user' && role !== 'assistant' && role !== 'toolResult')
+    )
+      return
     const current = this.liveMessage
-    if (current?.value.phase === "persisting") return
+    if (current?.value.phase === 'persisting') return
     const currentMessage = current && isJsonObject(current.value.message) ? current.value.message : undefined
     const currentRole = currentMessage?.role
-    const reusedCheckpoint = current && currentRole === role && current.value.phase === "streaming" ? current : undefined
+    const reusedCheckpoint =
+      current && currentRole === role && current.value.phase === 'streaming' ? current : undefined
     if (reusedCheckpoint && JSON.stringify(reusedCheckpoint.value.message) === JSON.stringify(message)) return
     this.liveMessage = {
       value: {
         id: reusedCheckpoint?.value.id ?? randomUUID(),
         revision: reusedCheckpoint ? reusedCheckpoint.value.revision + 1 : 1,
-        phase: "streaming",
+        phase: 'streaming',
         message,
       },
       messageIdentity,
@@ -524,24 +406,27 @@ export class RealPiSession implements SessionRuntime {
 
   private clearPersistedLiveMessage(): void {
     const checkpoint = this.liveMessage
-    if (!checkpoint || checkpoint.value.phase !== "persisting") return
-    const persisted = this.runtime.session.sessionManager.getEntries()
+    if (!checkpoint || checkpoint.value.phase !== 'persisting') return
+    const persisted = this.runtime.session.sessionManager
+      .getEntries()
       .slice(checkpoint.entriesBeforeEnd)
-      .some(entry => entry.type === "message" && entry.message === checkpoint.messageIdentity)
+      .some(entry => entry.type === 'message' && entry.message === checkpoint.messageIdentity)
     if (persisted && this.liveMessage?.value.id === checkpoint.value.id) this.liveMessage = undefined
   }
 
   private detachSessionSubscriptions(): void {
+    this.extensionErrorUnsub?.()
+    this.extensionErrorUnsub = undefined
     this.sessionUnsub?.()
     this.sessionUnsub = null
   }
 
   private resetSessionShadowState(): void {
     this.isCompactingFlag = false
-    this.retryShadow = { phase: "idle", autoEnabled: this.runtime.session.autoRetryEnabled }
+    this.retryShadow = { phase: 'idle', autoEnabled: this.runtime.session.autoRetryEnabled }
     this.compactionShadow = {
       autoEnabled: this.runtime.session.autoCompactionEnabled,
-      operation: { type: "none" },
+      operation: { type: 'none' },
     }
     this.eventEpoch = randomUUID()
     this.eventSequence = 0
@@ -586,6 +471,57 @@ export class RealPiSession implements SessionRuntime {
     return this.extensionUi.onEvent(listener as never)
   }
 
+  onChildSession(listener: (event: JsonObject) => void): Unsubscribe {
+    this.childSessionListeners.add(listener)
+    return () => this.childSessionListeners.delete(listener)
+  }
+
+  /**
+   * 订阅插件的子代理会话公告。
+   *
+   * 约定频道名由 @gotgenes/pi-permission-system 的 subagent-integration 文档
+   * 定义，不可改名、不可加字段：payload 只有 { sessionId, parentSessionId }。
+   * 子代理会话是 SessionManager.inMemory，转录不落盘也不在本进程可读，
+   * 所以这里只转发「有/没有」这件事，不假装能拿到消息。
+   */
+  private bindChildSessionBus(bus: EventBus | undefined): void {
+    for (const unsub of this.childSessionBusUnsubs) unsub()
+    this.childSessionBusUnsubs = []
+    if (!bus) return
+    this.childSessionBusUnsubs = forwardChildSessionEvents(bus, event => {
+      // parentSessionId 由插件从父会话管理器取；对账时以 worker 自己的
+      // 会话 id 为准，避免多会话共用一个进程时串号。
+      const sessionId = typeof event.sessionId === 'string' ? event.sessionId : ''
+      const persisted = sessionId ? describeSubagentSession(sessionId) : undefined
+      const enriched: JsonObject = {
+        ...event,
+        owningSessionId: this.runtime.session.sessionManager.getSessionId(),
+        ...(persisted ? { sessionFile: persisted.sessionFile } : {}),
+        ...(persisted?.sessionName ? { sessionName: persisted.sessionName } : {}),
+      }
+      if (event.phase === 'disposed' && sessionId) forgetSubagentSession(sessionId)
+      for (const listener of this.childSessionListeners) listener(enriched)
+    })
+  }
+
+  /**
+   * 把子代理落盘桥的父锚点指向当前会话：插件 spawn 子代理时 worker 拿不到
+   * 调用栈，只能按「当前正在推进的会话」认父。
+   */
+  anchorSubagentParent(): void {
+    const manager = this.runtime.session.sessionManager
+    try {
+      const sessionFile = manager.getSessionFile()
+      if (!sessionFile) {
+        setSubagentParentAnchor(undefined)
+        return
+      }
+      setSubagentParentAnchor({ cwd: manager.getCwd(), sessionFile, sessionDir: manager.getSessionDir() })
+    } catch {
+      setSubagentParentAnchor(undefined)
+    }
+  }
+
   onResourcesChanged(listener: () => void): Unsubscribe {
     this.resourceListeners.add(listener)
     return () => this.resourceListeners.delete(listener)
@@ -614,15 +550,18 @@ export class RealPiSession implements SessionRuntime {
   getHead(): SessionHead {
     const manager = this.runtime.session.sessionManager
     const header = toJson(manager.getHeader()) ?? null
-    const version = isJsonObject(header) && typeof header.version === "number" ? header.version : undefined
-    return sessionHeadFromParts({
-      sdkVersion: getLoadedSdk().version,
-      revision: this.nativeRevision,
-      sessionFormatVersion: version,
-      header: isJsonObject(header) ? header : null,
-      leafId: manager.getLeafId(),
-      entryCount: manager.getEntries().length,
-    }, manager.getSessionId())
+    const version = isJsonObject(header) && typeof header.version === 'number' ? header.version : undefined
+    return sessionHeadFromParts(
+      {
+        sdkVersion: getLoadedSdk().version,
+        revision: this.nativeRevision,
+        sessionFormatVersion: version,
+        header: isJsonObject(header) ? header : null,
+        leafId: manager.getLeafId(),
+        entryCount: manager.getEntries().length,
+      },
+      manager.getSessionId(),
+    )
   }
 
   getEntriesPage(cursor: string | undefined, limit: number, maxBytes: number): EntriesPage {
@@ -634,24 +573,31 @@ export class RealPiSession implements SessionRuntime {
     const manager = this.runtime.session.sessionManager
     this.syncLiveMessageFromAgentState()
     this.clearPersistedLiveMessage()
-    const checkpoint: BranchCheckpoint | undefined = cursor ? undefined : {
-      position: { epoch: this.eventEpoch, sequence: this.eventSequence },
-      liveMessage: this.liveMessage?.value,
-    }
-    return entriesPageFromEntries(this.getHead(), manager.getBranch(), { cursor, limit, maxBytes, checkpoint }, toJsonObject)
+    const checkpoint: BranchCheckpoint | undefined = cursor
+      ? undefined
+      : {
+          position: { epoch: this.eventEpoch, sequence: this.eventSequence },
+          liveMessage: this.liveMessage?.value,
+        }
+    return entriesPageFromEntries(
+      this.getHead(),
+      manager.getBranch(),
+      { cursor, limit, maxBytes, checkpoint },
+      toJsonObject,
+    )
   }
 
   getTree(): JsonValue {
     const tree = toJson(this.runtime.session.sessionManager.getTree())
     if (!Array.isArray(tree) || tree.some(node => !isJsonObject(node))) {
-      throw Object.assign(new Error("Pi session tree nodes are not JSON objects"), { code: "NATIVE_DATA_NOT_JSON" })
+      throw Object.assign(new Error('Pi session tree nodes are not JSON objects'), { code: 'NATIVE_DATA_NOT_JSON' })
     }
     return tree
   }
 
   getAttachment(entryId: string, blockIndex: number): JsonObject {
     const entry = this.runtime.session.sessionManager.getEntry(entryId)
-    if (!entry) throw Object.assign(new Error("entry not found"), { code: "NOT_FOUND" })
+    if (!entry) throw Object.assign(new Error('entry not found'), { code: 'NOT_FOUND' })
     return imageAttachmentFromEntry(toJsonObject(entry), blockIndex)
   }
 
@@ -665,7 +611,7 @@ export class RealPiSession implements SessionRuntime {
       sessionName: session.sessionManager.getSessionName() ?? null,
       cwd: session.sessionManager.getCwd(),
       model: toJson(session.model) ?? null,
-      thinkingLevel: String(session.thinkingLevel ?? "off"),
+      thinkingLevel: String(session.thinkingLevel ?? 'off'),
       isStreaming: Boolean(session.isStreaming),
       isCompacting: this.isCompactingFlag || Boolean(session.isCompacting),
       steeringMode: String(session.steeringMode),
@@ -736,23 +682,23 @@ export class RealPiSession implements SessionRuntime {
     })
     return {
       sdkVersion: getLoadedSdk().version,
-      tools: requireJsonValue(session.getAllTools()) as RegistrySnapshot["tools"],
+      tools: requireJsonValue(session.getAllTools()) as RegistrySnapshot['tools'],
       activeTools: session.getActiveToolNames?.() ?? [],
-      commands: requireJsonValue(
-        [
-          ...getLoadedSdk().builtinSlashCommands.map(command => ({
-            name: command.name,
-            description: command.description,
-            argumentHint: command.argumentHint,
-            sourceInfo: { source: "pi-sdk", builtin: true },
-          })),
-          ...extensions.extensions.flatMap(extension => [...extension.commands.values()].map(command => ({
+      commands: requireJsonValue([
+        ...getLoadedSdk().builtinSlashCommands.map(command => ({
+          name: command.name,
+          description: command.description,
+          argumentHint: command.argumentHint,
+          sourceInfo: { source: 'pi-sdk', builtin: true },
+        })),
+        ...extensions.extensions.flatMap(extension =>
+          [...extension.commands.values()].map(command => ({
             name: command.name,
             description: command.description,
             sourceInfo: toJson(command.sourceInfo),
-          }))),
-        ],
-      ) as RegistrySnapshot["commands"],
+          })),
+        ),
+      ]) as RegistrySnapshot['commands'],
       extensions: extensionDescriptors,
       eventHandlers: [...eventHandlers],
     }
@@ -760,22 +706,46 @@ export class RealPiSession implements SessionRuntime {
 
   async invokeTool(name: string, args?: JsonObject): Promise<JsonValue | undefined> {
     const runner = this.runtime.session.extensionRunner
-    if (!runner) throw Object.assign(new Error("extensions are not initialized"), { code: "CAPABILITY_DISABLED" })
+    if (!runner) throw Object.assign(new Error('extensions are not initialized'), { code: 'CAPABILITY_DISABLED' })
     const registered = runner.getAllRegisteredTools().find(tool => tool.definition.name === name)
-    if (!registered) throw Object.assign(new Error(`tool not found: ${name}`), { code: "NOT_FOUND" })
-    const result = await registered.definition.execute(randomUUID(), args ?? {}, undefined, undefined, runner.createContext())
-    this.emitHeadIfChanged()
-    return toJson(result)
+    if (!registered) throw Object.assign(new Error(`tool not found: ${name}`), { code: 'NOT_FOUND' })
+    if (typeof runner.createToolContext !== 'function') {
+      throw Object.assign(new Error('Pi SDK does not expose extension tool execution contexts'), {
+        code: 'PI_SDK_INCOMPATIBLE',
+      })
+    }
+    const toolCallId = randomUUID()
+    const reportFailure = this.extensionUi.captureFailureReporter()
+    try {
+      const result = await registered.definition.execute(
+        toolCallId,
+        args ?? {},
+        undefined,
+        undefined,
+        runner.createToolContext(toolCallId, undefined),
+      )
+      this.emitHeadIfChanged()
+      return toJson(result)
+    } catch (error) {
+      reportFailure(registered.sourceInfo.path, 'tool')
+      throw extensionActionError(error)
+    }
   }
 
   async invokeCommand(name: string, args?: string): Promise<JsonValue | undefined> {
     const runner = this.runtime.session.extensionRunner
-    if (!runner) throw Object.assign(new Error("extensions are not initialized"), { code: "CAPABILITY_DISABLED" })
+    if (!runner) throw Object.assign(new Error('extensions are not initialized'), { code: 'CAPABILITY_DISABLED' })
     const command = runner.getCommand(name)
-    if (!command) throw Object.assign(new Error(`command not found: ${name}`), { code: "NOT_FOUND" })
-    await command.handler(args ?? "", runner.createCommandContext())
-    this.emitHeadIfChanged()
-    return undefined
+    if (!command) throw Object.assign(new Error(`command not found: ${name}`), { code: 'NOT_FOUND' })
+    const reportFailure = this.extensionUi.captureFailureReporter()
+    try {
+      await command.handler(args ?? '', runner.createCommandContext())
+      this.emitHeadIfChanged()
+      return undefined
+    } catch (error) {
+      reportFailure(command.sourceInfo.path, 'command')
+      throw extensionActionError(error)
+    }
   }
 
   /**
@@ -785,7 +755,7 @@ export class RealPiSession implements SessionRuntime {
    */
   async getCommandCompletions(name: string, prefix: string): Promise<JsonValue | undefined> {
     const runner = this.runtime.session.extensionRunner
-    if (!runner) throw Object.assign(new Error("extensions are not initialized"), { code: "CAPABILITY_DISABLED" })
+    if (!runner) throw Object.assign(new Error('extensions are not initialized'), { code: 'CAPABILITY_DISABLED' })
     const command = runner.getCommand(name)
     if (!command?.getArgumentCompletions) return undefined
     const items = await command.getArgumentCompletions(prefix)
@@ -796,7 +766,7 @@ export class RealPiSession implements SessionRuntime {
     const manager = this.runtime.session.sessionManager
     const entries = manager.getEntries()
     const last = entries.at(-1)
-    return `${entries.length}:${manager.getLeafId() ?? ""}:${last?.id ?? ""}:${last?.timestamp ?? ""}`
+    return `${entries.length}:${manager.getLeafId() ?? ''}:${last?.id ?? ''}:${last?.timestamp ?? ''}`
   }
 
   private emitHeadIfChanged(): void {
@@ -813,28 +783,33 @@ export class RealPiSession implements SessionRuntime {
       const levels = this.runtime.session.getAvailableThinkingLevels?.() ?? []
       return levels.map(String)
     } catch {
-      return ["off", "minimal", "low", "medium", "high"]
+      return ['off', 'minimal', 'low', 'medium', 'high']
     }
   }
 
   private assertImageSupport(images: ImageInput[] | undefined): void {
     if (!images?.length) return
     const model = this.runtime.session.model as { input?: string[] } | undefined
-    if (!model?.input?.includes("image")) {
-      throw Object.assign(new Error("The selected Pi model does not support image input"), {
-        code: "CAPABILITY_DISABLED",
+    if (!model?.input?.includes('image')) {
+      throw Object.assign(new Error('The selected Pi model does not support image input'), {
+        code: 'CAPABILITY_DISABLED',
       })
     }
   }
 
-  async prompt(text: string, images?: ImageInput[], options: { expandPromptTemplates?: boolean; streamingBehavior?: "steer" | "followUp" } = {}): Promise<void> {
+  async prompt(
+    text: string,
+    images?: ImageInput[],
+    options: { expandPromptTemplates?: boolean; streamingBehavior?: 'steer' | 'followUp' } = {},
+  ): Promise<void> {
     try {
       this.assertImageSupport(images)
+      this.anchorSubagentParent()
       await this.runtime.session.prompt(text, {
         images: images?.length ? images : undefined,
         expandPromptTemplates: options.expandPromptTemplates,
         streamingBehavior: options.streamingBehavior,
-        source: "rpc",
+        source: 'rpc',
       })
     } finally {
       this.emitHeadIfChanged()
@@ -843,29 +818,25 @@ export class RealPiSession implements SessionRuntime {
 
   async steer(text: string, images?: ImageInput[]): Promise<void> {
     if (!this.runtime.session.isStreaming) {
-      throw Object.assign(new Error("Cannot steer an idle Pi session"), { code: "SESSION_CONFLICT" })
+      throw Object.assign(new Error('Cannot steer an idle Pi session'), { code: 'SESSION_CONFLICT' })
     }
     this.assertImageSupport(images)
+    this.anchorSubagentParent()
     await this.runtime.session.steer(text, images)
   }
 
   async followUp(text: string, images?: ImageInput[]): Promise<void> {
     if (!this.runtime.session.isStreaming) {
-      throw Object.assign(new Error("Cannot queue a follow-up on an idle Pi session"), { code: "SESSION_CONFLICT" })
+      throw Object.assign(new Error('Cannot queue a follow-up on an idle Pi session'), { code: 'SESSION_CONFLICT' })
     }
     this.assertImageSupport(images)
+    this.anchorSubagentParent()
     await this.runtime.session.followUp(text, images)
   }
 
-  async sendUserMessage(
-    text: string,
-    images?: ImageInput[],
-    deliverAs?: "steer" | "followUp",
-  ): Promise<void> {
+  async sendUserMessage(text: string, images?: ImageInput[], deliverAs?: 'steer' | 'followUp'): Promise<void> {
     this.assertImageSupport(images)
-    const content = images?.length
-      ? [{ type: "text" as const, text }, ...images]
-      : text
+    const content = images?.length ? [{ type: 'text' as const, text }, ...images] : text
     try {
       await this.runtime.session.sendUserMessage(content, deliverAs ? { deliverAs } : undefined)
     } finally {
@@ -884,7 +855,7 @@ export class RealPiSession implements SessionRuntime {
     const result = await this.runtime.newSession({ parentSession })
     if (!result.cancelled) this.emitHeadIfChanged()
     return {
-      operation: "new",
+      operation: 'new',
       sourceSessionId,
       targetSessionId: this.getSessionId(),
       targetSessionFile: this.getSessionFile() ?? null,
@@ -900,7 +871,7 @@ export class RealPiSession implements SessionRuntime {
     const result = await this.runtime.switchSession(targetPath, { cwdOverride })
     if (!result.cancelled) this.emitHeadIfChanged()
     return {
-      operation: "switch",
+      operation: 'switch',
       sourceSessionId,
       targetSessionId: this.getSessionId(),
       targetSessionFile: this.getSessionFile() ?? null,
@@ -909,12 +880,12 @@ export class RealPiSession implements SessionRuntime {
     }
   }
 
-  async fork(entryId: string, position: "before" | "at"): Promise<JsonObject> {
+  async fork(entryId: string, position: 'before' | 'at'): Promise<JsonObject> {
     const sourceSessionId = this.getSessionId()
     const result = await this.runtime.fork(entryId, { position })
     if (!result.cancelled) this.emitHeadIfChanged()
     return {
-      operation: "fork",
+      operation: 'fork',
       sourceSessionId,
       targetSessionId: this.getSessionId(),
       targetSessionFile: this.getSessionFile() ?? null,
@@ -928,7 +899,7 @@ export class RealPiSession implements SessionRuntime {
     const sourceSessionId = this.getSessionId()
     const sourcePath = resolveUserPath(inputPath)
     if (!existsSync(sourcePath)) {
-      throw Object.assign(new Error(`Import file not found: ${sourcePath}`), { code: "NOT_FOUND" })
+      throw Object.assign(new Error(`Import file not found: ${sourcePath}`), { code: 'NOT_FOUND' })
     }
     const sessionDir = this.runtime.session.sessionManager.getSessionDir()
     mkdirSync(sessionDir, { recursive: true })
@@ -940,7 +911,7 @@ export class RealPiSession implements SessionRuntime {
       keepStagedFile = !result.cancelled
       if (!result.cancelled) this.emitHeadIfChanged()
       return {
-        operation: "import",
+        operation: 'import',
         sourceSessionId,
         targetSessionId: this.getSessionId(),
         targetSessionFile: this.getSessionFile() ?? null,
@@ -966,15 +937,17 @@ export class RealPiSession implements SessionRuntime {
   async setModel(provider: string, modelId: string): Promise<void> {
     const session = this.runtime.session
     const model = session.modelRuntime?.getModel?.(provider, modelId)
-    if (!model) throw Object.assign(new Error(`model not found: ${provider}/${modelId}`), { code: "MODEL_NOT_AVAILABLE" })
+    if (!model)
+      throw Object.assign(new Error(`model not found: ${provider}/${modelId}`), { code: 'MODEL_NOT_AVAILABLE' })
     await session.setModel(model)
   }
 
-  async cycleModel(direction: "forward" | "backward" = "forward"): Promise<void> {
+  async cycleModel(direction: 'forward' | 'backward' = 'forward'): Promise<void> {
     const result = await this.runtime.session.cycleModel(direction)
-    if (!result) throw Object.assign(new Error("no authenticated model is available to cycle to"), {
-      code: "MODEL_NOT_AVAILABLE",
-    })
+    if (!result)
+      throw Object.assign(new Error('no authenticated model is available to cycle to'), {
+        code: 'MODEL_NOT_AVAILABLE',
+      })
   }
 
   async setScopedModels(patterns: string[]): Promise<JsonValue | undefined> {
@@ -992,18 +965,18 @@ export class RealPiSession implements SessionRuntime {
   async cycleThinkingLevel(): Promise<JsonValue | undefined> {
     const level = this.runtime.session.cycleThinkingLevel()
     if (level === undefined) {
-      throw Object.assign(new Error("the selected Pi model does not support thinking levels"), {
-        code: "CAPABILITY_DISABLED",
+      throw Object.assign(new Error('the selected Pi model does not support thinking levels'), {
+        code: 'CAPABILITY_DISABLED',
       })
     }
     return String(level)
   }
 
-  async setSteeringMode(mode: "all" | "one-at-a-time"): Promise<void> {
+  async setSteeringMode(mode: 'all' | 'one-at-a-time'): Promise<void> {
     this.runtime.session.setSteeringMode(mode)
   }
 
-  async setFollowUpMode(mode: "all" | "one-at-a-time"): Promise<void> {
+  async setFollowUpMode(mode: 'all' | 'one-at-a-time'): Promise<void> {
     this.runtime.session.setFollowUpMode(mode)
   }
 
@@ -1015,16 +988,16 @@ export class RealPiSession implements SessionRuntime {
     try {
       const result = await this.runtime.session.compact(customInstructions)
       this.emitHeadIfChanged()
-      return toJson({ status: "completed", result })
+      return toJson({ status: 'completed', result })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (/nothing to compact/i.test(message)) {
-        return { status: "skipped", reason: "session_too_small", message }
+        return { status: 'skipped', reason: 'session_too_small', message }
       }
       if (/already compacted/i.test(message)) {
-        return { status: "skipped", reason: "already_compacted", message }
+        return { status: 'skipped', reason: 'already_compacted', message }
       }
-      if (/compaction cancelled/i.test(message)) return { status: "aborted" }
+      if (/compaction cancelled/i.test(message)) return { status: 'aborted' }
       throw error
     }
   }
@@ -1051,10 +1024,10 @@ export class RealPiSession implements SessionRuntime {
 
   async bash(command: string, excludeFromContext = false, clientId?: string): Promise<JsonValue | undefined> {
     const normalized = command.trim()
-    if (!normalized) throw Object.assign(new Error("empty bash command"), { code: "INVALID_REQUEST" })
+    if (!normalized) throw Object.assign(new Error('empty bash command'), { code: 'INVALID_REQUEST' })
     try {
       const eventResult = await this.runtime.session.extensionRunner?.emitUserBash({
-        type: "user_bash",
+        type: 'user_bash',
         command: normalized,
         excludeFromContext,
         cwd: this.getCwd(),
@@ -1065,11 +1038,13 @@ export class RealPiSession implements SessionRuntime {
       }
       // clientId 透传为 bash_execution_update 事件的 id：前端用它关联乐观
       // 条目的实时输出（pi TUI 的 onChunk 对应物，经事件流转发）。
-      return toJson(await this.runtime.session.executeBash(normalized, undefined, {
-        excludeFromContext,
-        operations: eventResult?.operations,
-        id: clientId,
-      }))
+      return toJson(
+        await this.runtime.session.executeBash(normalized, undefined, {
+          excludeFromContext,
+          operations: eventResult?.operations,
+          id: clientId,
+        }),
+      )
     } finally {
       this.emitHeadIfChanged()
     }
@@ -1084,7 +1059,7 @@ export class RealPiSession implements SessionRuntime {
     const normalized = [...new Set(toolNames)]
     const unknown = normalized.filter(name => !available.has(name))
     if (unknown.length > 0) {
-      throw Object.assign(new Error(`Unknown Pi tools: ${unknown.join(", ")}`), { code: "INVALID_REQUEST" })
+      throw Object.assign(new Error(`Unknown Pi tools: ${unknown.join(', ')}`), { code: 'INVALID_REQUEST' })
     }
     this.runtime.session.setActiveToolsByName(normalized)
   }
@@ -1102,16 +1077,16 @@ export class RealPiSession implements SessionRuntime {
       this.isCompactingFlag = true
       this.compactionShadow = {
         ...this.compactionShadow,
-        operation: { type: "branchSummary", phase: "running", targetEntryId: entryId },
+        operation: { type: 'branchSummary', phase: 'running', targetEntryId: entryId },
       }
     }
-    let result: Awaited<ReturnType<AgentSessionRuntime["session"]["navigateTree"]>>
+    let result: Awaited<ReturnType<AgentSessionRuntime['session']['navigateTree']>>
     try {
       result = await this.runtime.session.navigateTree(entryId, options)
     } finally {
       if (options.summarize) {
         this.isCompactingFlag = false
-        this.compactionShadow = { ...this.compactionShadow, operation: { type: "none" } }
+        this.compactionShadow = { ...this.compactionShadow, operation: { type: 'none' } }
       }
     }
     if (!result.cancelled) this.emitHeadIfChanged()
@@ -1130,30 +1105,33 @@ export class RealPiSession implements SessionRuntime {
 
   async sendCustomMessage(
     customType: string,
-    content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>,
+    content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>,
     options: {
       display: boolean
       details?: JsonValue
       triggerTurn?: boolean
-      deliverAs?: "steer" | "followUp" | "nextTurn"
+      deliverAs?: 'steer' | 'followUp' | 'nextTurn'
     },
   ): Promise<void> {
-    if (!customType.trim()) throw Object.assign(new Error("custom message type required"), { code: "INVALID_REQUEST" })
-    await this.runtime.session.sendCustomMessage({
-      customType: customType.trim(),
-      content,
-      display: options.display,
-      details: options.details,
-    }, {
-      triggerTurn: options.triggerTurn,
-      deliverAs: options.deliverAs,
-    })
+    if (!customType.trim()) throw Object.assign(new Error('custom message type required'), { code: 'INVALID_REQUEST' })
+    await this.runtime.session.sendCustomMessage(
+      {
+        customType: customType.trim(),
+        content,
+        display: options.display,
+        details: options.details,
+      },
+      {
+        triggerTurn: options.triggerTurn,
+        deliverAs: options.deliverAs,
+      },
+    )
     this.emitHeadIfChanged()
   }
 
   async appendCustomEntry(customType: string, data?: JsonValue): Promise<void> {
     const normalized = customType.trim()
-    if (!normalized) throw Object.assign(new Error("custom entry type required"), { code: "INVALID_REQUEST" })
+    if (!normalized) throw Object.assign(new Error('custom entry type required'), { code: 'INVALID_REQUEST' })
     this.runtime.session.sessionManager.appendCustomEntry(normalized, data)
     this.emitHeadIfChanged()
   }
@@ -1171,82 +1149,23 @@ export class RealPiSession implements SessionRuntime {
   }
 
   async reload(): Promise<void> {
-    this.extensionUi.cancelAll("runtime_reloaded")
-    await this.runtime.session.reload()
-    this.nativeFingerprint = ""
+    this.extensionUi.cancelAll('runtime_reloaded')
+    await this.runtime.session.reload({ beforeSessionStart: async () => this.bindExtensionErrors() })
+    this.reportExtensionLoadErrors()
+    this.nativeFingerprint = ''
     this.emitHeadIfChanged()
     for (const listener of this.resourceListeners) listener()
   }
 
   async dispose(): Promise<void> {
-    this.extensionUi.cancelAll("runtime_disposed")
+    this.extensionUi.cancelAll('runtime_disposed')
     this.detachSessionSubscriptions()
+    for (const unsub of this.childSessionBusUnsubs) unsub()
+    this.childSessionBusUnsubs = []
+    this.childSessionListeners.clear()
     this.piEventListeners.clear()
     this.headListeners.clear()
     this.resourceListeners.clear()
     await this.runtime.dispose()
   }
-}
-
-function toJson(value: unknown): JsonValue | undefined {
-  if (value === undefined) return undefined
-  return JSON.parse(JSON.stringify(value, (_key, item) => {
-    if (typeof item === "bigint") return item.toString()
-    if (typeof item === "function" || typeof item === "symbol") return undefined
-    if (item instanceof Error) return { name: item.name, message: item.message, stack: item.stack }
-    return item
-  })) as JsonValue
-}
-
-function toJsonObject(value: unknown): JsonObject {
-  const json = toJson(value)
-  if (!isJsonObject(json)) {
-    throw Object.assign(new Error("Pi native data is not a JSON object"), { code: "NATIVE_DATA_NOT_JSON" })
-  }
-  return json
-}
-
-function pathKey(value: string): string {
-  const resolved = path.resolve(value)
-  return process.platform === "win32" ? resolved.toLowerCase() : resolved
-}
-
-async function assertSessionFileInside(rootPath: string, sessionFile: string): Promise<void> {
-  const root = await realpath(path.resolve(rootPath))
-  const target = await realpath(path.resolve(sessionFile))
-  const rootKey = process.platform === "win32" ? root.toLowerCase() : root
-  const targetKey = process.platform === "win32" ? target.toLowerCase() : target
-  if (targetKey !== rootKey && !targetKey.startsWith(rootKey + path.sep)) {
-    throw Object.assign(new Error("Pi session file is outside the session directory"), { code: "PATH_OUTSIDE_WORKSPACE" })
-  }
-}
-
-async function resolveProjectTrustFromExtensions(
-  cwd: string,
-  agentDir: string,
-  extensionsResult: LoadExtensionsResult,
-  defaultDecision: "always" | "never" | "ask",
-): Promise<boolean> {
-  const { ProjectTrustStore, hasTrustRequiringProjectResources } = getLoadedSdk().sdk
-  if (!hasTrustRequiringProjectResources(cwd)) return true
-
-  const trustStore = new ProjectTrustStore(agentDir)
-  const context = projectTrustContextForRpc(cwd)
-  for (const extension of extensionsResult.extensions) {
-    const handlers = extension.handlers.get("project_trust") ?? []
-    for (const handler of handlers) {
-      const result = await handler({ type: "project_trust", cwd }, context) as {
-        trusted: "yes" | "no" | "undecided"
-        remember?: boolean
-      }
-      if (result.trusted === "undecided") continue
-      const trusted = result.trusted === "yes"
-      if (result.remember === true) trustStore.set(cwd, trusted)
-      return trusted
-    }
-  }
-
-  const stored = trustStore.get(cwd)
-  if (stored !== null) return stored
-  return defaultDecision === "always"
 }

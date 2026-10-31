@@ -1,4 +1,4 @@
-import type { JsonObject } from "@piui/protocol"
+import type { JsonObject } from '@piui/protocol'
 
 export interface SchedulerCommand {
   type: string
@@ -30,7 +30,7 @@ export function createWorkerCommandScheduler<T>(
 
   const schedule = ((command: SchedulerCommand): Promise<T> => {
     if (closing) {
-      return Promise.reject(Object.assign(new Error("worker scheduler is closing"), { code: "RUNTIME_CLOSING" }))
+      return Promise.reject(Object.assign(new Error('worker scheduler is closing'), { code: 'RUNTIME_CLOSING' }))
     }
     const result = execute(command)
     inFlight.add(result)

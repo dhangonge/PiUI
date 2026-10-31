@@ -1,4 +1,3 @@
-
 export interface UiSession {
   id: string
   directory: string

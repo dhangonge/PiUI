@@ -1,8 +1,10 @@
-import type { ReactNode } from 'react'
-import { render, screen } from '@testing-library/react'
+import { StrictMode, type ReactNode } from 'react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { isEntryGrowComplete, resetEntryGrowCompletionsForTests } from '../../utils/entryGrow'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   MessageRenderer,
+  ProcessCollapseBlock,
   assistantHasFinalContent,
   assistantHasProcessContent,
   splitProcessRenderItems,
@@ -13,9 +15,8 @@ import type { PiAssistantMessageItem, PiUserMessageItem } from '../../pi/domain/
 let mockRenderUserMarkdown = false
 let mockCollapseUserMessages = false
 
-vi.mock('motion/mini', () => ({
-  animate: () => Promise.resolve(),
-}))
+const animation = vi.hoisted(() => ({ animate: vi.fn(() => Object.assign(Promise.resolve(), { stop: vi.fn() })) }))
+vi.mock('motion/mini', () => animation)
 
 vi.mock('../../hooks', () => ({
   useDelayedRender: (show: boolean) => show,
@@ -34,7 +35,17 @@ vi.mock('../../hooks/useTheme', () => ({
   useTheme: () => ({
     collapseUserMessages: mockCollapseUserMessages,
     renderUserMarkdown: mockRenderUserMarkdown,
-    stepFinishDisplay: { latestOnly: true, turnDuration: false, tokens: true, cache: true, cost: true, duration: true, agent: false, model: false, completedAt: false },
+    stepFinishDisplay: {
+      latestOnly: true,
+      turnDuration: false,
+      tokens: true,
+      cache: true,
+      cost: true,
+      duration: true,
+      agent: false,
+      model: false,
+      completedAt: false,
+    },
     actionsOnLatestAssistantOnly: true,
     descriptiveToolSteps: false,
     immersiveMode: false,
@@ -58,7 +69,13 @@ vi.mock('./parts', () => ({
 }))
 
 function rawEntry(id: string): SessionMessageEntry {
-  return { type: 'message', id, parentId: null, timestamp: '2026-01-01T00:00:01Z', message: { role: 'user', content: '', timestamp: 1 } }
+  return {
+    type: 'message',
+    id,
+    parentId: null,
+    timestamp: '2026-01-01T00:00:01Z',
+    message: { role: 'user', content: '', timestamp: 1 },
+  }
 }
 
 function createAssistantItem(text: string): PiAssistantMessageItem {
@@ -73,7 +90,14 @@ function createAssistantItem(text: string): PiAssistantMessageItem {
       api: 'anthropic-messages',
       provider: 'anthropic',
       model: 'model-1',
-      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
       stopReason: 'stop',
       timestamp: 1,
     },
@@ -162,6 +186,56 @@ describe('MessageRenderer assistant fork', () => {
   })
 })
 
+describe('entry animation lifecycle', () => {
+  beforeEach(() => {
+    resetEntryGrowCompletionsForTests()
+    animation.animate.mockClear()
+  })
+
+  it('finishes on normal completion and clears fixed styles', async () => {
+    const item = { ...createUserTextItem('animated'), timestamp: Date.now() }
+    const complete = vi.fn()
+    render(<MessageRenderer item={item} onEntryGrowComplete={complete} />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(isEntryGrowComplete(item.entryId)).toBe(true)
+    expect(complete).toHaveBeenCalledWith(item.entryId)
+  })
+
+  it('stops the first animation during StrictMode replay', async () => {
+    const item = { ...createUserTextItem('strict animation'), timestamp: Date.now() }
+    const { container, unmount } = render(
+      <StrictMode>
+        <MessageRenderer item={item} />
+      </StrictMode>,
+    )
+    const controls = animation.animate.mock.results[0]?.value
+    expect(controls?.stop).toHaveBeenCalledOnce()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(container.querySelector('[style*="clip-path"]')).toBeNull()
+    unmount()
+    expect(isEntryGrowComplete(item.entryId)).toBe(true)
+  })
+})
+
+describe('process shell disclosure', () => {
+  it('stays collapsed through tool activity and preserves an explicit user expansion', () => {
+    const props = { stateKey: 'process-no-auto-flash', children: <div>Process details</div> }
+    const { rerender } = render(<ProcessCollapseBlock {...props} isActive={false} />)
+    rerender(<ProcessCollapseBlock {...props} isActive />)
+    expect(screen.queryByText('Process details')).toBeNull()
+    rerender(<ProcessCollapseBlock {...props} isActive={false} />)
+    expect(screen.queryByText('Process details')).toBeNull()
+    fireEvent.click(screen.getByRole('button'))
+    expect(screen.getByText('Process details')).toBeTruthy()
+    rerender(<ProcessCollapseBlock {...props} isActive />)
+    expect(screen.getByText('Process details')).toBeTruthy()
+  })
+})
+
 describe('process content split', () => {
   function createCompletedAssistantItem(blocks: PiAssistantMessageItem['blocks']): PiAssistantMessageItem {
     return {
@@ -175,7 +249,14 @@ describe('process content split', () => {
         api: 'anthropic-messages',
         provider: 'anthropic',
         model: 'model-1',
-        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
         stopReason: 'stop',
         timestamp: 2,
       },

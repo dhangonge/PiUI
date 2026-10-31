@@ -58,3 +58,14 @@ class PiModelsStore {
 }
 
 export const piModelsStore = new PiModelsStore()
+const serverStores = new Map<string, PiModelsStore>()
+
+export function getPiModelsStore(serverId?: string): PiModelsStore {
+  if (serverId === undefined) return piModelsStore
+  let store = serverStores.get(serverId)
+  if (!store) {
+    store = new PiModelsStore()
+    serverStores.set(serverId, store)
+  }
+  return store
+}

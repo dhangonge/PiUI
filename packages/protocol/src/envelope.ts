@@ -1,6 +1,6 @@
-import type { JsonObject, JsonValue } from "./json.js"
-import type { Problem } from "./problem.js"
-import { EVENT_WS_SUBPROTOCOL, PROTOCOL_VERSION } from "./version.js"
+import type { JsonObject, JsonValue } from './json.js'
+import type { Problem } from './problem.js'
+import { EVENT_WS_SUBPROTOCOL, PROTOCOL_VERSION } from './version.js'
 
 export type CommandEnvelope = {
   id: string
@@ -9,13 +9,7 @@ export type CommandEnvelope = {
   params?: JsonObject
 }
 
-export type CommandStatus =
-  | "accepted"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "unknown_after_crash"
+export type CommandStatus = 'accepted' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown_after_crash'
 
 export type CommandRecord = {
   id: string
@@ -29,7 +23,7 @@ export type CommandRecord = {
   error?: Problem
 }
 
-export type EventStreamKind = "server" | "workspace" | "session" | "provider" | "resources"
+export type EventStreamKind = 'server' | 'workspace' | 'session' | 'provider' | 'resources'
 
 export type EventStreamRef = {
   kind: EventStreamKind
@@ -42,22 +36,23 @@ export type EventCursor = {
 }
 
 export type EventChannel =
-  | "pi.event"
-  | "session.head"
-  | "command.updated"
-  | "extension.ui"
-  | "provider.auth"
-  | "packages.progress"
-  | "registry.updated"
-  | "workspace.files"
-  | "workspace.git"
-  | "sessions.updated"
-  | "sessions.activity"
-  | "resources.updated"
-  | "terminal.created"
-  | "terminal.updated"
-  | "terminal.exited"
-  | "terminal.deleted"
+  | 'pi.event'
+  | 'session.head'
+  | 'command.updated'
+  | 'extension.ui'
+  | 'subagent.child'
+  | 'provider.auth'
+  | 'packages.progress'
+  | 'registry.updated'
+  | 'workspace.files'
+  | 'workspace.git'
+  | 'sessions.updated'
+  | 'sessions.activity'
+  | 'resources.updated'
+  | 'terminal.created'
+  | 'terminal.updated'
+  | 'terminal.exited'
+  | 'terminal.deleted'
 
 export type EventEnvelope = {
   protocolVersion: typeof PROTOCOL_VERSION
@@ -70,26 +65,22 @@ export type EventEnvelope = {
 }
 
 export type EventStreamKey =
-  | "server"
-  | `workspace:${string}`
-  | `session:${string}`
-  | `provider:${string}`
-  | `resources:${string}`
+  'server' | `workspace:${string}` | `session:${string}` | `provider:${string}` | `resources:${string}`
 
 export type EventCursorMap = Partial<Record<EventStreamKey, EventCursor>>
 
-export type EventResyncReason = "missing_cursor" | "epoch_mismatch" | "future_cursor" | "history_expired"
+export type EventResyncReason = 'missing_cursor' | 'epoch_mismatch' | 'future_cursor' | 'history_expired'
 
 export function eventStreamKey(stream: EventStreamRef): EventStreamKey {
-  return stream.kind === "server" ? "server" : `${stream.kind}:${encodeURIComponent(stream.id)}`
+  return stream.kind === 'server' ? 'server' : `${stream.kind}:${encodeURIComponent(stream.id)}`
 }
 
 export function parseEventStreamKey(key: string): EventStreamRef | null {
-  if (key === "server") return { kind: "server", id: "server" }
-  const separator = key.indexOf(":")
+  if (key === 'server') return { kind: 'server', id: 'server' }
+  const separator = key.indexOf(':')
   if (separator <= 0) return null
   const kind = key.slice(0, separator)
-  if (kind !== "workspace" && kind !== "session" && kind !== "provider" && kind !== "resources") return null
+  if (kind !== 'workspace' && kind !== 'session' && kind !== 'provider' && kind !== 'resources') return null
   try {
     const id = decodeURIComponent(key.slice(separator + 1))
     return id ? { kind, id } : null
@@ -99,29 +90,29 @@ export function parseEventStreamKey(key: string): EventStreamRef | null {
 }
 
 export type EventSubscribeMessage = {
-  type: "subscribe"
+  type: 'subscribe'
   protocolVersion: typeof PROTOCOL_VERSION
   streams: EventStreamRef[]
   cursors: EventCursorMap
 }
 
-export type EventClientMessage = EventSubscribeMessage | { type: "ping"; protocolVersion: typeof PROTOCOL_VERSION }
+export type EventClientMessage = EventSubscribeMessage | { type: 'ping'; protocolVersion: typeof PROTOCOL_VERSION }
 
 export type EventServerMessage =
   | {
-      type: "hello"
+      type: 'hello'
       protocolVersion: typeof PROTOCOL_VERSION
-      service: "piui-server"
+      service: 'piui-server'
       subprotocol: typeof EVENT_WS_SUBPROTOCOL
     }
-  | { channel: "event"; event: EventEnvelope }
+  | { channel: 'event'; event: EventEnvelope }
   | {
-      channel: "control"
-      type: "resync_required"
+      channel: 'control'
+      type: 'resync_required'
       streams: Partial<Record<EventStreamKey, { cursor: EventCursor; reason: EventResyncReason }>>
     }
-  | { channel: "control"; type: "problem"; problem: Problem }
-  | { type: "pong"; protocolVersion: typeof PROTOCOL_VERSION; t: number }
+  | { channel: 'control'; type: 'problem'; problem: Problem }
+  | { type: 'pong'; protocolVersion: typeof PROTOCOL_VERSION; t: number }
 
 export type CommandAcceptedResponse = {
   command: CommandRecord

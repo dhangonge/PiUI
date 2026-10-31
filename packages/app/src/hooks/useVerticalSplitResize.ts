@@ -178,19 +178,22 @@ export function useVerticalSplitResize({
     [applyHeight, containerRef, defaultPrimaryHeightRatio, finishResize, primaryRef],
   )
 
-  const adjustSplitHeight = useCallback((delta: number) => {
-    const container = containerRef.current
-    const primary = primaryRef.current
-    if (!container || !primary) return
-    const containerHeight = container.getBoundingClientRect().height
-    const current = currentHeightRef.current ?? primary.getBoundingClientRect().height
-    const maxHeight = Math.max(0, containerHeight - minSecondaryHeight)
-    const effectiveMinHeight = Math.min(minPrimaryHeight, maxHeight)
-    const next = Math.min(Math.max(current + delta, effectiveMinHeight), maxHeight)
-    primary.style.setProperty(cssVariableName, `${next}px`)
-    currentHeightRef.current = next
-    setSplitHeight(next)
-  }, [containerRef, cssVariableName, minPrimaryHeight, minSecondaryHeight, primaryRef])
+  const adjustSplitHeight = useCallback(
+    (delta: number) => {
+      const container = containerRef.current
+      const primary = primaryRef.current
+      if (!container || !primary) return
+      const containerHeight = container.getBoundingClientRect().height
+      const current = currentHeightRef.current ?? primary.getBoundingClientRect().height
+      const maxHeight = Math.max(0, containerHeight - minSecondaryHeight)
+      const effectiveMinHeight = Math.min(minPrimaryHeight, maxHeight)
+      const next = Math.min(Math.max(current + delta, effectiveMinHeight), maxHeight)
+      primary.style.setProperty(cssVariableName, `${next}px`)
+      currentHeightRef.current = next
+      setSplitHeight(next)
+    },
+    [containerRef, cssVariableName, minPrimaryHeight, minSecondaryHeight, primaryRef],
+  )
 
   return {
     splitHeight,

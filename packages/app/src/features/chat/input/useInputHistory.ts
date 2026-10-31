@@ -46,9 +46,13 @@ export function useInputHistory({ textareaRef }: UseInputHistoryOptions): UseInp
     for (const entry of branch?.items ?? []) {
       if (entry.type !== 'message' || entry.message.role !== 'user') continue
       const raw = entry.message.content
-      const t = (typeof raw === 'string'
-        ? raw
-        : raw.filter((block): block is TextContent => block.type === 'text').map(block => block.text).join('\n')
+      const t = (
+        typeof raw === 'string'
+          ? raw
+          : raw
+              .filter((block): block is TextContent => block.type === 'text')
+              .map(block => block.text)
+              .join('\n')
       ).trim()
       if (!t || seen.has(t)) continue
       seen.add(t)

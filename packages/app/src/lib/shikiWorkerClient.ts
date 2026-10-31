@@ -62,6 +62,8 @@ function getWorker(): Worker {
     workerReadyPromiseReject?.(error)
     pendingRequests.forEach(pending => pending.reject(error))
     pendingRequests.clear()
+    // 客户端将放弃这个实例；dispose 在 worker 为 null 时不能再清理标记。
+    latestRequestByKey.clear()
     workerReady = null
     workerReadyPromiseResolve = null
     workerReadyPromiseReject = null
@@ -81,11 +83,13 @@ export function ensureShikiWorkerReady(): Promise<void> {
   // 预加载用户当前选择的主题；其他主题在第一次 highlight 时 lazy load。
   // 用 localStorage 直接读避免循环依赖（themeStore 也会反向引用此模块树）。
   const light = normalizeCodeBlockTheme(
-    typeof localStorage !== 'undefined' && localStorage.getItem('piui-code-block-theme-light') || DEFAULT_CODE_BLOCK_THEME_LIGHT,
+    (typeof localStorage !== 'undefined' && localStorage.getItem('piui-code-block-theme-light')) ||
+      DEFAULT_CODE_BLOCK_THEME_LIGHT,
     DEFAULT_CODE_BLOCK_THEME_LIGHT,
   )
   const dark = normalizeCodeBlockTheme(
-    typeof localStorage !== 'undefined' && localStorage.getItem('piui-code-block-theme-dark') || DEFAULT_CODE_BLOCK_THEME_DARK,
+    (typeof localStorage !== 'undefined' && localStorage.getItem('piui-code-block-theme-dark')) ||
+      DEFAULT_CODE_BLOCK_THEME_DARK,
     DEFAULT_CODE_BLOCK_THEME_DARK,
   )
   const themes = Array.from(new Set<BundledTheme>([light, dark]))
@@ -122,6 +126,23 @@ function splitTokensIntoLines(tokens: WorkerToken[]): HighlightTokens {
   return lines
 }
 
+type HighlightResponse = Extract<WorkerResponse, { type: 'highlight' }>
+
+/**
+ * 一次性请求（完整 token / html）在 worker 侧不留流状态，客户端 key 标记也应随请求结算释放；
+ * 流式请求的 key 对应 worker 里的 tokenizer，必须由调用方 dispose 释放。
+ */
+function isOneShot(params: { mode: 'tokens' | 'html'; complete?: boolean }): boolean {
+  return params.complete === true || params.mode === 'html'
+}
+
+/** 只有仍是该 key 的 latest 请求才有权释放标记，旧请求不得抹掉新请求的标记。 */
+function releaseLatestKey(key: string, id: number): boolean {
+  if (latestRequestByKey.get(key) !== id) return false
+  latestRequestByKey.delete(key)
+  return true
+}
+
 async function workerHighlight(params: {
   key: string
   text: string
@@ -129,19 +150,31 @@ async function workerHighlight(params: {
   theme: BundledTheme
   mode: 'tokens' | 'html'
   complete?: boolean
-}): Promise<Extract<WorkerResponse, { type: 'highlight' }>> {
+}): Promise<HighlightResponse> {
   await ensureShikiWorkerReady()
 
   const id = nextId++
   const w = getWorker()
+  const oneShot = isOneShot(params)
   latestRequestByKey.set(params.key, id)
 
-  return new Promise<Extract<WorkerResponse, { type: 'highlight' }>>((resolve, reject) => {
+  return new Promise<HighlightResponse>((resolve, reject) => {
     pendingRequests.set(id, {
       resolve: resolve as (response: WorkerResponse) => void,
-      reject,
+      // 失败没有消费方可以做判定，只能在这里按 requestId 守卫释放。
+      reject: error => {
+        if (oneShot) releaseLatestKey(params.key, id)
+        reject(error)
+      },
     })
-    w.postMessage({ type: 'highlight', id, ...params } satisfies WorkerRequest)
+    try {
+      w.postMessage({ type: 'highlight', id, ...params } satisfies WorkerRequest)
+    } catch (error) {
+      // 本次请求未发出，不会收到响应；旧流是否仍在 Worker 中不由此处判断。
+      pendingRequests.delete(id)
+      releaseLatestKey(params.key, id)
+      reject(error)
+    }
   })
 }
 
@@ -152,12 +185,20 @@ export async function highlightTokensInWorker(params: {
   theme: BundledTheme
   complete?: boolean
 }): Promise<{ id: number; code: string; tokens: HighlightTokens }> {
+  const oneShot = params.complete === true
   const result = await workerHighlight({ ...params, mode: 'tokens' })
-  if (result.id !== latestRequestByKey.get(params.key)) throw new Error('superseded')
-  return {
-    id: result.id,
-    code: result.code,
-    tokens: splitTokensIntoLines([...result.stable, ...result.unstable]),
+  try {
+    // latest 判定留在消费时点（await 之后），与重构前一致：响应到达后、
+    // 消费前的 dispose 或新请求都算 superseded。
+    if (result.id !== latestRequestByKey.get(params.key)) throw new Error('superseded')
+    return {
+      id: result.id,
+      code: result.code,
+      tokens: splitTokensIntoLines([...result.stable, ...result.unstable]),
+    }
+  } finally {
+    // 一次性请求的标记在判定通过后才释放；superseded 时 Map 已指向别的请求，释放会自守卫为空操作。
+    if (oneShot) releaseLatestKey(params.key, result.id)
   }
 }
 
@@ -168,8 +209,12 @@ export async function highlightHtmlInWorker(params: {
   theme: BundledTheme
 }): Promise<{ id: number; html: string }> {
   const result = await workerHighlight({ ...params, mode: 'html', complete: true })
-  if (result.id !== latestRequestByKey.get(params.key)) throw new Error('superseded')
-  return { id: result.id, html: result.html ?? '' }
+  try {
+    if (result.id !== latestRequestByKey.get(params.key)) throw new Error('superseded')
+    return { id: result.id, html: result.html ?? '' }
+  } finally {
+    releaseLatestKey(params.key, result.id)
+  }
 }
 
 export function disposeShikiWorkerKey(key: string) {

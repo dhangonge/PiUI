@@ -1,14 +1,24 @@
-import { existsSync, promises as fs } from "node:fs"
-import { homedir } from "node:os"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-import type { JsonObject, JsonValue } from "@piui/protocol"
-import { isJsonObject, requireJsonValue } from "@piui/protocol"
-import type { SettingsManager } from "@earendil-works/pi-coding-agent"
-import { getLoadedSdk } from "../sdk-host.js"
-import type { CatalogProvider } from "../runtime.js"
-import type { PackagesGateway } from "../command-table.js"
-import { entriesPageFromEntries, sessionHeadFromParts } from "./pagination.js"
+import { existsSync, promises as fs } from 'node:fs'
+import { homedir } from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import type { JsonObject, JsonValue } from '@piui/protocol'
+import { isJsonObject, requireJsonValue } from '@piui/protocol'
+import type { SettingsManager } from '@earendil-works/pi-coding-agent'
+import { getLoadedSdk } from '../sdk-host.js'
+import type { CatalogProvider } from '../runtime.js'
+import type { PackagesGateway } from '../command-table.js'
+import { entriesPageFromEntries, sessionHeadFromParts } from './pagination.js'
+import {
+  findSessionFileById,
+  isSessionListCacheEnabled,
+  listAllSessionInfos,
+  listSessionInfos,
+  readSessionHeader,
+  searchSnippet,
+  sessionMatchesSearch,
+  type SessionListInfo,
+} from './session-list-cache.js'
 
 /**
  * Windows callers hand us backslash paths, but pi encodes the cwd into the
@@ -16,7 +26,7 @@ import { entriesPageFromEntries, sessionHeadFromParts } from "./pagination.js"
  * try to mkdir a nested folder and fail. Normalize once at the boundary.
  */
 export function normalizeCwd(cwd: string): string {
-  return cwd.replace(/\\/g, "/")
+  return cwd.replace(/\\/g, '/')
 }
 
 export function settingsForWorkspace(cwd: string, agentDir?: string) {
@@ -27,9 +37,10 @@ export function settingsForWorkspace(cwd: string, agentDir?: string) {
   const required = hasTrustRequiringProjectResources(cwd)
   const decision = store.get(cwd)
   const defaultDecision = manager.getDefaultProjectTrust()
-  const trusted = !required
-    || decision === true
-    || (decision === null && defaultDecision === "always")
+  // 信任成立的条件：项目不需要信任，或用户/默认策略已明确信任。
+  // 注意 (decision ?? defaultDecision) === "always" 不等于这里的判断——
+  // 显式 false 优先级高于默认 "always"。
+  const trusted = !required || decision === true || (decision === null && defaultDecision === 'always')
   return {
     manager,
     trust: {
@@ -38,7 +49,7 @@ export function settingsForWorkspace(cwd: string, agentDir?: string) {
       decision,
       inheritedFrom: store.getEntry(cwd)?.path,
       defaultDecision,
-      trusted: !required || (decision ?? defaultDecision === "always"),
+      trusted,
     },
   }
 }
@@ -57,8 +68,11 @@ export function configuredSessionDir(cwd: string, agentDir?: string): string {
 
 function defaultSessionDir(cwd: string, agentDir?: string): string {
   const dir = agentDir ?? getLoadedSdk().sdk.getAgentDir()
-  const safePath = `--${path.resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`
-  return path.join(path.resolve(dir), "sessions", safePath)
+  const safePath = `--${path
+    .resolve(cwd)
+    .replace(/^[/\\]/, '')
+    .replace(/[/\\:]/g, '-')}--`
+  return path.join(path.resolve(dir), 'sessions', safePath)
 }
 
 export function resolveUserPath(input: string): string {
@@ -66,11 +80,45 @@ export function resolveUserPath(input: string): string {
   if (/^file:\/\//i.test(trimmed)) {
     return path.resolve(fileURLToPath(trimmed))
   }
-  if (trimmed === "~") return homedir()
-  if (trimmed.startsWith("~/") || (process.platform === "win32" && trimmed.startsWith("~\\"))) {
+  if (trimmed === '~') return homedir()
+  if (trimmed.startsWith('~/') || (process.platform === 'win32' && trimmed.startsWith('~\\'))) {
     return path.resolve(homedir(), trimmed.slice(2))
   }
   return path.resolve(trimmed)
+}
+
+function samePath(a: string, b: string): boolean {
+  const left = process.platform === 'win32' ? path.resolve(a).toLowerCase() : path.resolve(a)
+  const right = process.platform === 'win32' ? path.resolve(b).toLowerCase() : path.resolve(b)
+  return left === right
+}
+
+/**
+ * Shape one list response. `allMessagesText` dominates the payload (93% of
+ * session.list) and only feeds the client's local search, so it is dropped
+ * unless the caller asked for a search — then only the matching snippet ships.
+ */
+function sessionListPayload(infos: SessionListInfo[], search?: string): JsonValue {
+  const query = search?.trim()
+  const selected = query ? infos.filter(info => sessionMatchesSearch(info, query)) : infos
+  return requireJsonValue(
+    selected.map(info => {
+      const snippet = query ? searchSnippet(info.allMessagesText, query) : undefined
+      return {
+        path: info.path,
+        id: info.id,
+        cwd: info.cwd,
+        name: info.name,
+        parentSessionPath: info.parentSessionPath,
+        created: info.created,
+        modified: info.modified,
+        messageCount: info.messageCount,
+        firstMessage: info.firstMessage,
+        ...(snippet ? { allMessagesText: snippet } : {}),
+      }
+    }),
+    'SESSION_LIST_NOT_JSON',
+  )
 }
 
 function packageManagerForWorkspace(cwd: string, agentDir?: string) {
@@ -89,22 +137,42 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
     return this.agentDir
   }
 
-  async listSessions(cwd: string): Promise<JsonValue> {
+  async listSessions(cwd: string, search?: string): Promise<JsonValue> {
     const { SessionManager } = getLoadedSdk().sdk
     const normalized = normalizeCwd(cwd)
-    return requireJsonValue(await SessionManager.list(normalized, configuredSessionDir(normalized, this.dir())), "SESSION_LIST_NOT_JSON")
+    const dir = configuredSessionDir(normalized, this.dir())
+    if (isSessionListCacheEnabled()) {
+      const cached = await listSessionInfos(dir).catch(() => undefined)
+      if (cached) {
+        // A custom sessionDir holds sessions from several workspaces; the SDK
+        // filters them by cwd in that case too (`filterCwd` in SessionManager.list).
+        const filterCwd = path.resolve(dir) !== path.resolve(defaultSessionDir(normalized, this.dir()))
+        const resolved = path.resolve(normalized)
+        const infos = filterCwd ? cached.filter(info => samePath(info.cwd, resolved)) : cached
+        return sessionListPayload(infos, search)
+      }
+    }
+    const sessions = (await SessionManager.list(normalized, dir)) as unknown as SessionListInfo[]
+    return sessionListPayload(sessions, search)
   }
 
-  async listAllSessions(): Promise<JsonValue> {
+  async listAllSessions(search?: string): Promise<JsonValue> {
     const { SessionManager } = getLoadedSdk().sdk
     const configured = configuredSessionDir(process.cwd(), this.dir())
-    const defaultForProcessCwd = defaultSessionDir(process.cwd(), this.dir())
-    // With the default layout, the SDK's no-argument listAll scans every encoded
-    // workspace directory. A custom sessionDir must be passed explicitly.
-    const sessions = path.resolve(configured) === path.resolve(defaultForProcessCwd)
+    const defaultLayout = path.resolve(configured) === path.resolve(defaultSessionDir(process.cwd(), this.dir()))
+    if (isSessionListCacheEnabled()) {
+      // Default layout: <agentDir>/sessions/<encoded-cwd>/<file>.jsonl
+      // Custom sessionDir: a flat directory of session files.
+      const cached = (
+        defaultLayout ? listAllSessionInfos(path.dirname(configured)) : listSessionInfos(configured)
+      ).catch(() => undefined)
+      const infos = await cached
+      if (infos) return sessionListPayload(infos, search)
+    }
+    const sessions = (defaultLayout
       ? await SessionManager.listAll()
-      : await SessionManager.listAll(configured)
-    return requireJsonValue(sessions, "SESSION_LIST_NOT_JSON")
+      : await SessionManager.listAll(configured)) as unknown as SessionListInfo[]
+    return sessionListPayload(sessions, search)
   }
 
   async createSession(cwd: string): Promise<JsonValue> {
@@ -124,58 +192,69 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
   ): Promise<JsonValue> {
     const target = resolveUserPath(sessionFile)
     const root = path.resolve(configuredSessionDir(cwd, this.dir()))
-    const targetKey = process.platform === "win32" ? target.toLowerCase() : target
-    const rootKey = process.platform === "win32" ? root.toLowerCase() : root
+    const targetKey = process.platform === 'win32' ? target.toLowerCase() : target
+    const rootKey = process.platform === 'win32' ? root.toLowerCase() : root
     if (targetKey !== rootKey && !targetKey.startsWith(rootKey + path.sep)) {
-      throw Object.assign(new Error("session file is outside the Pi session directory"), { code: "PATH_OUTSIDE_WORKSPACE" })
+      throw Object.assign(new Error('session file is outside the Pi session directory'), {
+        code: 'PATH_OUTSIDE_WORKSPACE',
+      })
     }
 
     const { SessionManager } = getLoadedSdk().sdk
     const manager = SessionManager.open(target, undefined, normalizeCwd(cwd))
     const header = toJsonObject(manager.getHeader())
     const entries = manager.getEntries()
-    const head = sessionHeadFromParts({
-      sdkVersion: getLoadedSdk().version,
-      revision: 0,
-      sessionFormatVersion: typeof header.version === "number" ? header.version : undefined,
-      header,
-      leafId: manager.getLeafId() ?? null,
-      entryCount: entries.length,
-    }, [manager.getSessionId(), header, entries.length])
-    const branch = entriesPageFromEntries(head, manager.getBranch(), {
-      cursor: params.cursor,
-      limit: params.limit ?? 100,
-      maxBytes: params.maxBytes ?? 2 * 1024 * 1024,
-    }, toJsonObject)
+    const head = sessionHeadFromParts(
+      {
+        sdkVersion: getLoadedSdk().version,
+        revision: 0,
+        sessionFormatVersion: typeof header.version === 'number' ? header.version : undefined,
+        header,
+        leafId: manager.getLeafId() ?? null,
+        entryCount: entries.length,
+      },
+      [manager.getSessionId(), header, entries.length],
+    )
+    const branch = entriesPageFromEntries(
+      head,
+      manager.getBranch(),
+      {
+        cursor: params.cursor,
+        limit: params.limit ?? 100,
+        maxBytes: params.maxBytes ?? 2 * 1024 * 1024,
+      },
+      toJsonObject,
+    )
     const context = manager.buildSessionContext() as {
       model?: { provider?: string; modelId?: string }
       thinkingLevel?: string
     }
-    const model = context.model?.provider && context.model.modelId
-      ? { provider: context.model.provider, modelId: context.model.modelId }
-      : null
+    const model =
+      context.model?.provider && context.model.modelId
+        ? { provider: context.model.provider, modelId: context.model.modelId }
+        : null
     const state = requireJsonValue({
       sessionId: manager.getSessionId(),
       sessionFile: manager.getSessionFile() ?? target,
       sessionName: manager.getSessionName() ?? null,
       cwd: manager.getCwd(),
       model,
-      thinkingLevel: context.thinkingLevel ?? "off",
+      thinkingLevel: context.thinkingLevel ?? 'off',
       isStreaming: false,
       isCompacting: false,
-      steeringMode: "one-at-a-time",
-      followUpMode: "one-at-a-time",
+      steeringMode: 'one-at-a-time',
+      followUpMode: 'one-at-a-time',
       autoCompactionEnabled: true,
       autoRetryEnabled: true,
       messageCount: entries.length,
       pendingMessageCount: 0,
-      availableThinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+      availableThinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
       isIdle: true,
       isBashRunning: false,
       hasPendingBashMessages: false,
       isRetrying: false,
       retryAttempt: 0,
-      queue: { steering: [], followUp: [], steeringMode: "one-at-a-time", followUpMode: "one-at-a-time" },
+      queue: { steering: [], followUp: [], steeringMode: 'one-at-a-time', followUpMode: 'one-at-a-time' },
       supportsThinking: true,
       activeTools: [],
       scopedModels: [],
@@ -190,31 +269,51 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
 
   async previewSessionById(
     sessionId: string,
-    params: { cursor?: string; limit?: number; maxBytes?: number } = {},
+    params: { cursor?: string; limit?: number; maxBytes?: number; cwd?: string; sessionFile?: string } = {},
   ): Promise<JsonValue> {
-    const sessions = await this.listAllSessions()
-    if (!Array.isArray(sessions)) throw Object.assign(new Error("session list is not an array"), { code: "NATIVE_DATA_NOT_JSON" })
-    const match = sessions.find(item => isJsonObject(item) && item.id === sessionId)
-    if (!isJsonObject(match) || typeof match.path !== "string" || typeof match.cwd !== "string") {
-      throw Object.assign(new Error(`session not found: ${sessionId}`), { code: "SESSION_NOT_FOUND" })
+    // Callers that already know where the session lives skip the lookup.
+    if (params.sessionFile) return this.previewSession(params.cwd ?? '', params.sessionFile, params)
+    const located = await this.locateSession(sessionId)
+    return this.previewSession(located.cwd, located.sessionFile, params)
+  }
+
+  /**
+   * Map a session id to its file + workspace without parsing every session
+   * (the old path went through listAllSessions and cost ~2.4s per lookup).
+   */
+  async locateSession(sessionId: string): Promise<{ sessionId: string; sessionFile: string; cwd: string }> {
+    const configured = configuredSessionDir(process.cwd(), this.dir())
+    const defaultLayout = path.resolve(configured) === path.resolve(defaultSessionDir(process.cwd(), this.dir()))
+    const root = defaultLayout ? path.dirname(configured) : configured
+    const sessionFile = await findSessionFileById(root, sessionId)
+    const header = sessionFile ? await readSessionHeader(sessionFile) : undefined
+    if (!sessionFile || !header) {
+      // Fall back to the full scan (custom layouts, renamed files).
+      const sessions = await this.listAllSessions()
+      const match = Array.isArray(sessions)
+        ? sessions.find(item => isJsonObject(item) && item.id === sessionId)
+        : undefined
+      if (!isJsonObject(match) || typeof match.path !== 'string' || typeof match.cwd !== 'string') {
+        throw Object.assign(new Error(`session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND' })
+      }
+      return { sessionId, sessionFile: match.path, cwd: match.cwd }
     }
-    return this.previewSession(match.cwd, match.path, params)
+    return { sessionId, sessionFile, cwd: header.cwd }
   }
 
   async deleteSession(cwd: string, sessionFile: string): Promise<void> {
     const target = resolveUserPath(sessionFile)
     const root = path.resolve(configuredSessionDir(cwd, this.dir()))
-    const resolved = path.resolve(target)
     // Windows paths compare case-insensitively; a legal path differing only
     // in case must not be rejected (fails closed, but still a false 403).
     if (!existsSync(target)) return
     const realRoot = await fs.realpath(root)
     const realTarget = await fs.realpath(target)
-    const rootKey = process.platform === "win32" ? realRoot.toLowerCase() : realRoot
-    const resolvedKey = process.platform === "win32" ? realTarget.toLowerCase() : realTarget
+    const rootKey = process.platform === 'win32' ? realRoot.toLowerCase() : realRoot
+    const resolvedKey = process.platform === 'win32' ? realTarget.toLowerCase() : realTarget
     if (resolvedKey !== rootKey && !resolvedKey.startsWith(rootKey + path.sep)) {
-      throw Object.assign(new Error("session file is outside the Pi session directory"), {
-        code: "PATH_OUTSIDE_WORKSPACE",
+      throw Object.assign(new Error('session file is outside the Pi session directory'), {
+        code: 'PATH_OUTSIDE_WORKSPACE',
       })
     }
     // 幂等：文件可能从未落盘（新会话首个条目才写文件），缺文件即视为已删
@@ -224,7 +323,7 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
   async listModels(): Promise<JsonValue> {
     const { ModelRuntime } = getLoadedSdk().sdk
     const runtime = await ModelRuntime.create({ allowModelNetwork: false })
-    return requireJsonValue(await runtime.getAvailable(), "MODEL_LIST_NOT_JSON")
+    return requireJsonValue(await runtime.getAvailable(), 'MODEL_LIST_NOT_JSON')
   }
 
   getSettings(cwd: string): JsonValue {
@@ -256,8 +355,8 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
 
   async manage(
     cwd: string,
-    commandId: string,
-    action: "install" | "remove" | "update",
+    _commandId: string,
+    action: 'install' | 'remove' | 'update',
     source: string | undefined,
     local = false,
     persist = true,
@@ -273,11 +372,11 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
         ...(event.message ? { message: event.message } : {}),
       })
     })
-    if (action === "install") {
-      if (!source) throw Object.assign(new Error("package source required"), { code: "INVALID_REQUEST" })
+    if (action === 'install') {
+      if (!source) throw Object.assign(new Error('package source required'), { code: 'INVALID_REQUEST' })
       await (persist ? packages.installAndPersist(source, { local }) : packages.install(source, { local }))
-    } else if (action === "remove") {
-      if (!source) throw Object.assign(new Error("package source required"), { code: "INVALID_REQUEST" })
+    } else if (action === 'remove') {
+      if (!source) throw Object.assign(new Error('package source required'), { code: 'INVALID_REQUEST' })
       if (persist) await packages.removeAndPersist(source, { local })
       else await packages.remove(source, { local })
     } else {
@@ -287,26 +386,29 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
     return requireJsonValue(packages.listConfiguredPackages())
   }
 
-  async resolve(cwd: string, missingAction: "install" | "skip" | "error" = "skip"): Promise<JsonValue> {
+  async resolve(cwd: string, missingAction: 'install' | 'skip' | 'error' = 'skip'): Promise<JsonValue> {
     return requireJsonValue(await packageManagerForWorkspace(cwd, this.dir()).resolve(async () => missingAction))
   }
 
   async resolveSources(cwd: string, sources: string[], local?: boolean, temporary?: boolean): Promise<JsonValue> {
-    return requireJsonValue(await packageManagerForWorkspace(cwd, this.dir()).resolveExtensionSources(sources, { local, temporary }))
+    return requireJsonValue(
+      await packageManagerForWorkspace(cwd, this.dir()).resolveExtensionSources(sources, { local, temporary }),
+    )
   }
 
-  async changeSource(cwd: string, source: string, operation: "add" | "remove", local = false): Promise<JsonValue> {
+  async changeSource(cwd: string, source: string, operation: 'add' | 'remove', local = false): Promise<JsonValue> {
     const { DefaultPackageManager, getAgentDir } = getLoadedSdk().sdk
     const { manager } = settingsForWorkspace(cwd, this.dir())
     const packages = new DefaultPackageManager({ cwd, agentDir: this.dir() ?? getAgentDir(), settingsManager: manager })
-    const changed = operation === "add"
-      ? packages.addSourceToSettings(source, { local })
-      : packages.removeSourceFromSettings(source, { local })
+    const changed =
+      operation === 'add'
+        ? packages.addSourceToSettings(source, { local })
+        : packages.removeSourceFromSettings(source, { local })
     await manager.flush()
     return requireJsonValue({ changed, packages: packages.listConfiguredPackages() })
   }
 
-  installedPath(cwd: string, source: string, scope: "user" | "project"): JsonValue {
+  installedPath(cwd: string, source: string, scope: 'user' | 'project'): JsonValue {
     return requireJsonValue(packageManagerForWorkspace(cwd, this.dir()).getInstalledPath(source, scope) ?? null)
   }
 
@@ -316,13 +418,15 @@ export class PiCatalog implements CatalogProvider, PackagesGateway {
 }
 
 function toJsonObject(value: unknown): JsonObject {
-  const json = JSON.parse(JSON.stringify(value, (_key, item) => {
-    if (typeof item === "bigint") return item.toString()
-    if (typeof item === "function" || typeof item === "symbol") return undefined
-    return item
-  })) as unknown
-  if (!json || typeof json !== "object" || Array.isArray(json)) {
-    throw Object.assign(new Error("Pi session data is not a JSON object"), { code: "NATIVE_DATA_NOT_JSON" })
+  const json = JSON.parse(
+    JSON.stringify(value, (_key, item) => {
+      if (typeof item === 'bigint') return item.toString()
+      if (typeof item === 'function' || typeof item === 'symbol') return undefined
+      return item
+    }),
+  ) as unknown
+  if (!json || typeof json !== 'object' || Array.isArray(json)) {
+    throw Object.assign(new Error('Pi session data is not a JSON object'), { code: 'NATIVE_DATA_NOT_JSON' })
   }
   return json as JsonObject
 }
@@ -336,13 +440,13 @@ export function readEffectiveSettings(manager: unknown, version = getLoadedSdk()
   // SettingsManager.settings 是私有字段：不能直接按结构化类型传入（私有成员
   // 会让类型不兼容），从 unknown 读取并在运行时校验其形状。
   const effective = (manager as { settings?: unknown } | null | undefined)?.settings
-  if (!effective || typeof effective !== "object" || Array.isArray(effective)) {
+  if (!effective || typeof effective !== 'object' || Array.isArray(effective)) {
     throw Object.assign(
       new Error(
         `Pi SDK ${version} SettingsManager does not expose its effective settings object ` +
-        "(private field \"settings\" renamed or removed)",
+          '(private field "settings" renamed or removed)',
       ),
-      { code: "PI_SDK_INCOMPATIBLE" },
+      { code: 'PI_SDK_INCOMPATIBLE' },
     )
   }
   return effective as JsonObject
@@ -367,68 +471,73 @@ function applySettingsPatch(manager: SettingsManager, patch: JsonObject): void {
   let httpProxyOverride: string | undefined
   let hasHttpProxyOverride = false
   for (const [key, value] of Object.entries(patch)) {
-    if (key === "defaultModelAndProvider") {
+    if (key === 'defaultModelAndProvider') {
       const pair = expectRecord(key, value)
-      manager.setDefaultModelAndProvider(expectString("provider", pair.provider), expectString("model", pair.model))
-    }
-    else if (key === "lastChangelogVersion") manager.setLastChangelogVersion(expectString(key, value))
-    else if (key === "defaultProvider") manager.setDefaultProvider(expectString(key, value))
-    else if (key === "defaultModel") manager.setDefaultModel(expectString(key, value))
-    else if (key === "defaultThinkingLevel") manager.setDefaultThinkingLevel(expectEnum(key, value, ["off", "minimal", "low", "medium", "high", "xhigh", "max"]))
-    else if (key === "transport") manager.setTransport(expectEnum(key, value, ["auto", "sse", "websocket", "websocket-cached"]))
-    else if (key === "steeringMode") manager.setSteeringMode(expectEnum(key, value, ["all", "one-at-a-time"]))
-    else if (key === "followUpMode") manager.setFollowUpMode(expectEnum(key, value, ["all", "one-at-a-time"]))
-    else if (key === "theme") manager.setTheme(expectString(key, value))
-    else if (key === "compactionEnabled") manager.setCompactionEnabled(expectBoolean(key, value))
-    else if (key === "retryEnabled") manager.setRetryEnabled(expectBoolean(key, value))
-    else if (key === "httpIdleTimeoutMs") manager.setHttpIdleTimeoutMs(expectNonNegativeNumber(key, value))
-    else if (key === "httpProxy") {
+      manager.setDefaultModelAndProvider(expectString('provider', pair.provider), expectString('model', pair.model))
+    } else if (key === 'lastChangelogVersion') manager.setLastChangelogVersion(expectString(key, value))
+    else if (key === 'defaultProvider') manager.setDefaultProvider(expectString(key, value))
+    else if (key === 'defaultModel') manager.setDefaultModel(expectString(key, value))
+    else if (key === 'defaultThinkingLevel')
+      manager.setDefaultThinkingLevel(
+        expectEnum(key, value, ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']),
+      )
+    else if (key === 'transport')
+      manager.setTransport(expectEnum(key, value, ['auto', 'sse', 'websocket', 'websocket-cached']))
+    else if (key === 'steeringMode') manager.setSteeringMode(expectEnum(key, value, ['all', 'one-at-a-time']))
+    else if (key === 'followUpMode') manager.setFollowUpMode(expectEnum(key, value, ['all', 'one-at-a-time']))
+    else if (key === 'theme') manager.setTheme(expectString(key, value))
+    else if (key === 'compactionEnabled') manager.setCompactionEnabled(expectBoolean(key, value))
+    else if (key === 'retryEnabled') manager.setRetryEnabled(expectBoolean(key, value))
+    else if (key === 'httpIdleTimeoutMs') manager.setHttpIdleTimeoutMs(expectNonNegativeNumber(key, value))
+    else if (key === 'httpProxy') {
       httpProxyOverride = expectOptionalString(key, value)?.trim()
       hasHttpProxyOverride = true
-    }
-    else if (key === "hideThinkingBlock") manager.setHideThinkingBlock(expectBoolean(key, value))
-    else if (key === "showCacheMissNotices") manager.setShowCacheMissNotices(expectBoolean(key, value))
-    else if (key === "shellPath") manager.setShellPath(expectOptionalString(key, value))
-    else if (key === "shellCommandPrefix") manager.setShellCommandPrefix(expectOptionalString(key, value))
-    else if (key === "quietStartup") manager.setQuietStartup(expectBoolean(key, value))
-    else if (key === "defaultProjectTrust") manager.setDefaultProjectTrust(expectEnum(key, value, ["always", "never", "ask"]))
-    else if (key === "npmCommand") manager.setNpmCommand(expectOptionalStringArray(key, value))
-    else if (key === "enableAnalytics") manager.setEnableAnalytics(expectBoolean(key, value))
-    else if (key === "enableInstallTelemetry") manager.setEnableInstallTelemetry(expectBoolean(key, value))
-    else if (key === "collapseChangelog") manager.setCollapseChangelog(expectBoolean(key, value))
-    else if (key === "enableSkillCommands") manager.setEnableSkillCommands(expectBoolean(key, value))
-    else if (key === "packages") manager.setPackages(expectPackageSources(key, value) as never)
-    else if (key === "projectPackages") manager.setProjectPackages(expectPackageSources(key, value) as never)
-    else if (key === "extensionPaths") manager.setExtensionPaths(expectStringArray(key, value))
-    else if (key === "projectExtensionPaths") manager.setProjectExtensionPaths(expectStringArray(key, value))
-    else if (key === "skillPaths") manager.setSkillPaths(expectStringArray(key, value))
-    else if (key === "projectSkillPaths") manager.setProjectSkillPaths(expectStringArray(key, value))
-    else if (key === "promptTemplatePaths") manager.setPromptTemplatePaths(expectStringArray(key, value))
-    else if (key === "projectPromptTemplatePaths") manager.setProjectPromptTemplatePaths(expectStringArray(key, value))
-    else if (key === "themePaths") manager.setThemePaths(expectStringArray(key, value))
-    else if (key === "projectThemePaths") manager.setProjectThemePaths(expectStringArray(key, value))
-    else if (key === "showImages") manager.setShowImages(expectBoolean(key, value))
-    else if (key === "imageWidthCells") manager.setImageWidthCells(expectNumber(key, value))
-    else if (key === "imageAutoResize") manager.setImageAutoResize(expectBoolean(key, value))
-    else if (key === "blockImages") manager.setBlockImages(expectBoolean(key, value))
-    else if (key === "enabledModels") manager.setEnabledModels(expectOptionalStringArray(key, value))
-    else if (key === "doubleEscapeAction") manager.setDoubleEscapeAction(expectEnum(key, value, ["fork", "tree", "none"]))
-    else if (key === "treeFilterMode") manager.setTreeFilterMode(expectEnum(key, value, ["default", "no-tools", "user-only", "labeled-only", "all"]))
-    else if (key === "clearOnShrink") manager.setClearOnShrink(expectBoolean(key, value))
-    else if (key === "showTerminalProgress") manager.setShowTerminalProgress(expectBoolean(key, value))
-    else if (key === "showHardwareCursor") manager.setShowHardwareCursor(expectBoolean(key, value))
-    else if (key === "editorPaddingX") manager.setEditorPaddingX(expectNumber(key, value))
-    else if (key === "outputPad") manager.setOutputPad(expectOutputPad(key, value))
-    else if (key === "autocompleteMaxVisible") manager.setAutocompleteMaxVisible(expectNumber(key, value))
-    else if (key === "warnings") manager.setWarnings(expectWarnings(key, value))
-    else throw Object.assign(new Error(`unsupported Pi setting: ${key}`), { code: "INVALID_REQUEST" })
+    } else if (key === 'hideThinkingBlock') manager.setHideThinkingBlock(expectBoolean(key, value))
+    else if (key === 'showCacheMissNotices') manager.setShowCacheMissNotices(expectBoolean(key, value))
+    else if (key === 'shellPath') manager.setShellPath(expectOptionalString(key, value))
+    else if (key === 'shellCommandPrefix') manager.setShellCommandPrefix(expectOptionalString(key, value))
+    else if (key === 'quietStartup') manager.setQuietStartup(expectBoolean(key, value))
+    else if (key === 'defaultProjectTrust')
+      manager.setDefaultProjectTrust(expectEnum(key, value, ['always', 'never', 'ask']))
+    else if (key === 'npmCommand') manager.setNpmCommand(expectOptionalStringArray(key, value))
+    else if (key === 'enableAnalytics') manager.setEnableAnalytics(expectBoolean(key, value))
+    else if (key === 'enableInstallTelemetry') manager.setEnableInstallTelemetry(expectBoolean(key, value))
+    else if (key === 'collapseChangelog') manager.setCollapseChangelog(expectBoolean(key, value))
+    else if (key === 'enableSkillCommands') manager.setEnableSkillCommands(expectBoolean(key, value))
+    else if (key === 'packages') manager.setPackages(expectPackageSources(key, value) as never)
+    else if (key === 'projectPackages') manager.setProjectPackages(expectPackageSources(key, value) as never)
+    else if (key === 'extensionPaths') manager.setExtensionPaths(expectStringArray(key, value))
+    else if (key === 'projectExtensionPaths') manager.setProjectExtensionPaths(expectStringArray(key, value))
+    else if (key === 'skillPaths') manager.setSkillPaths(expectStringArray(key, value))
+    else if (key === 'projectSkillPaths') manager.setProjectSkillPaths(expectStringArray(key, value))
+    else if (key === 'promptTemplatePaths') manager.setPromptTemplatePaths(expectStringArray(key, value))
+    else if (key === 'projectPromptTemplatePaths') manager.setProjectPromptTemplatePaths(expectStringArray(key, value))
+    else if (key === 'themePaths') manager.setThemePaths(expectStringArray(key, value))
+    else if (key === 'projectThemePaths') manager.setProjectThemePaths(expectStringArray(key, value))
+    else if (key === 'showImages') manager.setShowImages(expectBoolean(key, value))
+    else if (key === 'imageWidthCells') manager.setImageWidthCells(expectNumber(key, value))
+    else if (key === 'imageAutoResize') manager.setImageAutoResize(expectBoolean(key, value))
+    else if (key === 'blockImages') manager.setBlockImages(expectBoolean(key, value))
+    else if (key === 'enabledModels') manager.setEnabledModels(expectOptionalStringArray(key, value))
+    else if (key === 'doubleEscapeAction')
+      manager.setDoubleEscapeAction(expectEnum(key, value, ['fork', 'tree', 'none']))
+    else if (key === 'treeFilterMode')
+      manager.setTreeFilterMode(expectEnum(key, value, ['default', 'no-tools', 'user-only', 'labeled-only', 'all']))
+    else if (key === 'clearOnShrink') manager.setClearOnShrink(expectBoolean(key, value))
+    else if (key === 'showTerminalProgress') manager.setShowTerminalProgress(expectBoolean(key, value))
+    else if (key === 'showHardwareCursor') manager.setShowHardwareCursor(expectBoolean(key, value))
+    else if (key === 'editorPaddingX') manager.setEditorPaddingX(expectNumber(key, value))
+    else if (key === 'outputPad') manager.setOutputPad(expectOutputPad(key, value))
+    else if (key === 'autocompleteMaxVisible') manager.setAutocompleteMaxVisible(expectNumber(key, value))
+    else if (key === 'warnings') manager.setWarnings(expectWarnings(key, value))
+    else throw Object.assign(new Error(`unsupported Pi setting: ${key}`), { code: 'INVALID_REQUEST' })
   }
   // Setter methods rebuild effective settings, so apply this override last.
   if (hasHttpProxyOverride) manager.applyOverrides({ httpProxy: httpProxyOverride })
 }
 
 function expectString(key: string, value: unknown): string {
-  if (typeof value !== "string") throw invalidSetting(key)
+  if (typeof value !== 'string') throw invalidSetting(key)
   return value
 }
 
@@ -438,12 +547,12 @@ function expectOptionalString(key: string, value: unknown): string | undefined {
 }
 
 function expectBoolean(key: string, value: unknown): boolean {
-  if (typeof value !== "boolean") throw invalidSetting(key)
+  if (typeof value !== 'boolean') throw invalidSetting(key)
   return value
 }
 
 function expectNumber(key: string, value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) throw invalidSetting(key)
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw invalidSetting(key)
   return value
 }
 
@@ -454,13 +563,13 @@ function expectNonNegativeNumber(key: string, value: unknown): number {
 }
 
 function expectEnum<T extends string>(key: string, value: unknown, values: readonly T[]): T {
-  if (typeof value !== "string" || !values.includes(value as T)) throw invalidSetting(key)
+  if (typeof value !== 'string' || !values.includes(value as T)) throw invalidSetting(key)
   return value as T
 }
 
 function expectOptionalStringArray(key: string, value: unknown): string[] | undefined {
   if (value === null || value === undefined) return undefined
-  if (!Array.isArray(value) || value.some(item => typeof item !== "string")) throw invalidSetting(key)
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) throw invalidSetting(key)
   return value
 }
 
@@ -471,21 +580,25 @@ function expectStringArray(key: string, value: unknown): string[] {
 }
 
 function expectRecord(key: string, value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw invalidSetting(key)
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalidSetting(key)
   return value as Record<string, unknown>
 }
 
 function expectPackageSources(key: string, value: unknown): unknown {
   if (!Array.isArray(value)) throw invalidSetting(key)
   for (const item of value) {
-    if (typeof item === "string") continue
+    if (typeof item === 'string') continue
     const source = expectRecord(key, item)
-    if (typeof source.source !== "string" || !source.source) throw invalidSetting(key)
-    if (source.autoload !== undefined && typeof source.autoload !== "boolean") throw invalidSetting(key)
-    for (const field of ["extensions", "skills", "prompts", "themes"] as const) {
+    if (typeof source.source !== 'string' || !source.source) throw invalidSetting(key)
+    if (source.autoload !== undefined && typeof source.autoload !== 'boolean') throw invalidSetting(key)
+    for (const field of ['extensions', 'skills', 'prompts', 'themes'] as const) {
       if (source[field] !== undefined) expectStringArray(key, source[field])
     }
-    if (Object.keys(source).some(field => !["source", "autoload", "extensions", "skills", "prompts", "themes"].includes(field))) {
+    if (
+      Object.keys(source).some(
+        field => !['source', 'autoload', 'extensions', 'skills', 'prompts', 'themes'].includes(field),
+      )
+    ) {
       throw invalidSetting(key)
     }
   }
@@ -494,8 +607,8 @@ function expectPackageSources(key: string, value: unknown): unknown {
 
 function expectWarnings(key: string, value: unknown): { anthropicExtraUsage?: boolean } {
   const warnings = expectRecord(key, value)
-  if (Object.keys(warnings).some(field => field !== "anthropicExtraUsage")) throw invalidSetting(key)
-  if (warnings.anthropicExtraUsage !== undefined && typeof warnings.anthropicExtraUsage !== "boolean") {
+  if (Object.keys(warnings).some(field => field !== 'anthropicExtraUsage')) throw invalidSetting(key)
+  if (warnings.anthropicExtraUsage !== undefined && typeof warnings.anthropicExtraUsage !== 'boolean') {
     throw invalidSetting(key)
   }
   return warnings as { anthropicExtraUsage?: boolean }
@@ -507,5 +620,5 @@ function expectOutputPad(key: string, value: unknown): 0 | 1 {
 }
 
 function invalidSetting(key: string): Error {
-  return Object.assign(new Error(`invalid Pi setting: ${key}`), { code: "INVALID_REQUEST" })
+  return Object.assign(new Error(`invalid Pi setting: ${key}`), { code: 'INVALID_REQUEST' })
 }

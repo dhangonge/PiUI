@@ -52,15 +52,9 @@ async function ensureServiceWorker(): Promise<ServiceWorkerRegistration | null> 
 
 async function sendTauriNotification(title: string, body: string): Promise<void> {
   try {
-    const { isPermissionGranted, requestPermission, sendNotification } = await import('@tauri-apps/plugin-notification')
+    const { isPermissionGranted, sendNotification } = await import('@tauri-apps/plugin-notification')
 
-    let permitted = await isPermissionGranted()
-    if (!permitted) {
-      const result = await requestPermission()
-      permitted = result === 'granted'
-    }
-
-    if (permitted) {
+    if (await isPermissionGranted()) {
       sendNotification({ title, body })
     }
   } catch (e) {
@@ -82,9 +76,10 @@ async function checkTauriPermission(): Promise<NotificationPermission> {
 
 async function requestTauriPermission(): Promise<NotificationPermission> {
   try {
-    const { requestPermission } = await import('@tauri-apps/plugin-notification')
+    const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification')
+    if (await isPermissionGranted()) return 'granted'
     const result = await requestPermission()
-    return result === 'granted' ? 'granted' : 'denied'
+    return result === 'granted' || (await isPermissionGranted()) ? 'granted' : 'denied'
   } catch {
     return 'denied'
   }
@@ -109,16 +104,30 @@ export function useNotification() {
     return Notification.permission
   })
 
+  const enableRequest = useRef(0)
   // 跟踪最新的 enabled 值，供 sendNotification 闭包使用
   const enabledRef = useRef(enabled)
   useEffect(() => {
     enabledRef.current = enabled
   }, [enabled])
 
-  // Tauri: 异步获取初始权限状态
+  // Refresh permission separately from the app preference, including return from OS settings.
   useEffect(() => {
-    if (isTauri()) {
-      checkTauriPermission().then(setPermission)
+    let disposed = false
+    const refresh = async () => {
+      const request = enableRequest.current
+      const result = isTauri()
+        ? await checkTauriPermission()
+        : typeof Notification === 'undefined'
+          ? 'denied'
+          : Notification.permission
+      if (!disposed && request === enableRequest.current) setPermission(result)
+    }
+    void refresh()
+    window.addEventListener('focus', refresh)
+    return () => {
+      disposed = true
+      window.removeEventListener('focus', refresh)
     }
   }, [])
 
@@ -151,18 +160,25 @@ export function useNotification() {
 
   // 切换通知开关
   const setEnabled = useCallback(async (value: boolean) => {
+    const request = ++enableRequest.current
     if (value) {
       if (isTauri()) {
         const result = await requestTauriPermission()
+        if (request !== enableRequest.current) return
         setPermission(result)
         if (result !== 'granted') return
       } else if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
         const result = await Notification.requestPermission()
+        if (request !== enableRequest.current) return
         setPermission(result)
         if (result !== 'granted') return
+      } else if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+        setPermission('denied')
+        return
       }
     }
 
+    enabledRef.current = value
     setEnabledState(value)
     try {
       if (value) {

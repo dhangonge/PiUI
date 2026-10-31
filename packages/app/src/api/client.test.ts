@@ -49,6 +49,13 @@ describe('Pi project adapter', () => {
     await expect(getProjects()).resolves.toEqual([])
   })
 
+  it('keeps both project operations bound to the requested server', async () => {
+    mocks.getHostGitInfo.mockResolvedValue({ root: true })
+    await getCurrentProject('/a', 'server-a')
+    expect(mocks.resolveWorkspacePath).toHaveBeenCalledWith('/a', 'server-a')
+    expect(mocks.getHostGitInfo).toHaveBeenCalledWith('C:/work/PiUI', undefined, 'server-a')
+  })
+
   it('fails when no workspace is available', async () => {
     mocks.resolveWorkspacePath.mockResolvedValue(null)
 

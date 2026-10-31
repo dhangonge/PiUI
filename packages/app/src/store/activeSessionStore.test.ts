@@ -3,8 +3,7 @@ import { activeSessionStore } from './activeSessionStore'
 
 describe('activeSessionStore scoped refresh handling', () => {
   beforeEach(() => {
-    activeSessionStore.initialize({})
-    activeSessionStore.initializePendingRequests([], [])
+    activeSessionStore.reset()
   })
 
   it('preserves existing busy child sessions when merging scoped status refreshes', () => {
@@ -92,4 +91,58 @@ describe('activeSessionStore scoped refresh handling', () => {
     })
   })
 
+  it('drops a replayed pending request after it has been replied', () => {
+    // 症状：本地乐观回复清掉了 store，但 worker 侧回放的 pending / 迟到事件没清；
+    // 下一次重放就把已回复的请求补回来，侧边栏徽标卡住不消失。
+    activeSessionStore.addPendingRequest('req-1', 'local::root', 'permission', 'bash: rm -rf')
+    expect(activeSessionStore.getBusySessions()[0]?.pendingAction).toEqual({
+      type: 'permission',
+      description: 'bash: rm -rf',
+    })
+
+    activeSessionStore.resolvePendingRequest('req-1')
+
+    activeSessionStore.addPendingRequest('req-1', 'local::root', 'permission', 'bash: rm -rf')
+
+    expect(activeSessionStore.getBusySessions()).toEqual([])
+  })
+
+  it('still accepts a fresh request id after another one settled', () => {
+    activeSessionStore.addPendingRequest('req-1', 'local::root', 'question', 'first')
+    activeSessionStore.resolvePendingRequest('req-1')
+    activeSessionStore.addPendingRequest('req-2', 'local::root', 'question', 'second')
+
+    expect(activeSessionStore.getBusySessions()[0]?.pendingAction).toEqual({
+      type: 'question',
+      description: 'second',
+    })
+  })
+
+  it('lets a pending snapshot revive a request the local side had settled', () => {
+    // 快照是权威：它说还 pending 就要显示（本地乐观回复可能没真正生效），
+    // 所以 settled 只拦 addPendingRequest，不拦 applyPendingSnapshot。
+    activeSessionStore.addPendingRequest('req-1', 'local::root', 'permission', 'x')
+    activeSessionStore.resolvePendingRequest('req-1')
+
+    activeSessionStore.initializePendingRequests([{ id: 'req-1', sessionID: 'local::root', permission: 'bash' }], [])
+
+    expect(activeSessionStore.getBusySessions()[0]?.pendingAction).toEqual({
+      type: 'permission',
+      description: 'bash',
+    })
+  })
+
+  it('keeps the settled record bounded so old ids can come back', () => {
+    for (let i = 0; i < 600; i++) {
+      activeSessionStore.addPendingRequest(`req-${i}`, 'local::root', 'question', `q${i}`)
+      activeSessionStore.resolvePendingRequest(`req-${i}`)
+    }
+
+    // 早期 id 已被 FIFO 挤掉，重放时按新请求处理
+    activeSessionStore.addPendingRequest('req-0', 'local::root', 'question', 'again')
+    expect(activeSessionStore.getBusySessions()[0]?.pendingAction).toEqual({
+      type: 'question',
+      description: 'again',
+    })
+  })
 })

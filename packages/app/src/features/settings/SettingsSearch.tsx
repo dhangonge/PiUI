@@ -11,7 +11,13 @@ interface SettingsSearchProps<T extends SearchMenuItem> {
   onSelect: (item: T) => boolean | void
 }
 
-export function SettingsSearch<T extends SearchMenuItem>({ items, placeholder, clearLabel, noResultsLabel, onSelect }: SettingsSearchProps<T>) {
+export function SettingsSearch<T extends SearchMenuItem>({
+  items,
+  placeholder,
+  clearLabel,
+  noResultsLabel,
+  onSelect,
+}: SettingsSearchProps<T>) {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const [hasFocus, setHasFocus] = useState(false)
@@ -90,10 +96,7 @@ export function SettingsSearch<T extends SearchMenuItem>({ items, placeholder, c
         inputRef.current?.focus()
       }}
     >
-      <SearchIcon
-        size={14}
-        className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-400"
-      />
+      <SearchIcon size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-400" />
       <input
         ref={inputRef}
         type="text"
@@ -147,7 +150,7 @@ export function SettingsSearch<T extends SearchMenuItem>({ items, placeholder, c
           ref={listboxRef}
           id={listboxId}
           role="listbox"
-          className="absolute left-0 top-[calc(100%+6px)] max-h-72 min-w-full max-w-[calc(100vw-2rem)] overflow-y-auto rounded-md border border-border-200 bg-bg-000/95 p-1 shadow-xl backdrop-blur-xl custom-scrollbar"
+          className="absolute left-0 top-[calc(100%+6px)] max-h-72 min-w-full max-w-[calc(100vw-2rem)] overflow-y-auto rounded-md border border-border-200 bg-bg-000/95 p-1 shadow-xl custom-scrollbar"
         >
           {results.length === 0 ? (
             <div className="px-2.5 py-3 text-[length:var(--fs-xs)] text-text-400" role="status">
@@ -181,7 +184,10 @@ export function SettingsSearch<T extends SearchMenuItem>({ items, placeholder, c
                     </span>
                   )}
                 </span>
-                <span className="max-w-[48%] shrink-0 truncate text-[length:var(--fs-xs)] text-text-400" title={item.tabLabel}>
+                <span
+                  className="max-w-[48%] shrink-0 truncate text-[length:var(--fs-xs)] text-text-400"
+                  title={item.tabLabel}
+                >
                   {item.tabLabel}
                 </span>
               </button>

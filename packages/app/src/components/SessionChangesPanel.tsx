@@ -114,11 +114,15 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     let cancelled = false
     canonicalWorkspaceRef.current = null
     if (directory) {
-      void resolveWorkspacePath(directory).then(workspacePath => {
-        if (!cancelled) canonicalWorkspaceRef.current = workspacePath
-      }).catch(() => undefined)
+      void resolveWorkspacePath(directory)
+        .then(workspacePath => {
+          if (!cancelled) canonicalWorkspaceRef.current = workspacePath
+        })
+        .catch(() => undefined)
     }
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [directory])
 
   const projectRequestIdRef = useRef(0)
@@ -174,7 +178,9 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
       },
       branch: {
         label: t('sessionChanges.branchScope'),
-        description: t('sessionChanges.branchScopeHint', { branch: vcsInfo?.defaultBranch ?? vcsInfo?.upstream ?? 'main' }),
+        description: t('sessionChanges.branchScopeHint', {
+          branch: vcsInfo?.defaultBranch ?? vcsInfo?.upstream ?? 'main',
+        }),
         icon: <GitBranchIcon size={12} />,
       },
       staged: {
@@ -304,7 +310,9 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       if (changeOptions.length === 0) return
 
-      const currentIndex = changeOptions.findIndex(mode => changeMenuOptionRefs.current[mode] === document.activeElement)
+      const currentIndex = changeOptions.findIndex(
+        mode => changeMenuOptionRefs.current[mode] === document.activeElement,
+      )
       if (event.key === 'Escape') {
         event.preventDefault()
         setChangeMenuOpen(false)
@@ -332,7 +340,10 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         focusByIndex(nextIndex)
       } else if (event.key === 'ArrowUp') {
         event.preventDefault()
-        const nextIndex = currentIndex === -1 ? changeOptions.length - 1 : (currentIndex - 1 + changeOptions.length) % changeOptions.length
+        const nextIndex =
+          currentIndex === -1
+            ? changeOptions.length - 1
+            : (currentIndex - 1 + changeOptions.length) % changeOptions.length
         focusByIndex(nextIndex)
       } else if (event.key === 'Home') {
         event.preventDefault()
@@ -648,7 +659,8 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
       .then(loaded => {
         if (!loaded) return
         if (controller.signal.aborted || diffRequestIdRef.current[changeMode] !== listRequestId) return
-        const apply = (items: ChangeDiff[]) => items.map(item => item.file === loaded.file ? { ...item, ...loaded } : item)
+        const apply = (items: ChangeDiff[]) =>
+          items.map(item => (item.file === loaded.file ? { ...item, ...loaded } : item))
         if (changeMode === 'git') setGitDiffs(apply)
         else if (changeMode === 'branch') setBranchDiffs(apply)
         else if (changeMode === 'staged') setStagedDiffs(apply)
@@ -673,7 +685,11 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
   const showPreview = !loading && selectedDiff !== null && !(error && diffs.length === 0)
 
   if (projectLoading && !vcsInfo) {
-    return <div className="p-4 text-center text-text-400 text-[length:var(--fs-sm)]">{t('sessionChanges.loadingChanges')}</div>
+    return (
+      <div className="p-4 text-center text-text-400 text-[length:var(--fs-sm)]">
+        {t('sessionChanges.loadingChanges')}
+      </div>
+    )
   }
 
   if (!vcsInfo && error) {
@@ -805,7 +821,8 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
                           changeMenuOpen &&
                           ((changeMenuOpenFocusRef.current === 'selected' && isSelected) ||
                             (changeMenuOpenFocusRef.current === 'first' && mode === changeOptions[0]) ||
-                            (changeMenuOpenFocusRef.current === 'last' && mode === changeOptions[changeOptions.length - 1]))
+                            (changeMenuOpenFocusRef.current === 'last' &&
+                              mode === changeOptions[changeOptions.length - 1]))
 
                         if (node && shouldFocusNode) {
                           node.focus()
@@ -905,7 +922,9 @@ export const SessionChangesPanel = memo(function SessionChangesPanel({
         {/* File List */}
         <div className="flex-1 overflow-auto panel-scrollbar-y">
           {loading ? (
-            <div className="p-4 text-center text-text-400 text-[length:var(--fs-sm)]">{t('sessionChanges.loadingChanges')}</div>
+            <div className="p-4 text-center text-text-400 text-[length:var(--fs-sm)]">
+              {t('sessionChanges.loadingChanges')}
+            </div>
           ) : error && diffs.length === 0 ? (
             <div className="p-4 text-center text-danger-100 text-[length:var(--fs-sm)]">{error}</div>
           ) : diffs.length === 0 ? (
@@ -1136,7 +1155,14 @@ const DiffPreviewPanel = memo(function DiffPreviewPanel({
 
       {/* Diff Content - DiffViewer 自带滚动 */}
       <div className="flex-1 min-h-0">
-        <DiffViewer before={before} after={after} language={language} viewMode={viewMode} isResizing={isResizing} data={diffViewerData} />
+        <DiffViewer
+          before={before}
+          after={after}
+          language={language}
+          viewMode={viewMode}
+          isResizing={isResizing}
+          data={diffViewerData}
+        />
       </div>
     </div>
   )

@@ -6,6 +6,7 @@ import { hasUpdateAvailable, updateStore, useUpdateStore, RELEASES_PAGE_URL } fr
 import { saveData } from '../../../utils/downloadUtils'
 import { exportSettingsBackup, importSettingsBackup, previewBackupMeta } from '../../../utils/settingsBackup'
 import { isTauri } from '../../../utils/tauri'
+import { DiagnosticsCard } from './DiagnosticsSettings'
 import { SettingsSection } from './SettingsUI'
 
 async function openExternalUrl(url: string): Promise<void> {
@@ -110,7 +111,9 @@ export function AboutSettings() {
           </div>
           <div className="flex items-center justify-between gap-4 py-2.5">
             <div className="text-[length:var(--fs-sm)] text-text-300">{t('about.latestVersion')}</div>
-            <div className="shrink-0 text-[length:var(--fs-sm)] font-semibold text-text-100 font-mono tabular-nums">{latestVersion}</div>
+            <div className="shrink-0 text-[length:var(--fs-sm)] font-semibold text-text-100 font-mono tabular-nums">
+              {latestVersion}
+            </div>
           </div>
         </div>
 
@@ -160,6 +163,8 @@ export function AboutSettings() {
           </div>
         )}
       </SettingsSection>
+
+      <DiagnosticsCard />
     </div>
   )
 }

@@ -13,6 +13,8 @@ export interface InternalFileMentionPayload {
 export interface InternalSessionPayload {
   kind: 'session'
   sessionId: string
+  /** 源 session 所属服务器（多服务器模式；拖到分屏窗口时用它合成复合 key） */
+  serverId?: string
   directory?: string
 }
 
@@ -170,10 +172,7 @@ export function getInternalDragPreviewElement() {
   return currentPreview
 }
 
-export function startInternalDrag(
-  event: ReactPointerEvent<HTMLElement>,
-  payload: InternalDragPayload,
-) {
+export function startInternalDrag(event: ReactPointerEvent<HTMLElement>, payload: InternalDragPayload) {
   if (event.button !== 0 || !event.isPrimary) return
   if (event.pointerType === 'touch') return
 

@@ -53,3 +53,16 @@ class PiCommandStore {
 }
 
 export const piCommandStore = new PiCommandStore()
+
+const serverStores = new Map<string, PiCommandStore>()
+
+/** Keep raw protocol IDs inside a server's store, never in a shared ID map. */
+export function getPiCommandStore(serverId?: string): PiCommandStore {
+  if (serverId === undefined) return piCommandStore
+  let store = serverStores.get(serverId)
+  if (!store) {
+    store = new PiCommandStore()
+    serverStores.set(serverId, store)
+  }
+  return store
+}

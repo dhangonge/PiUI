@@ -1,4 +1,5 @@
 import { forwardRef } from 'react'
+import { PRESS_TRANSITION_CLASS } from '../../constants/animation'
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
 type ButtonSize = 'sm' | 'md' | 'lg'
@@ -36,8 +37,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         className={`
           inline-flex items-center justify-center gap-2
           rounded-lg font-medium
-          transition-all duration-150
-          active:scale-95
+          ${PRESS_TRANSITION_CLASS}
+          motion-safe:active:scale-95
           disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100
           ${variantStyles[variant]}
           ${sizeStyles[size]}

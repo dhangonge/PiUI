@@ -35,13 +35,7 @@ describe('MentionMenu', () => {
   it('loads root directory items when opened', async () => {
     render(
       <div>
-        <MentionMenu
-          isOpen={true}
-          query=""
-          rootPath="/workspace/project"
-          onSelect={vi.fn()}
-          onClose={vi.fn()}
-        />
+        <MentionMenu isOpen={true} query="" rootPath="/workspace/project" onSelect={vi.fn()} onClose={vi.fn()} />
       </div>,
     )
 

@@ -22,6 +22,9 @@ yarn.lock
 packages/*/dist
 packages/*/tsconfig.tsbuildinfo
 
+# Test artifacts
+packages/*/coverage
+
 # Runtime (user engine updates live outside repo; ignore local runtime dir if present)
 .runtime/
 

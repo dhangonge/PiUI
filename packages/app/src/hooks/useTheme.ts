@@ -3,7 +3,13 @@ import { flushSync } from 'react-dom'
 import { THEME_SWITCH_DISABLE_MS } from '../constants'
 import { themeStore, type ColorMode } from '../store/themeStore'
 import type { StepFinishDisplay, CustomCSSSnippet } from '../store/themeStore'
-import type { ReasoningDisplayMode, DiffStyle, ToolCardStyle, CompletedAtFormat, ExternalFileDropMode } from '../store/themeStore'
+import type {
+  ReasoningDisplayMode,
+  DiffStyle,
+  ToolCardStyle,
+  CompletedAtFormat,
+  ExternalFileDropMode,
+} from '../store/themeStore'
 
 // 保持向后兼容的类型别名
 export type ThemeMode = ColorMode
@@ -152,6 +158,10 @@ export function useTheme() {
     themeStore.setRenderUserMarkdown(enabled)
   }, [])
 
+  const setRenderHtmlContent = useCallback((enabled: boolean) => {
+    themeStore.setRenderHtmlContent(enabled)
+  }, [])
+
   // ---- Step Finish Display ----
 
   const setStepFinishDisplay = useCallback((display: Partial<StepFinishDisplay>) => {
@@ -268,6 +278,8 @@ export function useTheme() {
     setCollapseUserMessages,
     renderUserMarkdown: state.renderUserMarkdown,
     setRenderUserMarkdown,
+    renderHtmlContent: state.renderHtmlContent,
+    setRenderHtmlContent,
 
     // step-finish 信息栏显示
     stepFinishDisplay: state.stepFinishDisplay,

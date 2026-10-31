@@ -1,7 +1,9 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToolPartView } from './ToolPartView'
 import type { PiToolExecution } from '../../../pi/domain/index.js'
+
+let processCollapseEnabled = false
 
 const { getActiveCalibratedNowMock } = vi.hoisted(() => ({
   getActiveCalibratedNowMock: vi.fn<() => number | undefined>(() => undefined),
@@ -35,6 +37,7 @@ vi.mock('../../../hooks', () => ({
 vi.mock('../../../hooks/useTheme', () => ({
   useTheme: () => ({
     immersiveMode: false,
+    processCollapseEnabled,
   }),
 }))
 
@@ -48,7 +51,7 @@ vi.mock('../tools', () => ({
   getToolIcon: () => <span data-testid="tool-icon">icon</span>,
   extractToolData: () => ({}),
   getToolConfig: () => undefined,
-  DefaultRenderer: () => null,
+  DefaultRenderer: () => <div>Tool output</div>,
   TodoRenderer: () => null,
   TaskRenderer: () => null,
   hasTodos: () => false,
@@ -67,6 +70,7 @@ function createRunningExecution(): PiToolExecution {
 
 describe('ToolPartView running duration', () => {
   beforeEach(() => {
+    processCollapseEnabled = false
     vi.useFakeTimers()
     vi.setSystemTime(10_000)
     getActiveCalibratedNowMock.mockReset()
@@ -76,6 +80,24 @@ describe('ToolPartView running duration', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('does not auto-expand active tools in process-collapse mode', () => {
+    processCollapseEnabled = true
+    render(<ToolPartView execution={createRunningExecution()} partKey="collapsed-active" />)
+    expect(screen.queryByText('Tool output')).toBeNull()
+    act(() => vi.advanceTimersByTime(500))
+    expect(screen.queryByText('Tool output')).toBeNull()
+    fireEvent.click(screen.getByRole('button'))
+    expect(screen.getByText('Tool output')).toBeTruthy()
+    act(() => vi.advanceTimersByTime(500))
+    expect(screen.getByText('Tool output')).toBeTruthy()
+  })
+
+  it('still opens explicitly user-started commands', () => {
+    processCollapseEnabled = true
+    render(<ToolPartView execution={createRunningExecution()} partKey="user-command" defaultExpanded />)
+    expect(screen.getByText('Tool output')).toBeTruthy()
   })
 
   it('falls back to local wall clock when calibration is unavailable', () => {

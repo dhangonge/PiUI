@@ -1,5 +1,5 @@
 import type { DragDropEvent } from '@tauri-apps/api/webview'
-import { getDesktopPlatform, isTauri } from '../utils/tauri'
+import { getDesktopPlatform, isTauri, isTauriMobile } from '../utils/tauri'
 
 export type TauriDragDropEvent = DragDropEvent
 export type TauriDropPosition = Extract<DragDropEvent, { type: 'drop' }>['position']
@@ -18,10 +18,7 @@ export function getTauriDropClientPoints(position: TauriDropPosition): Array<{ x
 }
 
 /** Physical + CSS 坐标双试，兼容 Windows / macOS 拖放坐标差异 */
-export function isTauriDropPointInsideElement(
-  position: TauriDropPosition,
-  element: HTMLElement | null,
-): boolean {
+export function isTauriDropPointInsideElement(position: TauriDropPosition, element: HTMLElement | null): boolean {
   if (!element) return false
   const rect = element.getBoundingClientRect()
   return getTauriDropClientPoints(position).some(
@@ -31,6 +28,8 @@ export function isTauriDropPointInsideElement(
 
 export async function getDroppedPathsInfo(paths: string[]): Promise<DroppedPathInfo[]> {
   if (paths.length === 0) return []
+  // 安卓端没有本地路径概念（server 在远端），且 Rust 侧已移除该命令
+  if (isTauriMobile()) return []
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<DroppedPathInfo[]>('get_dropped_paths_info', { paths })
 }

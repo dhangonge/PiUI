@@ -1,11 +1,31 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react'
 import type { SessionListParams, UiSession } from '../types/session'
 import { pinnedSessionsStore } from '../store/pinnedSessionsStore'
-import { autoDetectPathStyle, isSameDirectory } from '../utils'
+import { autoDetectPathStyle, isSameDirectory, normalizeToForwardSlash } from '../utils'
+import { serverStore } from '../store/serverStore'
+import { getServerRevision } from '../utils/sessionKey'
 import { createPiSession, loadPiSessions, loadPiSessionsForCwd, deletePiSession } from '../pi/controllers/index.js'
 import { filterPiSessionList, linkPiSessionForks, piSessionInfoToUiSession } from '../pi/nativeSessionListModel'
+import { groupSubagentSessions } from '../pi/subagentSessionGrouping'
 import { trackPiSession } from '../pi/piSessionIndex'
 import { resolveWorkspacePath } from '../pi/workspaces.js'
+
+// 会话列表加载失败的重试退避（毫秒）。退避间隔内仍算「加载中」，
+// 不落空态——消费方据此区分「还在加载」与「确实没有对话」
+const SESSION_RETRY_DELAYS_MS = [500, 1500, 3000]
+
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    if (signal.aborted) return resolve()
+    const finish = () => {
+      window.clearTimeout(timer)
+      signal.removeEventListener('abort', finish)
+      resolve()
+    }
+    const timer = window.setTimeout(finish, ms)
+    signal.addEventListener('abort', finish, { once: true })
+  })
+}
 
 interface UseSessionsOptions {
   /** 每页数量 */
@@ -14,10 +34,13 @@ interface UseSessionsOptions {
   initialSearch?: string
   /** 只加载根会话 */
   rootsOnly?: boolean
+  /** 子代理会话从顶层抽样，挂到父会话下（侧栏用） */
+  groupSubagentSessions?: boolean
   /** 按目录过滤 */
   directory?: string
   /** 延迟启用，用于懒加载 */
   enabled?: boolean
+  serverId?: string
 }
 
 interface UseSessionsResult {
@@ -41,15 +64,24 @@ interface UseSessionsResult {
   patchLocalSession: (sessionId: string, patch: Partial<UiSession>) => void
   /** 本地移除会话 */
   removeLocalSession: (sessionId: string) => void
+  /** 父会话 id -> 子代理会话（仅在开启 groupSubagentSessions 时有值） */
+  subagentChildrenByParentId: Map<string, UiSession[]>
 }
 
+const EMPTY_CHILDREN: Map<string, UiSession[]> = new Map()
+
 export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult {
-  const { pageSize = 20, initialSearch = '', directory, enabled = true } = options
+  const { pageSize = 20, initialSearch = '', directory, enabled = true, serverId } = options
+  const shouldGroupSubagentSessions = options.groupSubagentSessions === true
 
   // 标准化 directory 路径 (移除末尾斜杠，统一正斜杠)
-  const normalizedDirectory = directory ? directory.replace(/\\/g, '/').replace(/\/$/, '') : undefined
+  const normalizedDirectory = normalizeToForwardSlash(directory) || undefined
+  const connectionRevision = useSyncExternalStore(serverStore.subscribe.bind(serverStore), () =>
+    serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration(),
+  )
 
   const [sessions, setSessions] = useState<UiSession[]>([])
+  const [subagentChildrenByParentId, setSubagentChildrenByParentId] = useState<Map<string, UiSession[]>>(EMPTY_CHILDREN)
   const [isLoading, setIsLoading] = useState(enabled)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [error, setError] = useState<Error | null>(null)
@@ -66,10 +98,18 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   // 防止 onReconnected 密集触发时重复请求
   const isFetchingRef = useRef(false)
   const queuedReconnectRefreshRef = useRef(false)
-  const retryTimerRef = useRef<number | null>(null)
+  const retryAbortRef = useRef<AbortController | null>(null)
   const fetchSessionsRef = useRef<
-    (params?: SessionListParams & { append?: boolean; retryAttempt?: number; silent?: boolean }) => Promise<void>
+    (params?: SessionListParams & { append?: boolean; silent?: boolean }) => Promise<void>
   >(() => Promise.resolve())
+
+  const cancelPendingRequest = useCallback(() => {
+    requestIdRef.current += 1
+    retryAbortRef.current?.abort()
+    retryAbortRef.current = null
+    isFetchingRef.current = false
+    queuedReconnectRefreshRef.current = false
+  }, [])
 
   useEffect(() => {
     searchRef.current = search
@@ -83,12 +123,17 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   // 获取会话列表
   // append 仅用于控制 loading 状态：true 时用 isLoadingMore，false 时用 isLoading
   // 数据始终全量替换（递增 limit 策略）
+  // 重试为显式循环而非 setTimeout 自调用：loading 的生命周期 = 循环的生命周期，
+  // 重试空档不再以「空列表 + 非 loading」示人（空态文案闪现的根因）
   const fetchSessions = useCallback(
-    async (params: SessionListParams & { append?: boolean; retryAttempt?: number; silent?: boolean } = {}) => {
+    async (params: SessionListParams & { append?: boolean; silent?: boolean } = {}) => {
       if (!enabled) return
 
-      const { append = false, retryAttempt = 0, silent = false, ...queryParams } = params
+      const { append = false, silent = false, ...queryParams } = params
       const requestId = ++requestIdRef.current
+      retryAbortRef.current?.abort()
+      const retryAbort = new AbortController()
+      retryAbortRef.current = retryAbort
       isFetchingRef.current = true
 
       if (append) {
@@ -101,43 +146,58 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
       }
 
       try {
-        const nativeSessions = normalizedDirectory
-          ? await loadPiSessionsForCwd(normalizedDirectory)
-          : await loadPiSessions()
-        const mapped = nativeSessions
-          .map(piSessionInfoToUiSession)
-          .filter((session): session is UiSession => session !== null)
-        const all = linkPiSessionForks(mapped)
-        const searchTerm = queryParams.search?.trim().toLowerCase()
-        const matching = filterPiSessionList(all.filter(session => matchesDirectory(session)), searchTerm ?? '')
-        const data = matching.slice(0, currentLimitRef.current)
+        for (let retryAttempt = 0; ; retryAttempt++) {
+          try {
+            // Server-side search: with `allMessagesText` no longer shipped by
+            // default, transcript matches must be resolved on the worker.
+            const searchArg = queryParams.search?.trim() || undefined
+            const nativeSessions = normalizedDirectory
+              ? await (serverId
+                  ? loadPiSessionsForCwd(normalizedDirectory, retryAbort.signal, serverId, searchArg)
+                  : loadPiSessionsForCwd(normalizedDirectory, undefined, undefined, searchArg))
+              : await (serverId
+                  ? loadPiSessions(retryAbort.signal, serverId, searchArg)
+                  : loadPiSessions(undefined, undefined, searchArg))
+            const mapped = nativeSessions
+              .map(piSessionInfoToUiSession)
+              .filter((session): session is UiSession => session !== null)
+            const all = linkPiSessionForks(mapped)
+            const searchTerm = queryParams.search?.trim().toLowerCase()
+            const matching = filterPiSessionList(
+              all.filter(session => matchesDirectory(session)),
+              searchTerm ?? '',
+            )
+            // 子代理会话不占顶层名额（侧栏里收进父会话，避免最近的 5 条全被刷屏）
+            const grouped = shouldGroupSubagentSessions ? groupSubagentSessions(matching) : undefined
+            const visible = grouped ? grouped.roots : matching
+            const data = visible.slice(0, currentLimitRef.current)
 
-        // 检查是否是最新的请求
-        if (requestId !== requestIdRef.current) return
+            // 已被更新的请求覆盖：静默退出，不碰任何状态
+            if (requestId !== requestIdRef.current) return
 
-        if (data.length > 0 && data[0].directory) {
-          autoDetectPathStyle(data[0].directory)
-        }
+            if (data.length > 0 && data[0].directory) {
+              autoDetectPathStyle(data[0].directory, serverId)
+            }
 
-        setSessions(data)
-        setHasMore(matching.length > data.length)
-      } catch (e) {
-        if (requestId !== requestIdRef.current) return
-        setError(e instanceof Error ? e : new Error('Failed to fetch sessions'))
-        if (!append) {
-          if (retryAttempt < 3) {
-            if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
-            retryTimerRef.current = window.setTimeout(() => {
-              if (requestId !== requestIdRef.current) return
-              void fetchSessionsRef.current({ ...queryParams, retryAttempt: retryAttempt + 1 })
-            }, [500, 1500, 3000][retryAttempt])
-          } else {
-            setSessions([])
-            setHasMore(false)
+            setSessions(data)
+            setSubagentChildrenByParentId(grouped ? grouped.childrenByParentId : EMPTY_CHILDREN)
+            setHasMore(visible.length > data.length)
+            setError(null)
+            return
+          } catch (e) {
+            if (requestId !== requestIdRef.current) return
+            const exhausted = retryAttempt >= SESSION_RETRY_DELAYS_MS.length
+            if (append || exhausted) {
+              setError(e instanceof Error ? e : new Error('Failed to fetch sessions'))
+              return
+            }
+            await delay(SESSION_RETRY_DELAYS_MS[retryAttempt], retryAbort.signal)
+            if (requestId !== requestIdRef.current) return
           }
         }
       } finally {
         if (requestId === requestIdRef.current) {
+          retryAbortRef.current = null
           isFetchingRef.current = false
           setIsLoading(false)
           setIsLoadingMore(false)
@@ -149,7 +209,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
         }
       }
     },
-    [matchesDirectory, enabled, normalizedDirectory],
+    [matchesDirectory, enabled, normalizedDirectory, serverId, shouldGroupSubagentSessions],
   )
 
   useEffect(() => {
@@ -185,11 +245,10 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
       if (searchTimerRef.current) {
         clearTimeout(searchTimerRef.current)
       }
-      if (retryTimerRef.current) {
-        clearTimeout(retryTimerRef.current)
-      }
+      // Invalidate before the next debounce, not only when the next fetch starts.
+      cancelPendingRequest()
     }
-  }, [search, fetchSessions, enabled, pageSize])
+  }, [search, fetchSessions, enabled, pageSize, cancelPendingRequest, connectionRevision])
 
   useEffect(() => {
     if (!enabled) return
@@ -229,9 +288,9 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
   const create = useCallback(
     async (title?: string) => {
       // 全局（未选目录）时落到服务器默认工作区（桌面安装目录）
-      const directory = normalizedDirectory || (await resolveWorkspacePath())
+      const directory = normalizedDirectory || (await resolveWorkspacePath(undefined, serverId))
       if (!directory) throw new Error('A project directory is required')
-      const created = await createPiSession(directory)
+      const created = await createPiSession(directory, undefined, serverId)
       if (!created.sessionFile) throw new Error('Pi did not return a session file')
       const now = Date.now()
       const newSession: UiSession = {
@@ -259,7 +318,7 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
 
       return newSession
     },
-    [normalizedDirectory],
+    [normalizedDirectory, serverId],
   )
 
   // 删除会话
@@ -267,12 +326,12 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
     async (sessionId: string) => {
       const session = sessions.find(item => item.id === sessionId)
       if (!session?.path || !session.directory) throw new Error('Pi session file is unavailable')
-      await deletePiSession(session.directory, session.path)
+      await deletePiSession(session.directory, session.path, undefined, serverId)
       pinnedSessionsStore.unpin(sessionId)
       setSessions(prev => prev.filter(s => s.id !== sessionId))
       window.dispatchEvent(new CustomEvent('piui:sessions-changed'))
     },
-    [sessions],
+    [sessions, serverId],
   )
 
   const patchLocalSession = useCallback((sessionId: string, patch: Partial<UiSession>) => {
@@ -297,5 +356,6 @@ export function useSessions(options: UseSessionsOptions = {}): UseSessionsResult
     remove,
     patchLocalSession,
     removeLocalSession,
+    subagentChildrenByParentId,
   }
 }

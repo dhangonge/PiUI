@@ -5,7 +5,14 @@ import { mergeLatestBranchPage } from './branchMerge.js'
 import { selectPiTimelineItems } from './selectors/index.js'
 
 function entry(id: string): SessionEntry {
-  return { type: 'model_change', id, parentId: null, timestamp: '2026-01-01T00:00:00Z', provider: 'p', modelId: id } as SessionEntry
+  return {
+    type: 'model_change',
+    id,
+    parentId: null,
+    timestamp: '2026-01-01T00:00:00Z',
+    provider: 'p',
+    modelId: id,
+  } as SessionEntry
 }
 
 function messageEntry(id: string, role: 'user' | 'assistant', text: string): SessionEntry {
@@ -14,9 +21,7 @@ function messageEntry(id: string, role: 'user' | 'assistant', text: string): Ses
     id,
     parentId: null,
     timestamp: '2026-01-01T00:00:00Z',
-    message: role === 'user'
-      ? { role, content: text }
-      : { role, content: [{ type: 'text', text }] },
+    message: role === 'user' ? { role, content: text } : { role, content: [{ type: 'text', text }] },
   } as SessionEntry
 }
 

@@ -1,17 +1,17 @@
-import { beforeEach, describe, expect, it } from "vitest"
-import { getPiCapabilities } from "./capabilities"
-import { piNativeStatusForTest } from "./nativeStatus"
+import { beforeEach, describe, expect, it } from 'vitest'
+import { getPiCapabilities } from './capabilities'
+import { piNativeStatusForTest } from './nativeStatus'
 
-describe("Pi capability registry", () => {
+describe('Pi capability registry', () => {
   beforeEach(() => piNativeStatusForTest(undefined))
 
-  it("derives capabilities from registry commands natively", () => {
+  it('derives capabilities from registry commands natively', () => {
     piNativeStatusForTest({
       sessionCommands: [
-        { name: "fork", scope: "session", source: "pi-sdk" },
-        { name: "setSessionName", scope: "session", source: "pi-sdk" },
+        { name: 'fork', scope: 'session', source: 'pi-sdk' },
+        { name: 'setSessionName', scope: 'session', source: 'pi-sdk' },
       ],
-      globalCommands: [{ name: "session.delete", scope: "global", source: "pi-sdk" }],
+      globalCommands: [{ name: 'session.delete', scope: 'global', source: 'pi-sdk' }],
     })
 
     const caps = getPiCapabilities()
@@ -22,13 +22,13 @@ describe("Pi capability registry", () => {
     expect(caps.pty).toBe(false)
   })
 
-  it("derives host capabilities (pty/file/git) from their backing commands", () => {
+  it('derives host capabilities (pty/file/git) from their backing commands', () => {
     piNativeStatusForTest({
       sessionCommands: [],
       globalCommands: [
-        { name: "terminals.create", scope: "global", source: "piui-adapter" },
-        { name: "files.write", scope: "global", source: "piui-adapter" },
-        { name: "git.diff", scope: "global", source: "piui-adapter" },
+        { name: 'terminals.create', scope: 'global', source: 'piui-adapter' },
+        { name: 'files.write', scope: 'global', source: 'piui-adapter' },
+        { name: 'git.diff', scope: 'global', source: 'piui-adapter' },
       ],
     })
 
@@ -41,7 +41,7 @@ describe("Pi capability registry", () => {
     expect(caps.mcp).toBe(false)
   })
 
-  it("is unavailable without a registry", () => {
+  it('is unavailable without a registry', () => {
     expect(getPiCapabilities().fork).toBe(false)
     expect(getPiCapabilities().sessionDelete).toBe(false)
   })

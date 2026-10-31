@@ -1,5 +1,5 @@
-import { resolve } from "node:path"
-import type { WorkerSession } from "./worker-client.ts"
+import { resolve } from 'node:path'
+import type { WorkerSession } from './worker-client.ts'
 
 export interface AttachedSession {
   sessionId: string
@@ -9,17 +9,20 @@ export interface AttachedSession {
 }
 
 function sessionFileKey(sessionFile: string): string {
-  const normalized = resolve(sessionFile).replace(/\\/g, "/")
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized
+  const normalized = resolve(sessionFile).replace(/\\/g, '/')
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
 }
 
 export class SessionRuntimeRegistry {
   private readonly sessions = new Map<string, AttachedSession>()
-  private readonly openFlights = new Map<string, {
-    promise: Promise<unknown>
-    controller: AbortController
-    waiters: number
-  }>()
+  private readonly openFlights = new Map<
+    string,
+    {
+      promise: Promise<unknown>
+      controller: AbortController
+      waiters: number
+    }
+  >()
   private readonly attachFlights = new Map<string, Promise<AttachedSession>>()
 
   get(sessionId: string): AttachedSession | undefined {
@@ -44,10 +47,16 @@ export class SessionRuntimeRegistry {
 
   findBySessionFile(sessionFile: string): AttachedSession | undefined {
     const key = sessionFileKey(sessionFile)
-    return [...this.sessions.values()].find(session => session.sessionFile && sessionFileKey(session.sessionFile) === key)
+    return [...this.sessions.values()].find(
+      session => session.sessionFile && sessionFileKey(session.sessionFile) === key,
+    )
   }
 
-  async openFlight<T>(sessionFile: string, operation: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  async openFlight<T>(
+    sessionFile: string,
+    operation: (signal: AbortSignal) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
     const key = sessionFileKey(sessionFile)
     let flight = this.openFlights.get(key)
     if (!flight) {
@@ -57,14 +66,18 @@ export class SessionRuntimeRegistry {
       this.openFlights.set(key, flight)
       const current = flight
       void promise.then(
-        () => { if (this.openFlights.get(key) === current) this.openFlights.delete(key) },
-        () => { if (this.openFlights.get(key) === current) this.openFlights.delete(key) },
+        () => {
+          if (this.openFlights.get(key) === current) this.openFlights.delete(key)
+        },
+        () => {
+          if (this.openFlights.get(key) === current) this.openFlights.delete(key)
+        },
       )
     }
     flight.waiters += 1
     return new Promise<T>((resolve, reject) => {
       let settled = false
-      const cleanup = () => signal?.removeEventListener("abort", abort)
+      const cleanup = () => signal?.removeEventListener('abort', abort)
       const finish = (callback: () => void) => {
         if (settled) return
         settled = true
@@ -72,18 +85,19 @@ export class SessionRuntimeRegistry {
         cleanup()
         callback()
       }
-      const abort = () => finish(() => {
-        if (flight!.waiters === 0) {
-          flight!.controller.abort()
-          if (this.openFlights.get(key) === flight) this.openFlights.delete(key)
-        }
-        reject(Object.assign(new Error("request aborted"), { code: "REQUEST_ABORTED" }))
-      })
+      const abort = () =>
+        finish(() => {
+          if (flight!.waiters === 0) {
+            flight!.controller.abort()
+            if (this.openFlights.get(key) === flight) this.openFlights.delete(key)
+          }
+          reject(Object.assign(new Error('request aborted'), { code: 'REQUEST_ABORTED' }))
+        })
       if (signal?.aborted) {
         abort()
         return
       }
-      signal?.addEventListener("abort", abort, { once: true })
+      signal?.addEventListener('abort', abort, { once: true })
       flight!.promise.then(
         value => finish(() => resolve(value as T)),
         error => finish(() => reject(error)),

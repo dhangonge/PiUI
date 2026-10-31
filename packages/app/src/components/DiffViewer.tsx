@@ -9,15 +9,42 @@
  * 不再按文件大小、行数、字符数降级高亮或 diff
  */
 
-import { memo, useMemo, useRef, useState, useEffect, useCallback, useSyncExternalStore, type CSSProperties } from 'react'
+import {
+  memo,
+  useMemo,
+  useRef,
+  useState,
+  useEffect,
+  useCallback,
+  useSyncExternalStore,
+  type CSSProperties,
+} from 'react'
 import { useTranslation } from 'react-i18next'
-import { diffLines, diffWordsWithSpace } from 'diff'
 import { useSyntaxHighlight, type HighlightTokens } from '../hooks/useSyntaxHighlight'
 import { useDynamicVirtualScroll } from '../hooks/useDynamicVirtualScroll'
 import { themeStore } from '../store/themeStore'
 import type { DiffStyle } from '../store/themeStore'
 import { getLineCount, getLineNumberColumnWidth } from '../utils/lineNumberUtils'
 import { useUiState } from '../utils/uiDisclosureState'
+import {
+  buildPairedLines,
+  buildUnifiedLines,
+  collapseContextPaired,
+  collapseContextUnified,
+  computeLineDiff,
+  expandRegion,
+  isCollapsed,
+  type DiffLine,
+  type ExpandDirection,
+  type ExpansionRegion,
+  type LineType,
+  type PairedLine,
+  type UnifiedLine,
+  type WordDiffSegment,
+} from './diffModel'
+
+/** 保持既有公开出口：LineType 原先由本文件导出，抽到 diffModel 后继续转出。 */
+export type { LineType } from './diffModel'
 
 // ============================================
 // 常量
@@ -55,181 +82,6 @@ export interface DiffViewerData {
   pairedLines: PairedLine[]
   unifiedLines: UnifiedLine[]
   lineNumberWidth: number
-}
-
-export type LineType = 'add' | 'delete' | 'context' | 'empty'
-
-interface DiffLine {
-  type: LineType
-  content: string
-  lineNo?: number
-  /** 词级别 diff 标记（结构化），与 syntax token 共存 */
-  wordDiffSegments?: WordDiffSegment[]
-}
-
-/** 词级别 diff 的单个片段 */
-interface WordDiffSegment {
-  text: string
-  /** 'add' | 'delete' 表示增删标记，undefined 表示无变化 */
-  diffType?: 'add' | 'delete'
-}
-
-interface PairedLine {
-  left: DiffLine
-  right: DiffLine
-}
-
-/** 折叠的 context 行占位 */
-interface CollapsedPairedLine {
-  collapsed: true
-  count: number
-  /** 在原始 lines 数组中的起始索引，用于展开 */
-  id: number
-  isFirst: boolean
-  isLast: boolean
-  chunked: boolean
-}
-
-type PairedLineOrCollapsed = PairedLine | CollapsedPairedLine
-
-interface UnifiedLine extends DiffLine {
-  oldLineNo?: number
-  newLineNo?: number
-}
-
-interface CollapsedUnifiedLine {
-  collapsed: true
-  count: number
-  id: number
-  isFirst: boolean
-  isLast: boolean
-  chunked: boolean
-}
-
-type UnifiedLineOrCollapsed = UnifiedLine | CollapsedUnifiedLine
-
-function isCollapsed(
-  line: PairedLineOrCollapsed | UnifiedLineOrCollapsed,
-): line is CollapsedPairedLine | CollapsedUnifiedLine {
-  return 'collapsed' in line && line.collapsed === true
-}
-
-function expandRegion(prev: Map<number, ExpansionRegion>, id: number, direction: ExpandDirection): Map<number, ExpansionRegion> {
-  const next = new Map(prev)
-  const current = next.get(id) ?? { fromStart: 0, fromEnd: 0 }
-  next.set(id, {
-    fromStart: current.fromStart + (direction === 'up' || direction === 'both' ? EXPANSION_LINE_COUNT : 0),
-    fromEnd: current.fromEnd + (direction === 'down' || direction === 'both' ? EXPANSION_LINE_COUNT : 0),
-  })
-  return next
-}
-
-/** 上下文行保留数：变更前后各保留 CONTEXT_LINES 行 */
-const CONTEXT_LINES = 3
-const EXPANSION_LINE_COUNT = 100
-type ExpandDirection = 'up' | 'down' | 'both'
-interface ExpansionRegion {
-  fromStart: number
-  fromEnd: number
-}
-
-/** 将连续 context 行折叠，只保留变更前后各 CONTEXT_LINES 行 */
-function collapseContextPaired(lines: PairedLine[], expandedRegions?: ReadonlyMap<number, ExpansionRegion>): PairedLineOrCollapsed[] {
-  if (lines.length === 0) return []
-
-  const result: PairedLineOrCollapsed[] = []
-  let contextStart = -1
-
-  for (let i = 0; i <= lines.length; i++) {
-    const isCtx = i < lines.length && lines[i].left.type === 'context' && lines[i].right.type === 'context'
-
-    if (isCtx) {
-      if (contextStart === -1) contextStart = i
-    } else {
-      if (contextStart !== -1) {
-        const ctxLen = i - contextStart
-        const minToCollapse = CONTEXT_LINES * 2 + 2
-        if (ctxLen > minToCollapse) {
-          const isFirst = contextStart === 0
-          const isLast = i === lines.length
-          const keepBefore = isFirst ? 0 : CONTEXT_LINES
-          const keepAfter = isLast ? 0 : CONTEXT_LINES
-          const expanded = expandedRegions?.get(contextStart) ?? { fromStart: 0, fromEnd: 0 }
-          const prefixCount = Math.min(ctxLen, keepBefore + expanded.fromStart)
-          const suffixStart = Math.max(prefixCount, ctxLen - keepAfter - expanded.fromEnd)
-
-          for (let j = contextStart; j < contextStart + prefixCount; j++) result.push(lines[j])
-          if (suffixStart > prefixCount) {
-            const count = suffixStart - prefixCount
-            result.push({
-              collapsed: true,
-              count,
-              id: contextStart,
-              isFirst,
-              isLast,
-              chunked: count > EXPANSION_LINE_COUNT,
-            })
-          }
-          for (let j = contextStart + suffixStart; j < i; j++) result.push(lines[j])
-        } else {
-          for (let j = contextStart; j < i; j++) result.push(lines[j])
-        }
-        contextStart = -1
-      }
-      if (i < lines.length) result.push(lines[i])
-    }
-  }
-
-  return result
-}
-
-function collapseContextUnified(lines: UnifiedLine[], expandedRegions?: ReadonlyMap<number, ExpansionRegion>): UnifiedLineOrCollapsed[] {
-  if (lines.length === 0) return []
-
-  const result: UnifiedLineOrCollapsed[] = []
-  let contextStart = -1
-
-  for (let i = 0; i <= lines.length; i++) {
-    const isCtx = i < lines.length && lines[i].type === 'context'
-
-    if (isCtx) {
-      if (contextStart === -1) contextStart = i
-    } else {
-      if (contextStart !== -1) {
-        const ctxLen = i - contextStart
-        const minToCollapse = CONTEXT_LINES * 2 + 2
-        if (ctxLen > minToCollapse) {
-          const isFirst = contextStart === 0
-          const isLast = i === lines.length
-          const keepBefore = isFirst ? 0 : CONTEXT_LINES
-          const keepAfter = isLast ? 0 : CONTEXT_LINES
-          const expanded = expandedRegions?.get(contextStart) ?? { fromStart: 0, fromEnd: 0 }
-          const prefixCount = Math.min(ctxLen, keepBefore + expanded.fromStart)
-          const suffixStart = Math.max(prefixCount, ctxLen - keepAfter - expanded.fromEnd)
-
-          for (let j = contextStart; j < contextStart + prefixCount; j++) result.push(lines[j])
-          if (suffixStart > prefixCount) {
-            const count = suffixStart - prefixCount
-            result.push({
-              collapsed: true,
-              count,
-              id: contextStart,
-              isFirst,
-              isLast,
-              chunked: count > EXPANSION_LINE_COUNT,
-            })
-          }
-          for (let j = contextStart + suffixStart; j < i; j++) result.push(lines[j])
-        } else {
-          for (let j = contextStart; j < i; j++) result.push(lines[j])
-        }
-        contextStart = -1
-      }
-      if (i < lines.length) result.push(lines[i])
-    }
-  }
-
-  return result
 }
 
 // ============================================
@@ -295,10 +147,7 @@ function getWrappedPairContent(pair: PairedLine): string {
 }
 
 function useDiffLineNumberWidth(before: string, after: string): number {
-  return useMemo(
-    () => getLineNumberColumnWidth(Math.max(getLineCount(before), getLineCount(after))),
-    [before, after],
-  )
+  return useMemo(() => getLineNumberColumnWidth(Math.max(getLineCount(before), getLineCount(after))), [before, after])
 }
 
 function LineNumberCell({ lineNo, width, type }: { lineNo?: number; width: number; type?: LineType }) {
@@ -322,8 +171,18 @@ function DiffMarkerCell({ type }: { type: LineType }) {
   )
 }
 
-function EmptyContentBuffer({ height, yOffset = 0, xOffset = 0 }: { height: number; yOffset?: number; xOffset?: number }) {
-  return <div className="diff-empty-content-buffer min-w-full" style={getEmptyBufferRowStyle(height, yOffset, xOffset)} />
+function EmptyContentBuffer({
+  height,
+  yOffset = 0,
+  xOffset = 0,
+}: {
+  height: number
+  yOffset?: number
+  xOffset?: number
+}) {
+  return (
+    <div className="diff-empty-content-buffer min-w-full" style={getEmptyBufferRowStyle(height, yOffset, xOffset)} />
+  )
 }
 
 /** Change bar 样式 — 行号左侧的 3px 竖条，add 实心 / delete 虚线 */
@@ -351,7 +210,15 @@ function alignDeleteChangeBars(container: HTMLElement, yOffset: number) {
 function ExpandIcon({ type }: { type: ExpandDirection }) {
   if (type === 'both') {
     return (
-      <svg aria-hidden="true" data-icon="" className="diff-separator-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <svg
+        aria-hidden="true"
+        data-icon=""
+        className="diff-separator-icon"
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="currentColor"
+      >
         <path d="M11.47 9.47a.75.75 0 1 1 1.06 1.06l-4 4a.75.75 0 0 1-1.06 0l-4-4a.75.75 0 1 1 1.06-1.06L8 12.94zM7.526 1.418a.75.75 0 0 1 1.004.052l4 4a.75.75 0 1 1-1.06 1.06L8 3.06 4.53 6.53a.75.75 0 1 1-1.06-1.06l4-4z" />
       </svg>
     )
@@ -372,7 +239,15 @@ function ExpandIcon({ type }: { type: ExpandDirection }) {
   )
 }
 
-function getSeparatorDirections({ isFirst, isLast, chunked }: { isFirst?: boolean; isLast?: boolean; chunked?: boolean }): ExpandDirection[] {
+function getSeparatorDirections({
+  isFirst,
+  isLast,
+  chunked,
+}: {
+  isFirst?: boolean
+  isLast?: boolean
+  chunked?: boolean
+}): ExpandDirection[] {
   if (!chunked) return [!isFirst && !isLast ? 'both' : isFirst ? 'down' : 'up']
   const directions: ExpandDirection[] = []
   if (!isFirst) directions.push('up')
@@ -393,7 +268,11 @@ function CollapsedExpandButton({
   const buttonWidth = width !== undefined && directions.length > 0 ? width / directions.length : undefined
 
   return (
-    <div data-separator-wrapper="" className="diff-separator-button-group" style={width !== undefined ? { width, flexBasis: width } : undefined}>
+    <div
+      data-separator-wrapper=""
+      className="diff-separator-button-group"
+      style={width !== undefined ? { width, flexBasis: width } : undefined}
+    >
       {directions.map(direction => (
         <button
           key={direction}
@@ -405,7 +284,13 @@ function CollapsedExpandButton({
           data-expand-both={direction === 'both' ? '' : undefined}
           className="diff-separator-button"
           style={buttonWidth !== undefined ? { width: buttonWidth, minWidth: 0, flexBasis: buttonWidth } : undefined}
-          title={direction === 'up' ? t('diffViewer.expandUpward') : direction === 'down' ? t('diffViewer.expandDownward') : t('diffViewer.expandHiddenLines')}
+          title={
+            direction === 'up'
+              ? t('diffViewer.expandUpward')
+              : direction === 'down'
+                ? t('diffViewer.expandDownward')
+                : t('diffViewer.expandHiddenLines')
+          }
           onClick={() => onExpand?.(direction)}
         >
           <ExpandIcon type={direction} />
@@ -433,7 +318,13 @@ function CollapsedLabel({
     <div className="diff-separator-content-row" style={{ height }}>
       {leadingDirections.length > 0 && <CollapsedExpandButton directions={leadingDirections} onExpand={onExpand} />}
       <div data-separator-content="" className="diff-separator-content">
-        <button type="button" data-compact="" data-unmodified-lines="" className="diff-separator-text-button" onClick={() => onExpand?.('both')}>
+        <button
+          type="button"
+          data-compact=""
+          data-unmodified-lines=""
+          className="diff-separator-text-button"
+          onClick={() => onExpand?.('both')}
+        >
           {t('diffViewer.linesUnchanged', { count })}
         </button>
       </div>
@@ -500,7 +391,13 @@ function CollapsedBar({
 // ============================================
 
 // eslint-disable-next-line react-refresh/only-export-components -- DiffViewer consumers share this data with fullscreen instances.
-export function useDiffViewerData(before: string, after: string, language = 'text', isResizing = false, enabled = true): DiffViewerData {
+export function useDiffViewerData(
+  before: string,
+  after: string,
+  language = 'text',
+  isResizing = false,
+  enabled = true,
+): DiffViewerData {
   const shouldHighlight = enabled && !isResizing && language !== 'text'
   const { output: beforeTokens } = useSyntaxHighlight(before, {
     lang: language,
@@ -513,8 +410,14 @@ export function useDiffViewerData(before: string, after: string, language = 'tex
     enabled: shouldHighlight,
   })
   const skipWordDiff = isResizing
-  const pairedLines = useMemo(() => (enabled ? computePairedLines(before, after, skipWordDiff) : []), [before, after, enabled, skipWordDiff])
-  const unifiedLines = useMemo(() => (enabled ? computeUnifiedLines(before, after) : []), [before, after, enabled])
+  // 行级 diff 只算一次：paired 与 unified 共享同一份 changes，
+  // resize 只让 paired 重建词级标记，不会重跑 diffLines。
+  const lineModel = useMemo(() => (enabled ? computeLineDiff(before, after) : null), [before, after, enabled])
+  const pairedLines = useMemo(
+    () => (lineModel ? buildPairedLines(lineModel, { wordDiff: !skipWordDiff }) : []),
+    [lineModel, skipWordDiff],
+  )
+  const unifiedLines = useMemo(() => (lineModel ? buildUnifiedLines(lineModel) : []), [lineModel])
   const lineNumberWidth = useDiffLineNumberWidth(enabled ? before : '', enabled ? after : '')
 
   return useMemo(
@@ -523,17 +426,23 @@ export function useDiffViewerData(before: string, after: string, language = 'tex
   )
 }
 
-export const DiffViewer = memo(function DiffViewer({
-  data,
-  ...props
-}: DiffViewerProps) {
+export const DiffViewer = memo(function DiffViewer({ data, ...props }: DiffViewerProps) {
   if (data) return <DiffViewerContent {...props} data={data} />
   return <DiffViewerWithData {...props} />
 })
 
 function DiffViewerWithData({ before, after, language = 'text', isResizing = false, ...props }: DiffViewerProps) {
   const data = useDiffViewerData(before, after, language, isResizing)
-  return <DiffViewerContent before={before} after={after} language={language} isResizing={isResizing} {...props} data={data} />
+  return (
+    <DiffViewerContent
+      before={before}
+      after={after}
+      language={language}
+      isResizing={isResizing}
+      {...props}
+      data={data}
+    />
+  )
 }
 
 const DiffViewerContent = memo(function DiffViewerContent({
@@ -642,10 +551,16 @@ const WrappedSplitDiffView = memo(function WrappedSplitDiffView({
 }) {
   const { t } = useTranslation(['components', 'common'])
   const [expandedRegions, setExpandedRegions] = useUiState<Map<number, ExpansionRegion>>(stateKey, new Map())
-  const displayLines = useMemo(() => collapseContextPaired(pairedLines, expandedRegions), [pairedLines, expandedRegions])
-  const handleExpand = useCallback((id: number, direction: ExpandDirection) => {
-    setExpandedRegions(prev => expandRegion(prev, id, direction))
-  }, [setExpandedRegions])
+  const displayLines = useMemo(
+    () => collapseContextPaired(pairedLines, expandedRegions),
+    [pairedLines, expandedRegions],
+  )
+  const handleExpand = useCallback(
+    (id: number, direction: ExpandDirection) => {
+      setExpandedRegions(prev => expandRegion(prev, id, direction))
+    },
+    [setExpandedRegions],
+  )
 
   const useChangeBars = diffStyle === 'changeBars'
   const gutterWidth = useChangeBars ? lineNumberWidth + 4 : lineNumberWidth + 20
@@ -745,7 +660,10 @@ const WrappedSplitDiffView = memo(function WrappedSplitDiffView({
         </div>
 
         {/* Right panel */}
-        <div className={`flex-1 flex items-stretch min-w-0 ${getContentBgClass(pair.right.type)}`} style={rightEmptyStyle}>
+        <div
+          className={`flex-1 flex items-stretch min-w-0 ${getContentBgClass(pair.right.type)}`}
+          style={rightEmptyStyle}
+        >
           <div className="shrink-0" style={{ width: gutterWidth }}>
             {useChangeBars ? (
               <div className="flex items-stretch h-full">
@@ -844,10 +762,16 @@ const SplitDiffView = memo(function SplitDiffView({
   const [rightScrollLeft, setRightScrollLeft] = useState(0)
 
   const [expandedRegions, setExpandedRegions] = useUiState<Map<number, ExpansionRegion>>(stateKey, new Map())
-  const displayLines = useMemo(() => collapseContextPaired(pairedLines, expandedRegions), [pairedLines, expandedRegions])
-  const handleExpand = useCallback((id: number, direction: ExpandDirection) => {
-    setExpandedRegions(prev => expandRegion(prev, id, direction))
-  }, [setExpandedRegions])
+  const displayLines = useMemo(
+    () => collapseContextPaired(pairedLines, expandedRegions),
+    [pairedLines, expandedRegions],
+  )
+  const handleExpand = useCallback(
+    (id: number, direction: ExpandDirection) => {
+      setExpandedRegions(prev => expandRegion(prev, id, direction))
+    },
+    [setExpandedRegions],
+  )
 
   const totalHeight = displayLines.length * lineHeight
 
@@ -1026,20 +950,10 @@ const SplitDiffView = memo(function SplitDiffView({
         </div>,
       )
       rightGutterRows.push(
-        <div
-          key={i}
-          data-separator="line-info"
-          className="diff-separator-surface"
-          style={{ height: lineHeight }}
-        />,
+        <div key={i} data-separator="line-info" className="diff-separator-surface" style={{ height: lineHeight }} />,
       )
       rightContentRows.push(
-        <div
-          key={i}
-          data-separator="line-info"
-          className="diff-separator-surface"
-          style={{ height: lineHeight }}
-        >
+        <div key={i} data-separator="line-info" className="diff-separator-surface" style={{ height: lineHeight }}>
           <CollapsedContinuation height={lineHeight} />
         </div>,
       )
@@ -1048,7 +962,8 @@ const SplitDiffView = memo(function SplitDiffView({
 
     const pair = item as PairedLine
     const leftGutterClass = pair.left.type === 'empty' ? 'diff-empty-content-buffer' : getGutterBgClass(pair.left.type)
-    const rightGutterClass = pair.right.type === 'empty' ? 'diff-empty-content-buffer' : getGutterBgClass(pair.right.type)
+    const rightGutterClass =
+      pair.right.type === 'empty' ? 'diff-empty-content-buffer' : getGutterBgClass(pair.right.type)
     const rowTop = i * lineHeight
     const leftGutterStyle = getEmptyBufferRowStyle(lineHeight, rowTop)
     const rightGutterStyle = getEmptyBufferRowStyle(lineHeight, rowTop)
@@ -1065,7 +980,11 @@ const SplitDiffView = memo(function SplitDiffView({
           <LineNumberCell lineNo={pair.left.lineNo} width={lineNumberWidth} type={pair.left.type} />
         </div>
       ) : (
-        <div key={i} className={`flex ${leftGutterClass}`} style={pair.left.type === 'empty' ? leftGutterStyle : { height: lineHeight }}>
+        <div
+          key={i}
+          className={`flex ${leftGutterClass}`}
+          style={pair.left.type === 'empty' ? leftGutterStyle : { height: lineHeight }}
+        >
           <LineNumberCell lineNo={pair.left.lineNo} width={lineNumberWidth} type={pair.left.type} />
           <DiffMarkerCell type={pair.left.type} />
         </div>
@@ -1079,7 +998,11 @@ const SplitDiffView = memo(function SplitDiffView({
         className={`pr-2 leading-[var(--fs-code-line-height)] text-[length:var(--fs-code)] text-text-100 whitespace-pre ${pair.left.type === 'empty' ? '' : getContentBgClass(pair.left.type)}`}
         style={{ height: lineHeight }}
       >
-        {pair.left.type === 'empty' ? <EmptyContentBuffer height={lineHeight} yOffset={rowTop} xOffset={leftScrollLeft - gutterWidth} /> : <LineContent line={pair.left} tokens={beforeTokens} />}
+        {pair.left.type === 'empty' ? (
+          <EmptyContentBuffer height={lineHeight} yOffset={rowTop} xOffset={leftScrollLeft - gutterWidth} />
+        ) : (
+          <LineContent line={pair.left} tokens={beforeTokens} />
+        )}
       </div>,
     )
 
@@ -1095,7 +1018,11 @@ const SplitDiffView = memo(function SplitDiffView({
           <LineNumberCell lineNo={pair.right.lineNo} width={lineNumberWidth} type={pair.right.type} />
         </div>
       ) : (
-        <div key={i} className={`flex ${rightGutterClass}`} style={pair.right.type === 'empty' ? rightGutterStyle : { height: lineHeight }}>
+        <div
+          key={i}
+          className={`flex ${rightGutterClass}`}
+          style={pair.right.type === 'empty' ? rightGutterStyle : { height: lineHeight }}
+        >
           <LineNumberCell lineNo={pair.right.lineNo} width={lineNumberWidth} type={pair.right.type} />
           <DiffMarkerCell type={pair.right.type} />
         </div>
@@ -1109,7 +1036,11 @@ const SplitDiffView = memo(function SplitDiffView({
         className={`pr-2 leading-[var(--fs-code-line-height)] text-[length:var(--fs-code)] text-text-100 whitespace-pre ${pair.right.type === 'empty' ? '' : getContentBgClass(pair.right.type)}`}
         style={{ height: lineHeight }}
       >
-        {pair.right.type === 'empty' ? <EmptyContentBuffer height={lineHeight} yOffset={rowTop} xOffset={rightScrollLeft - gutterWidth} /> : <LineContent line={pair.right} tokens={afterTokens} />}
+        {pair.right.type === 'empty' ? (
+          <EmptyContentBuffer height={lineHeight} yOffset={rowTop} xOffset={rightScrollLeft - gutterWidth} />
+        ) : (
+          <LineContent line={pair.right} tokens={afterTokens} />
+        )}
       </div>,
     )
   }
@@ -1238,9 +1169,12 @@ const UnifiedDiffView = memo(function UnifiedDiffView({
 
   const [expandedRegions, setExpandedRegions] = useUiState<Map<number, ExpansionRegion>>(stateKey, new Map())
   const displayLines = useMemo(() => collapseContextUnified(lines, expandedRegions), [lines, expandedRegions])
-  const handleExpand = useCallback((id: number, direction: ExpandDirection) => {
-    setExpandedRegions(prev => expandRegion(prev, id, direction))
-  }, [setExpandedRegions])
+  const handleExpand = useCallback(
+    (id: number, direction: ExpandDirection) => {
+      setExpandedRegions(prev => expandRegion(prev, id, direction))
+    },
+    [setExpandedRegions],
+  )
 
   const totalHeight = displayLines.length * lineHeight
 
@@ -1369,7 +1303,13 @@ const UnifiedDiffView = memo(function UnifiedDiffView({
         </div>,
       )
       contentRows.push(
-        <div key={i} data-separator="line-info" data-expand-index="" className="diff-separator-surface" style={{ height: lineHeight }}>
+        <div
+          key={i}
+          data-separator="line-info"
+          data-expand-index=""
+          className="diff-separator-surface"
+          style={{ height: lineHeight }}
+        >
           <CollapsedContinuation height={lineHeight} />
         </div>,
       )
@@ -1479,9 +1419,12 @@ const WrappedUnifiedDiffView = memo(function WrappedUnifiedDiffView({
   const { t } = useTranslation(['components', 'common'])
   const [expandedRegions, setExpandedRegions] = useUiState<Map<number, ExpansionRegion>>(stateKey, new Map())
   const displayLines = useMemo(() => collapseContextUnified(lines, expandedRegions), [lines, expandedRegions])
-  const handleExpand = useCallback((id: number, direction: ExpandDirection) => {
-    setExpandedRegions(prev => expandRegion(prev, id, direction))
-  }, [setExpandedRegions])
+  const handleExpand = useCallback(
+    (id: number, direction: ExpandDirection) => {
+      setExpandedRegions(prev => expandRegion(prev, id, direction))
+    },
+    [setExpandedRegions],
+  )
 
   const useChangeBars = diffStyle === 'changeBars'
   const gutterWidth = useChangeBars ? lineNumberWidth * 2 + 4 : lineNumberWidth * 2 + 20
@@ -1557,21 +1500,25 @@ const WrappedUnifiedDiffView = memo(function WrappedUnifiedDiffView({
     }
 
     visibleRows.push(
-      <div key={i} ref={el => measureWrappedUnifiedRowRef(i, el)} className={`flex items-stretch ${getLineBgClass(line.type)}`}>
+      <div
+        key={i}
+        ref={el => measureWrappedUnifiedRowRef(i, el)}
+        className={`flex items-stretch ${getLineBgClass(line.type)}`}
+      >
         <div className="shrink-0" style={{ width: gutterWidth }}>
-            {useChangeBars ? (
-              <div className="flex items-stretch h-full">
-                <div {...getChangeBarProps(line.type)} />
-                <LineNumberCell lineNo={line.oldLineNo} width={lineNumberWidth} type={line.type} />
-                <LineNumberCell lineNo={line.newLineNo} width={lineNumberWidth} type={line.type} />
-              </div>
-            ) : (
-              <div className="flex h-full">
-                <LineNumberCell lineNo={line.oldLineNo} width={lineNumberWidth} type={line.type} />
-                <LineNumberCell lineNo={line.newLineNo} width={lineNumberWidth} type={line.type} />
-                <DiffMarkerCell type={line.type} />
-              </div>
-            )}
+          {useChangeBars ? (
+            <div className="flex items-stretch h-full">
+              <div {...getChangeBarProps(line.type)} />
+              <LineNumberCell lineNo={line.oldLineNo} width={lineNumberWidth} type={line.type} />
+              <LineNumberCell lineNo={line.newLineNo} width={lineNumberWidth} type={line.type} />
+            </div>
+          ) : (
+            <div className="flex h-full">
+              <LineNumberCell lineNo={line.oldLineNo} width={lineNumberWidth} type={line.type} />
+              <LineNumberCell lineNo={line.newLineNo} width={lineNumberWidth} type={line.type} />
+              <DiffMarkerCell type={line.type} />
+            </div>
+          )}
         </div>
 
         <div
@@ -1605,7 +1552,6 @@ const WrappedUnifiedDiffView = memo(function WrappedUnifiedDiffView({
 // ============================================
 
 type HighlightToken = HighlightTokens[number][number]
-type WordDiffChange = ReturnType<typeof diffWordsWithSpace>[number]
 
 const LineContent = memo(function LineContent({ line, tokens }: { line: DiffLine; tokens: HighlightTokens | null }) {
   const lineTokens = tokens && line.lineNo ? tokens[line.lineNo - 1] : null
@@ -1706,181 +1652,4 @@ function MergedWordDiffLine({ segments, lineTokens }: { segments: WordDiffSegmen
   }
 
   return <>{result}</>
-}
-
-// ============================================
-// Diff Computation
-// ============================================
-
-function computePairedLines(before: string, after: string, skipWordDiff: boolean): PairedLine[] {
-  const changes = diffLines(before, after)
-  const result: PairedLine[] = []
-  const beforeLines = before.split('\n')
-  const afterLines = after.split('\n')
-
-  let oldIdx = 0,
-    newIdx = 0,
-    i = 0
-
-  while (i < changes.length) {
-    const change = changes[i]
-    const count = change.count || 0
-
-    if (change.removed) {
-      const next = changes[i + 1]
-      if (next?.added) {
-        const addCount = next.count || 0
-        const maxCount = Math.max(count, addCount)
-
-        for (let j = 0; j < maxCount; j++) {
-          const oldLine = j < count ? beforeLines[oldIdx + j] : undefined
-          const newLine = j < addCount ? afterLines[newIdx + j] : undefined
-
-          let leftSegments: WordDiffSegment[] | undefined
-          let rightSegments: WordDiffSegment[] | undefined
-
-          if (!skipWordDiff && oldLine !== undefined && newLine !== undefined) {
-            const wordDiff = computeWordDiff(oldLine, newLine)
-            if (!isTooFragmented(wordDiff.changes)) {
-              leftSegments = wordDiff.left
-              rightSegments = wordDiff.right
-            }
-          }
-
-          result.push({
-            left:
-              oldLine !== undefined
-                ? { type: 'delete', content: oldLine, lineNo: oldIdx + j + 1, wordDiffSegments: leftSegments }
-                : { type: 'empty', content: '' },
-            right:
-              newLine !== undefined
-                ? { type: 'add', content: newLine, lineNo: newIdx + j + 1, wordDiffSegments: rightSegments }
-                : { type: 'empty', content: '' },
-          })
-        }
-
-        oldIdx += count
-        newIdx += addCount
-        i += 2
-        continue
-      }
-
-      for (let j = 0; j < count; j++) {
-        result.push({
-          left: { type: 'delete', content: beforeLines[oldIdx + j] || '', lineNo: oldIdx + j + 1 },
-          right: { type: 'empty', content: '' },
-        })
-      }
-      oldIdx += count
-    } else if (change.added) {
-      for (let j = 0; j < count; j++) {
-        result.push({
-          left: { type: 'empty', content: '' },
-          right: { type: 'add', content: afterLines[newIdx + j] || '', lineNo: newIdx + j + 1 },
-        })
-      }
-      newIdx += count
-    } else {
-      for (let j = 0; j < count; j++) {
-        result.push({
-          left: { type: 'context', content: beforeLines[oldIdx + j] || '', lineNo: oldIdx + j + 1 },
-          right: { type: 'context', content: afterLines[newIdx + j] || '', lineNo: newIdx + j + 1 },
-        })
-      }
-      oldIdx += count
-      newIdx += count
-    }
-    i++
-  }
-
-  return result
-}
-
-function computeUnifiedLines(before: string, after: string): UnifiedLine[] {
-  const changes = diffLines(before, after)
-  const result: UnifiedLine[] = []
-  const beforeLines = before.split('\n')
-  const afterLines = after.split('\n')
-
-  let oldIdx = 0,
-    newIdx = 0
-
-  for (const change of changes) {
-    const count = change.count || 0
-
-    if (change.removed) {
-      for (let j = 0; j < count; j++) {
-        result.push({ type: 'delete', content: beforeLines[oldIdx + j] || '', oldLineNo: oldIdx + j + 1 })
-      }
-      oldIdx += count
-    } else if (change.added) {
-      for (let j = 0; j < count; j++) {
-        result.push({ type: 'add', content: afterLines[newIdx + j] || '', newLineNo: newIdx + j + 1 })
-      }
-      newIdx += count
-    } else {
-      for (let j = 0; j < count; j++) {
-        result.push({
-          type: 'context',
-          content: afterLines[newIdx + j] || '',
-          oldLineNo: oldIdx + j + 1,
-          newLineNo: newIdx + j + 1,
-        })
-      }
-      oldIdx += count
-      newIdx += count
-    }
-  }
-
-  return result
-}
-
-function isTooFragmented(changes: WordDiffChange[]): boolean {
-  let commonLength = 0,
-    totalLength = 0
-  for (const change of changes) {
-    totalLength += change.value.length
-    if (!change.added && !change.removed) commonLength += change.value.length
-  }
-  return totalLength > 10 && commonLength / totalLength < 0.4
-}
-
-function computeWordDiff(
-  oldLine: string,
-  newLine: string,
-): { left: WordDiffSegment[]; right: WordDiffSegment[]; changes: WordDiffChange[] } {
-  const changes = diffWordsWithSpace(oldLine, newLine)
-
-  const mergedChanges: WordDiffChange[] = []
-  for (let i = 0; i < changes.length; i++) {
-    const current = changes[i]
-    const prev = mergedChanges[mergedChanges.length - 1]
-
-    if (prev && !current.added && !current.removed && /^\s*$/.test(current.value)) {
-      const next = changes[i + 1]
-      if ((prev.removed && next?.removed) || (prev.added && next?.added)) {
-        prev.value += current.value
-        continue
-      }
-    }
-
-    if (prev && ((prev.added && current.added) || (prev.removed && current.removed))) {
-      prev.value += current.value
-    } else {
-      mergedChanges.push({ ...current })
-    }
-  }
-
-  const left: WordDiffSegment[] = []
-  const right: WordDiffSegment[] = []
-  for (const change of mergedChanges) {
-    if (change.removed) left.push({ text: change.value, diffType: 'delete' })
-    else if (change.added) right.push({ text: change.value, diffType: 'add' })
-    else {
-      left.push({ text: change.value })
-      right.push({ text: change.value })
-    }
-  }
-
-  return { left, right, changes: mergedChanges }
 }

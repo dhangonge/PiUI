@@ -8,7 +8,7 @@ import type { PiAssistantMessageItem, PiTimelineItem } from '../../pi/domain/ind
 
 function itemHasContent(item: PiTimelineItem): boolean {
   if (item.kind === 'user_message') {
-    return item.blocks.some(block => block.type === 'text' ? block.text.trim().length > 0 : true)
+    return item.blocks.some(block => (block.type === 'text' ? block.text.trim().length > 0 : true))
   }
   if (item.kind === 'assistant_message') {
     const hasRenderable = item.blocks.some(block =>

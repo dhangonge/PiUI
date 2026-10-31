@@ -86,6 +86,7 @@ class MainActivity : TauriActivity() {
   override fun onResume() {
     super.onResume()
     startThemeSync()
+    notifyWebViewForeground()
   }
 
   override fun onPause() {
@@ -106,6 +107,19 @@ class MainActivity : TauriActivity() {
   private fun stopThemeSync() {
     themeSyncRunnable?.let { handler.removeCallbacks(it) }
     themeSyncRunnable = null
+  }
+
+  /**
+   * 部分 Android WebView 版本在后台不派发 visibilitychange，回前台时前端
+   * 就既不会立即重连也不探活。这里由原生 onResume 兜一个信号，前端
+   * attachResumeListeners 里监听 piui:foreground 走同一条 resumeNow() 路径。
+   * WebView 尚未创建时安静跳过（首次启动由正常加载流程处理）。
+   */
+  private fun notifyWebViewForeground() {
+    val rootView = window.decorView.findViewById<View>(android.R.id.content) ?: return
+    val webView = cachedWebView ?: findWebView(rootView) ?: return
+    cachedWebView = webView
+    webView.evaluateJavascript("window.dispatchEvent(new Event('piui:foreground'))", null)
   }
 
   private fun syncSystemBars(rootView: View) {

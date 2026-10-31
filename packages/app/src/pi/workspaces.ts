@@ -1,6 +1,7 @@
 import { postHostCommand } from './transport/index.js'
 import { trackPiWorkspace } from './piSessionIndex'
 import { serverStore } from '../store/serverStore'
+import { getServerRevision } from '../utils/sessionKey'
 
 /**
  * Host workspace commands (workspaces.*). A workspace is just a directory
@@ -13,49 +14,68 @@ export interface HostWorkspace {
   lastOpenedAt?: string
 }
 
-export async function listHostWorkspaces(signal?: AbortSignal): Promise<HostWorkspace[]> {
-  const data = await postHostCommand<{ workspaces: HostWorkspace[] }>('workspaces.list', undefined, signal)
+export async function listHostWorkspaces(signal?: AbortSignal, serverId?: string): Promise<HostWorkspace[]> {
+  const data = await postHostCommand<{ workspaces: HostWorkspace[] }>('workspaces.list', undefined, signal, serverId)
   return data.workspaces
 }
 
-export async function openHostWorkspace(rootPath?: string, displayName?: string, signal?: AbortSignal): Promise<HostWorkspace> {
+export async function openHostWorkspace(
+  rootPath?: string,
+  displayName?: string,
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<HostWorkspace> {
   const params: { rootPath?: string; displayName?: string } = {}
   if (rootPath) params.rootPath = rootPath
   if (displayName) params.displayName = displayName
-  const data = await postHostCommand<{ workspace: HostWorkspace }>(
-    'workspaces.open',
-    params,
-    signal,
-  )
-  trackPiWorkspace(data.workspace.path)
+  const data = await postHostCommand<{ workspace: HostWorkspace }>('workspaces.open', params, signal, serverId)
+  if (!serverId || serverId === serverStore.getActiveServerId()) trackPiWorkspace(data.workspace.path)
   return data.workspace
 }
 
-export async function watchHostWorkspace(workspacePath: string, signal?: AbortSignal): Promise<void> {
-  await postHostCommand<{ ok: boolean }>('workspaces.watch', { workspacePath }, signal)
+export async function watchHostWorkspace(
+  workspacePath: string,
+  signal?: AbortSignal,
+  serverId?: string,
+): Promise<void> {
+  await postHostCommand<{ ok: boolean }>('workspaces.watch', { workspacePath }, signal, serverId)
 }
 
 const workspaceResolutionPromises = new Map<string, Promise<string | null>>()
-let defaultWorkspacePromise: Promise<string | null> | null = null
+const defaultWorkspacePromises = new Map<string, Promise<string | null>>()
 
-async function ensureDefaultWorkspacePath(): Promise<string | null> {
-  if (!defaultWorkspacePromise) {
-    defaultWorkspacePromise = (async () => {
+function captureWorkspaceRevision(serverId?: string): () => void {
+  const revision = () => (serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration())
+  const initial = revision()
+  return () => {
+    if (revision() !== initial) throw new DOMException('Workspace server changed', 'AbortError')
+  }
+}
+
+async function ensureDefaultWorkspacePath(serverId?: string): Promise<string | null> {
+  const checkRevision = captureWorkspaceRevision(serverId)
+  const key = `${serverId ?? serverStore.getActiveServerId()}:${serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration()}`
+  let pending = defaultWorkspacePromises.get(key)
+  if (!pending) {
+    pending = (async () => {
       try {
         // 全局（未选目录）的默认工作区：服务器默认目录（桌面安装目录），
         // 与终端的全局语义保持一致。
-        const fallback = await openHostWorkspace()
-        await watchHostWorkspace(fallback.path)
+        const fallback = await openHostWorkspace(undefined, undefined, undefined, serverId)
+        checkRevision()
+        await watchHostWorkspace(fallback.path, undefined, serverId)
+        checkRevision()
         return fallback.path
       } catch {
         return null
       }
     })()
+    defaultWorkspacePromises.set(key, pending)
   }
   try {
-    return await defaultWorkspacePromise
+    return await pending
   } finally {
-    defaultWorkspacePromise = null
+    if (defaultWorkspacePromises.get(key) === pending) defaultWorkspacePromises.delete(key)
   }
 }
 
@@ -63,15 +83,18 @@ async function ensureDefaultWorkspacePath(): Promise<string | null> {
  * Return the workspace path for a directory (opening it on demand), or the
  * server's first known workspace when no directory is selected.
  */
-export async function resolveWorkspacePath(directory?: string): Promise<string | null> {
+export async function resolveWorkspacePath(directory?: string, serverId?: string): Promise<string | null> {
+  const checkRevision = captureWorkspaceRevision(serverId)
   if (directory && (/^[a-zA-Z]:[\\/]/.test(directory) || directory.startsWith('/'))) {
     const normalized = directory.replace(/\\/g, '/').replace(/\/+$/, '')
-    const key = `${serverStore.getActiveServerId()}:${serverStore.getActiveServerGeneration()}:${normalized}`
+    const key = `${serverId ?? serverStore.getActiveServerId()}:${serverId ? getServerRevision(serverId) : serverStore.getActiveServerGeneration()}:${normalized}`
     let pending = workspaceResolutionPromises.get(key)
     if (!pending) {
-      pending = openHostWorkspace(directory)
+      pending = openHostWorkspace(directory, undefined, undefined, serverId)
         .then(async workspace => {
-          await watchHostWorkspace(workspace.path)
+          checkRevision()
+          await watchHostWorkspace(workspace.path, undefined, serverId)
+          checkRevision()
           return workspace.path
         })
         .catch(error => {
@@ -86,10 +109,10 @@ export async function resolveWorkspacePath(directory?: string): Promise<string |
     }
     return pending
   }
-  return ensureDefaultWorkspacePath()
+  return ensureDefaultWorkspacePath(serverId)
 }
 
 export function resetWorkspaceResolutionCache(): void {
   workspaceResolutionPromises.clear()
-  defaultWorkspacePromise = null
+  defaultWorkspacePromises.clear()
 }

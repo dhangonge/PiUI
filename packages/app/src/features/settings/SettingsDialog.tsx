@@ -30,6 +30,8 @@ import { SettingsSearch } from './SettingsSearch'
 import { SETTINGS_SEARCH_DEFINITIONS, type SettingsSearchItem } from './settingsSearchCatalog'
 import { usePiCapabilities } from '../../pi/capabilities'
 import { isTauriMobile } from '../../utils/tauri'
+import { useReducedMotion } from '../../hooks/useReducedMotion'
+import { SETTINGS_COLOR_TRANSITION_CLASS, useSettingsTabFade } from './settingsMotion'
 
 // ============================================
 // Types
@@ -155,6 +157,8 @@ export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: Sett
     return next
   }, [])
   const [tab, setTab] = useState<SettingsTab>(normalizeTab(initialTab))
+  const reducedMotion = useReducedMotion()
+  const { flashTabContent } = useSettingsTabFade(scrollRef)
 
   const visibleTabIds = useMemo(
     () => TAB_IDS.filter(id => (capabilities.config || id !== 'config') && (!nativeMobile || id !== 'service')),
@@ -251,13 +255,20 @@ export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: Sett
     scrollRef.current?.querySelector('.settings-search-highlight')?.classList.remove('settings-search-highlight')
   }, [isOpen])
 
-  // 切换 tab 时重置滚动位置
-  const switchTab = useCallback((nextTab: SettingsTab) => {
-    setTab(nextTab)
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({ top: 0 })
-    })
-  }, [])
+  // 切换 tab 时重置滚动位置。
+  // feedback 只由指针点击传 'pointer'：键盘（detail 0）、方向键、搜索跳转、初始打开、
+  // 同 tab 点击都即时切换，不加任何动效；状态先改，滚动与 focus 都不等动画。
+  const switchTab = useCallback(
+    (nextTab: SettingsTab, feedback: 'pointer' | 'none' = 'none') => {
+      const changed = nextTab !== tab
+      setTab(nextTab)
+      if (changed && feedback === 'pointer') flashTabContent()
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({ top: 0 })
+      })
+    },
+    [flashTabContent, tab],
+  )
 
   const selectSearchItem = useCallback(
     (item: SettingsSearchItem) => {
@@ -275,12 +286,11 @@ export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: Sett
               (!item.targetContext || candidate.dataset.settingContext === item.targetContext),
           )
           const target =
-            matchingTargets[0] ??
-            candidates.find(candidate => candidate.dataset.settingLabel === item.fallbackLabel)
+            matchingTargets[0] ?? candidates.find(candidate => candidate.dataset.settingLabel === item.fallbackLabel)
           if (!target) return
 
           scrollRef.current?.querySelector('.settings-search-highlight')?.classList.remove('settings-search-highlight')
-          target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+          target.scrollIntoView({ block: 'center', behavior: reducedMotion ? 'auto' : 'smooth' })
           target.classList.add('settings-search-highlight')
           const focusTarget = Array.from(
             target.querySelectorAll<HTMLElement>(
@@ -301,7 +311,7 @@ export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: Sett
         })
       })
     },
-    [switchTab],
+    [switchTab, reducedMotion],
   )
 
   const handleTabKeyDown = useCallback(
@@ -364,13 +374,9 @@ export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: Sett
                   aria-selected={vt.id === tab}
                   aria-controls={`settings-panel-${vt.id}`}
                   tabIndex={vt.id === tab ? 0 : -1}
-                  onClick={() => switchTab(vt.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[length:var(--fs-md)] font-medium transition-colors whitespace-nowrap shrink-0
-                    ${
-                      vt.id === tab
-                        ? 'bg-bg-100/80 text-text-100'
-                        : 'text-text-400 active:bg-bg-100/40'
-                    }`}
+                  onClick={event => switchTab(vt.id, event.detail > 0 ? 'pointer' : 'none')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[length:var(--fs-md)] font-medium ${SETTINGS_COLOR_TRANSITION_CLASS} whitespace-nowrap shrink-0
+                    ${vt.id === tab ? 'bg-bg-100/80 text-text-100' : 'text-text-400 active:bg-bg-100/40'}`}
                 >
                   {vt.icon}
                   {vt.label}
@@ -446,9 +452,9 @@ export function SettingsDialog({ isOpen, onClose, initialTab = 'servers' }: Sett
                         role="tab"
                         aria-selected={active}
                         aria-controls={`settings-panel-${vt.id}`}
-                        onClick={() => switchTab(vt.id)}
+                        onClick={event => switchTab(vt.id, event.detail > 0 ? 'pointer' : 'none')}
                         tabIndex={active ? 0 : -1}
-                        className={`w-full min-h-8 flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[length:var(--fs-md)] font-medium transition-colors ${
+                        className={`w-full min-h-8 flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[length:var(--fs-md)] font-medium ${SETTINGS_COLOR_TRANSITION_CLASS} ${
                           active ? 'bg-bg-200/70 text-text-100' : 'text-text-300 hover:bg-bg-200/40 hover:text-text-100'
                         }`}
                       >

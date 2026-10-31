@@ -73,26 +73,33 @@ export const ToolPartView = memo(function ToolPartView({
   const endTime = result?.timestamp ?? (isActive ? (calibratedNow ?? now) : undefined)
   const rawDuration = startTime !== undefined && endTime !== undefined ? endTime - startTime : undefined
   const duration = rawDuration !== undefined && isActive ? Math.max(0, rawDuration) : rawDuration
-  const { immersiveMode } = useTheme()
+  const { immersiveMode, processCollapseEnabled } = useTheme()
   const isReadable = isReadableTool(toolName)
   const shouldStartExpanded =
-    defaultExpanded || isActive || (immersiveMode && descriptive && isStreaming && isReadable)
+    defaultExpanded ||
+    (!processCollapseEnabled && (isActive || (immersiveMode && descriptive && isStreaming && isReadable)))
 
-  const [expanded, setExpanded] = useUiDisclosureState(`message:${partKey}`, shouldStartExpanded)
+  const [expanded, setExpanded, touched] = useUiDisclosureState(`message:${partKey}`, shouldStartExpanded)
   const hasAutoExpandedReadableRef = useRef(shouldStartExpanded && immersiveMode && descriptive && isReadable)
   const [isChildFullscreen, setIsChildFullscreen] = useState(false)
   const { rootRef, headerRef, withScrollLock } = useDisclosureScrollLock()
-  const effectiveExpanded = expanded || isChildFullscreen
+  const effectiveExpanded =
+    isChildFullscreen || (processCollapseEnabled && !defaultExpanded && !touched ? false : expanded)
   // Android expand: instant layout + max-height fake; collapse: original grid-rows.
-  const { contentRef: expandContentRef, layoutOpen, keepMounted, panelClassName } =
-    useCompositorExpand(effectiveExpanded)
+  const {
+    contentRef: expandContentRef,
+    layoutOpen,
+    keepMounted,
+    panelClassName,
+  } = useCompositorExpand(effectiveExpanded)
   // 展开即挂 body：默认展开的工具 header/body 同帧，不再先 header 后 body
   const shouldRenderBody = useMessageExpandRender(keepMounted)
   const toggleExpanded = useCallback(() => {
-    withScrollLock(() => setExpanded(!expanded))
-  }, [expanded, setExpanded, withScrollLock])
+    withScrollLock(() => setExpanded(!effectiveExpanded))
+  }, [effectiveExpanded, setExpanded, withScrollLock])
 
   useEffect(() => {
+    if (processCollapseEnabled || defaultExpanded) return
     let frameId: number | null = null
 
     if (isActive) {
@@ -117,6 +124,8 @@ export const ToolPartView = memo(function ToolPartView({
       if (frameId !== null) cancelAnimationFrame(frameId)
     }
   }, [
+    processCollapseEnabled,
+    defaultExpanded,
     isActive,
     immersiveMode,
     descriptive,
@@ -229,7 +238,10 @@ export const ToolPartView = memo(function ToolPartView({
   // Grid: [14px icon] [gap 6px] [content] — mirrors ReasoningPartView alignment
   if (compact) {
     return (
-      <div ref={rootRef} className={`group relative grid grid-cols-[14px_minmax(0,1fr)] gap-x-1.5 items-start ${MSG_SPACING.item}`}>
+      <div
+        ref={rootRef}
+        className={`group relative grid grid-cols-[14px_minmax(0,1fr)] gap-x-1.5 items-start ${MSG_SPACING.item}`}
+      >
         {/* Icon column — fixed, outside of interactive area */}
         <span className="inline-flex h-9 w-[14px] items-center justify-center shrink-0">{toolIcon}</span>
 
@@ -465,7 +477,9 @@ const ToolBody = memo(function ToolBody({
   const config = getToolConfig(tool)
   if (config?.renderer) {
     const CustomRenderer = config.renderer
-    return <CustomRenderer execution={execution} partKey={partKey} data={data} onFullscreenChange={onFullscreenChange} />
+    return (
+      <CustomRenderer execution={execution} partKey={partKey} data={data} onFullscreenChange={onFullscreenChange} />
+    )
   }
 
   return <DefaultRenderer execution={execution} partKey={partKey} data={data} onFullscreenChange={onFullscreenChange} />

@@ -8,50 +8,14 @@
  * - CSS 变量注入
  */
 
-import { getThemePreset, themeColorsToCSSVars, builtinThemes, DEFAULT_THEME_ID } from '../themes'
-import type { ThemePreset, ThemeColors } from '../themes'
+import { getThemePreset, builtinThemes, DEFAULT_THEME_ID } from '../themes'
+import type { ThemePreset } from '../themes'
 import {
   DEFAULT_CODE_BLOCK_THEME_DARK,
   DEFAULT_CODE_BLOCK_THEME_LIGHT,
   normalizeCodeBlockTheme,
 } from '../lib/codeBlockThemes'
-
-// ============================================
-// Color Conversion Utility
-// ============================================
-
-/**
- * 将浏览器 getComputedStyle 返回的任意格式颜色字符串转为 #RRGGBB 十六进制
- *
- * 现代 Chromium WebView 可能返回多种格式：
- * - rgb(29, 36, 50)   — 逗号分隔
- * - rgb(29 36 50)     — 空格分隔 (CSS Color Level 4)
- * - color(srgb 0.11 0.14 0.20) — sRGB 函数
- * - oklch(...)        — OKLab 色彩空间
- *
- * 利用 Canvas 2D 做万能转换，让浏览器自己解析任何合法 CSS 颜色
- */
-function computedColorToHex(cssColor: string): string | null {
-  try {
-    const ctx = document.createElement('canvas').getContext('2d')
-    if (!ctx) return null
-    ctx.fillStyle = cssColor
-    // ctx.fillStyle 会被浏览器标准化为 #rrggbb 或 rgba(...) 格式
-    const normalized = ctx.fillStyle
-    if (normalized.startsWith('#')) return normalized
-    // 如果返回 rgba/rgb 格式，提取数值转 hex
-    const match = normalized.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/)
-    if (match) {
-      const r = parseInt(match[1], 10)
-      const g = parseInt(match[2], 10)
-      const b = parseInt(match[3], 10)
-      return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`
-    }
-    return null
-  } catch {
-    return null
-  }
-}
+import { applyCustomCSSToDom, applyFontScaleToDom, applyGlassToDom, applyThemeToDom } from './themeDom'
 
 // ============================================
 // Types
@@ -118,6 +82,7 @@ const DEFAULT_COMPLETED_AT_FORMAT: CompletedAtFormat = 'time'
 
 const DEFAULT_REASONING_DISPLAY_MODE: ReasoningDisplayMode = 'markdown'
 const DEFAULT_RENDER_USER_MARKDOWN = false
+const DEFAULT_RENDER_HTML_CONTENT = true
 const DEFAULT_DIFF_STYLE: DiffStyle = 'markers'
 const DEFAULT_DESCRIPTIVE_TOOL_STEPS = true
 const DEFAULT_CODE_WORD_WRAP = false
@@ -154,6 +119,8 @@ export interface ThemeState {
   collapseUserMessages: boolean
   /** 是否将用户消息渲染为 Markdown */
   renderUserMarkdown: boolean
+  /** 是否渲染 AI 输出中的 HTML（关闭后 HTML 一律按源码展示） */
+  renderHtmlContent: boolean
   /** step-finish 信息栏显示开关 */
   stepFinishDisplay: StepFinishDisplay
   /** 完成时刻显示格式 */
@@ -239,6 +206,7 @@ const STORAGE_KEY_CUSTOM_CSS_SNIPPETS = 'piui-theme-custom-css-snippets'
 const STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID = 'piui-theme-active-custom-css-snippet-id'
 const STORAGE_KEY_COLLAPSE_USER_MESSAGES = 'piui-collapse-user-messages'
 const STORAGE_KEY_RENDER_USER_MARKDOWN = 'piui-render-user-markdown'
+const STORAGE_KEY_RENDER_HTML_CONTENT = 'piui-render-html-content'
 const STORAGE_KEY_STEP_FINISH_DISPLAY = 'piui-step-finish-display'
 const STORAGE_KEY_COMPLETED_AT_FORMAT = 'piui-completed-at-format'
 const STORAGE_KEY_REASONING_DISPLAY_MODE = 'piui-reasoning-display-mode'
@@ -261,14 +229,6 @@ const STORAGE_KEY_MANUAL_TERMINAL_TITLES = 'piui-manual-terminal-titles'
 const STORAGE_KEY_PROCESS_COLLAPSE_ENABLED = 'piui-process-collapse-enabled'
 const STORAGE_KEY_CODE_BLOCK_THEME_LIGHT = 'piui-code-block-theme-light'
 const STORAGE_KEY_CODE_BLOCK_THEME_DARK = 'piui-code-block-theme-dark'
-
-// ============================================
-// DOM Style Element IDs
-// ============================================
-
-const STYLE_ID_THEME = 'piui-theme-vars'
-const STYLE_ID_FONT_SCALE = 'piui-font-scale'
-const STYLE_ID_CUSTOM = 'piui-custom-css'
 
 function parseCustomCSSSnippets(raw: string | null): CustomCSSSnippet[] {
   if (!raw) return []
@@ -314,6 +274,9 @@ class ThemeStore {
     const savedRenderUserMarkdown = storageGet(STORAGE_KEY_RENDER_USER_MARKDOWN)
     const renderUserMarkdown =
       savedRenderUserMarkdown === null ? DEFAULT_RENDER_USER_MARKDOWN : savedRenderUserMarkdown === 'true'
+    const savedRenderHtmlContent = storageGet(STORAGE_KEY_RENDER_HTML_CONTENT)
+    const renderHtmlContent =
+      savedRenderHtmlContent === null ? DEFAULT_RENDER_HTML_CONTENT : savedRenderHtmlContent === 'true'
     const savedReasoningDisplay = storageGet(STORAGE_KEY_REASONING_DISPLAY_MODE)
     const reasoningDisplayMode: ReasoningDisplayMode =
       savedReasoningDisplay === 'italic' || savedReasoningDisplay === 'markdown'
@@ -366,7 +329,6 @@ class ThemeStore {
     const queueFollowupMessages =
       savedQueueFollowupMessages === null ? DEFAULT_QUEUE_FOLLOWUP_MESSAGES : savedQueueFollowupMessages === 'true'
 
-
     const savedExternalFileDropMode = storageGet(STORAGE_KEY_EXTERNAL_FILE_DROP_MODE)
     const externalFileDropMode: ExternalFileDropMode =
       savedExternalFileDropMode === 'mention' ? 'mention' : DEFAULT_EXTERNAL_FILE_DROP_MODE
@@ -395,9 +357,7 @@ class ThemeStore {
 
     const savedProcessCollapseEnabled = storageGet(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED)
     const processCollapseEnabled =
-      savedProcessCollapseEnabled === null
-        ? DEFAULT_PROCESS_COLLAPSE_ENABLED
-        : savedProcessCollapseEnabled === 'true'
+      savedProcessCollapseEnabled === null ? DEFAULT_PROCESS_COLLAPSE_ENABLED : savedProcessCollapseEnabled === 'true'
 
     const savedManualTerminalTitles = storageGet(STORAGE_KEY_MANUAL_TERMINAL_TITLES)
     const manualTerminalTitles = savedManualTerminalTitles === null ? false : savedManualTerminalTitles === 'true'
@@ -419,6 +379,7 @@ class ThemeStore {
       activeCustomCSSSnippetId,
       collapseUserMessages,
       renderUserMarkdown,
+      renderHtmlContent,
       stepFinishDisplay,
       completedAtFormat,
       reasoningDisplayMode,
@@ -470,6 +431,9 @@ class ThemeStore {
   }
   get renderUserMarkdown() {
     return this.state.renderUserMarkdown
+  }
+  get renderHtmlContent() {
+    return this.state.renderHtmlContent
   }
   get stepFinishDisplay() {
     return this.state.stepFinishDisplay
@@ -591,7 +555,7 @@ class ThemeStore {
   setCustomCSS(css: string) {
     this.state = { ...this.state, customCSS: css }
     storageSet(STORAGE_KEY_CUSTOM_CSS, css)
-    this.applyCustomCSS()
+    applyCustomCSSToDom(css)
     this.emit()
   }
 
@@ -652,7 +616,7 @@ class ThemeStore {
 
     storageSet(STORAGE_KEY_CUSTOM_CSS, snippet.css)
     storageSet(STORAGE_KEY_ACTIVE_CUSTOM_CSS_SNIPPET_ID, id)
-    this.applyCustomCSS()
+    applyCustomCSSToDom(snippet.css)
     this.emit()
   }
 
@@ -674,6 +638,13 @@ class ThemeStore {
     if (this.state.renderUserMarkdown === enabled) return
     this.state = { ...this.state, renderUserMarkdown: enabled }
     storageSet(STORAGE_KEY_RENDER_USER_MARKDOWN, String(enabled))
+    this.emit()
+  }
+
+  setRenderHtmlContent(enabled: boolean) {
+    if (this.state.renderHtmlContent === enabled) return
+    this.state = { ...this.state, renderHtmlContent: enabled }
+    storageSet(STORAGE_KEY_RENDER_HTML_CONTENT, String(enabled))
     this.emit()
   }
 
@@ -742,7 +713,7 @@ class ThemeStore {
     if (this.state.uiFontScale === clamped) return
     this.state = { ...this.state, uiFontScale: clamped }
     storageSet(STORAGE_KEY_FONT_SCALE, String(clamped))
-    this.applyFontScale()
+    applyFontScaleToDom(this.state.uiFontScale, this.state.codeFontScale)
     this.emit()
   }
 
@@ -751,7 +722,7 @@ class ThemeStore {
     if (this.state.codeFontScale === clamped) return
     this.state = { ...this.state, codeFontScale: clamped }
     storageSet(STORAGE_KEY_CODE_FONT_SCALE, String(clamped))
-    this.applyFontScale()
+    applyFontScaleToDom(this.state.uiFontScale, this.state.codeFontScale)
     this.emit()
   }
 
@@ -781,7 +752,7 @@ class ThemeStore {
     if (this.state.glassEffect === enabled) return
     this.state = { ...this.state, glassEffect: enabled }
     storageSet(STORAGE_KEY_GLASS_EFFECT, String(enabled))
-    this.applyGlassClass()
+    applyGlassToDom(enabled)
     this.emit()
   }
 
@@ -855,8 +826,8 @@ class ThemeStore {
   /** 初始化：应用当前主题到 DOM */
   init() {
     this.applyTheme()
-    this.applyFontScale()
-    this.applyGlassClass()
+    applyFontScaleToDom(this.state.uiFontScale, this.state.codeFontScale)
+    applyGlassToDom(this.state.glassEffect)
 
     // 监听系统主题变化
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
@@ -870,144 +841,14 @@ class ThemeStore {
 
   /** 将主题 CSS 变量注入到 DOM */
   applyTheme() {
-    const root = document.documentElement
     const resolvedMode = this.getResolvedMode()
-
-    // 1. 设置 data-mode（驱动 CSS 中日/夜模式相关的非颜色规则，以及 Terminal、Shiki 等联动）
-    if (this.state.colorMode === 'system') {
-      root.removeAttribute('data-mode')
-    } else {
-      root.setAttribute('data-mode', this.state.colorMode)
-    }
-
-    // 2. 注入主题颜色变量
     const preset = this.getPreset()
-    if (preset) {
-      const colors: ThemeColors = resolvedMode === 'dark' ? preset.dark : preset.light
-      this.injectThemeStyle(colors)
-    }
-
-    // 3. 应用自定义 CSS
-    this.applyCustomCSS()
-
-    // 4. 更新 meta theme-color
-    requestAnimationFrame(() => {
-      const bg = getComputedStyle(root).getPropertyValue('--color-bg-100').trim()
-      if (!bg) return
-
-      // 将计算后的颜色统一转为 HEX 格式，避免不同浏览器/WebView 返回
-      // 不同格式（rgb, oklch, color(srgb ...)）导致 Android 原生端解析失败或色差
-      const hex = computedColorToHex(bg)
-      if (!hex) return
-
-      const meta = document.querySelector('meta[name="theme-color"]')
-      if (meta) meta.setAttribute('content', hex)
-
-      const androidBridge = (
-        window as unknown as { __piui_android?: { setSystemBars?: (mode: string, bg: string) => void } }
-      ).__piui_android
-      if (androidBridge?.setSystemBars) {
-        androidBridge.setSystemBars(resolvedMode, hex)
-      }
+    applyThemeToDom({
+      colorMode: this.state.colorMode,
+      resolvedMode,
+      colors: preset ? (resolvedMode === 'dark' ? preset.dark : preset.light) : undefined,
+      customCSS: this.state.customCSS,
     })
-  }
-
-  private injectThemeStyle(colors: ThemeColors) {
-    let el = document.getElementById(STYLE_ID_THEME) as HTMLStyleElement | null
-    if (!el) {
-      el = document.createElement('style')
-      el.id = STYLE_ID_THEME
-      document.head.appendChild(el)
-    }
-
-    // 用高优先级选择器覆盖 :root 中的默认值
-    // 使用 :root:root 提升特异性，确保覆盖 index.css 中的所有定义
-    el.textContent = `:root:root {\n  ${themeColorsToCSSVars(colors)}\n}`
-  }
-
-  /**
-   * 字号偏移覆盖。
-   * 两个维度均为 0 时不注入覆盖，直接用 index.css :root 里的默认值。
-   * 非零时通过 :root:root 高优先级覆盖 --fs-* 变量。
-   *
-   * 基准值（偏移 0）：
-   *   UI:   xxs=11  xs=12  sm=13  md=13  base=14  lg=16
-   *         heading-3=16  heading-2=18  heading-1=20
-   *   Code: code=13  code-line-height=24  terminal=13  terminal-line-height=1.4
-   */
-  private applyFontScale() {
-    const { uiFontScale: ui, codeFontScale: code } = this.state
-    let el = document.getElementById(STYLE_ID_FONT_SCALE) as HTMLStyleElement | null
-
-    if (ui === 0 && code === 0) {
-      if (el) el.remove()
-      return
-    }
-
-    if (!el) {
-      el = document.createElement('style')
-      el.id = STYLE_ID_FONT_SCALE
-      document.head.appendChild(el)
-    }
-
-    const vars: string[] = []
-
-    if (ui !== 0) {
-      vars.push(
-        `--fs-xxs: ${11 + ui}px`,
-        `--fs-xs: ${12 + ui}px`,
-        `--fs-sm: ${13 + ui}px`,
-        `--fs-md: ${13 + ui}px`,
-        `--fs-base: ${14 + ui}px`,
-        `--fs-lg: ${16 + ui}px`,
-        `--fs-heading-3: ${16 + ui}px`,
-        `--fs-heading-2: ${18 + ui}px`,
-        `--fs-heading-1: ${20 + ui}px`,
-      )
-    }
-
-    if (code !== 0) {
-      const codePx = 13 + code
-      // 行高 = 基准 24 + 偏移 * 2（每 1px 字号对应 2px 行高增量）
-      const lineH = 24 + code * 2
-      const termPx = 13 + code
-      const termLH = Math.round((1.4 + code * 0.05) * 100) / 100
-      vars.push(
-        `--fs-code: ${codePx}px`,
-        `--fs-code-line-height: ${lineH}px`,
-        `--fs-terminal: ${termPx}px`,
-        `--fs-terminal-line-height: ${termLH}`,
-      )
-    }
-
-    el.textContent = `:root:root {\n  ${vars.join(';\n  ')};\n}`
-  }
-
-  private applyCustomCSS() {
-    const css = this.state.customCSS.trim()
-    let el = document.getElementById(STYLE_ID_CUSTOM) as HTMLStyleElement | null
-
-    if (!css) {
-      if (el) el.remove()
-      return
-    }
-
-    if (!el) {
-      el = document.createElement('style')
-      el.id = STYLE_ID_CUSTOM
-      document.head.appendChild(el)
-    }
-    el.textContent = css
-  }
-
-  /** 毛玻璃开关：data-glass 属性驱动 CSS */
-  private applyGlassClass() {
-    const root = document.documentElement
-    if (this.state.glassEffect) {
-      root.setAttribute('data-glass', '')
-    } else {
-      root.removeAttribute('data-glass')
-    }
   }
 
   private persistCustomCSSSnippets(customCSSSnippets: CustomCSSSnippet[]) {
@@ -1054,6 +895,8 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
     collapseUserMessages: typeof parsed?.collapseUserMessages === 'boolean' ? parsed.collapseUserMessages : true,
     renderUserMarkdown:
       typeof parsed?.renderUserMarkdown === 'boolean' ? parsed.renderUserMarkdown : DEFAULT_RENDER_USER_MARKDOWN,
+    renderHtmlContent:
+      typeof parsed?.renderHtmlContent === 'boolean' ? parsed.renderHtmlContent : DEFAULT_RENDER_HTML_CONTENT,
     stepFinishDisplay:
       parsed?.stepFinishDisplay && typeof parsed.stepFinishDisplay === 'object'
         ? { ...DEFAULT_STEP_FINISH_DISPLAY, ...(parsed.stepFinishDisplay as Partial<StepFinishDisplay>) }
@@ -1089,9 +932,7 @@ function normalizeThemeBackup(raw: unknown): ThemeBackup {
         ? parsed.outlineCurrentHighlight
         : DEFAULT_OUTLINE_CURRENT_HIGHLIGHT,
     autoExpandExtensionsOnCommand:
-      typeof parsed?.autoExpandExtensionsOnCommand === 'boolean'
-        ? parsed.autoExpandExtensionsOnCommand
-        : true,
+      typeof parsed?.autoExpandExtensionsOnCommand === 'boolean' ? parsed.autoExpandExtensionsOnCommand : true,
     actionsOnLatestAssistantOnly:
       typeof parsed?.actionsOnLatestAssistantOnly === 'boolean'
         ? parsed.actionsOnLatestAssistantOnly
@@ -1137,6 +978,7 @@ export function importThemeBackup(raw: unknown): void {
   }
   storageSet(STORAGE_KEY_COLLAPSE_USER_MESSAGES, String(backup.collapseUserMessages))
   storageSet(STORAGE_KEY_RENDER_USER_MARKDOWN, String(backup.renderUserMarkdown))
+  storageSet(STORAGE_KEY_RENDER_HTML_CONTENT, String(backup.renderHtmlContent))
   storageSet(STORAGE_KEY_STEP_FINISH_DISPLAY, JSON.stringify(backup.stepFinishDisplay))
   storageSet(STORAGE_KEY_COMPLETED_AT_FORMAT, backup.completedAtFormat)
   storageSet(STORAGE_KEY_REASONING_DISPLAY_MODE, backup.reasoningDisplayMode)
@@ -1153,10 +995,7 @@ export function importThemeBackup(raw: unknown): void {
   storageSet(STORAGE_KEY_EXTERNAL_FILE_DROP_MODE, backup.externalFileDropMode)
   storageSet(STORAGE_KEY_OUTLINE_CURRENT_HIGHLIGHT, String(backup.outlineCurrentHighlight))
   storageSet(STORAGE_KEY_AUTO_EXPAND_EXTENSIONS, String(backup.autoExpandExtensionsOnCommand))
-  storageSet(
-    STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY,
-    String(backup.actionsOnLatestAssistantOnly),
-  )
+  storageSet(STORAGE_KEY_ACTIONS_ON_LATEST_ASSISTANT_ONLY, String(backup.actionsOnLatestAssistantOnly))
   storageSet(STORAGE_KEY_DESKTOP_COLLAPSED_INPUT_DOCK, String(backup.desktopCollapsedInputDock))
   storageSet(STORAGE_KEY_PROCESS_COLLAPSE_ENABLED, String(backup.processCollapseEnabled))
   storageSet(STORAGE_KEY_CODE_BLOCK_THEME_LIGHT, backup.codeBlockThemeLight)

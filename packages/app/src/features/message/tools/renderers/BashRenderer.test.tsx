@@ -65,14 +65,7 @@ function completedExecution(): PiToolExecution {
 }
 
 function renderBash(execution: PiToolExecution, data: ExtractedToolData) {
-  return render(
-    <BashRenderer
-      execution={execution}
-      partKey="p1"
-      data={data}
-      onFullscreenChange={vi.fn()}
-    />,
-  )
+  return render(<BashRenderer execution={execution} partKey="p1" data={data} onFullscreenChange={vi.fn()} />)
 }
 
 describe('BashRenderer', () => {
@@ -91,13 +84,21 @@ describe('BashRenderer', () => {
   })
 
   it('prefers the persisted result output once the tool completes', async () => {
-    renderBash(completedExecution(), { output: 'final output', truncated: true, fullOutputPath: '/tmp/pi-bash-abc.log' })
+    renderBash(completedExecution(), {
+      output: 'final output',
+      truncated: true,
+      fullOutputPath: '/tmp/pi-bash-abc.log',
+    })
 
     expect(await screen.findByText(/final output/)).toBeInTheDocument()
   })
 
   it('shows a native truncation notice with the full log path', async () => {
-    renderBash(completedExecution(), { output: 'truncated output...', truncated: true, fullOutputPath: '/tmp/pi-bash-abc.log' })
+    renderBash(completedExecution(), {
+      output: 'truncated output...',
+      truncated: true,
+      fullOutputPath: '/tmp/pi-bash-abc.log',
+    })
 
     expect(await screen.findByText('Output truncated — full log at /tmp/pi-bash-abc.log')).toBeInTheDocument()
   })

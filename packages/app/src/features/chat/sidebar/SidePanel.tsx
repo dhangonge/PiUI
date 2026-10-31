@@ -2,12 +2,17 @@ import { useCallback, useMemo, useState, useEffect, useRef, useSyncExternalStore
 import { useTranslation } from 'react-i18next'
 import { SessionList } from '../../sessions'
 import { FolderRecentList } from './FolderRecentList'
-import { getProjectGroupIdentity } from './projectGrouping'
+import { MultiServerFolderList } from './MultiServerFolderList'
+import { useMultiServerStore } from '../../../store/multiServerStore'
+import { serverStore } from '../../../store/serverStore'
+import { sessionKeyToServerId } from '../../../utils/sessionKey'
+import { findProjectGroupForDirectory, getProjectGroupIdentity, type ProjectItem } from './projectGrouping'
+import { groupSubagentSessions } from '../../../pi/subagentSessionGrouping'
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog'
 import { ActiveSessionItem } from './ActiveSessionItem'
 import { NotificationItem } from './NotificationItem'
 import { SidebarFooter } from './SidebarFooter'
-import { getParentPath } from './sidebarUtils'
+import { getParentPath, getSelectionRange } from './sidebarUtils'
 import {
   SidebarIcon,
   FolderIcon,
@@ -30,10 +35,7 @@ import { useBusySessions, useBusyCount } from '../../../store/activeSessionStore
 import { notificationStore, useNotifications, useUnreadNotificationCount } from '../../../store/notificationStore'
 import { pinnedSessionsStore } from '../../../store/pinnedSessionsStore'
 import type { NotificationEntry } from '../../../store/notificationStore'
-import {
-  subscribeToConnectionState,
-  type ConnectionInfo,
-} from '../../../api'
+import { subscribeToConnectionState, type ConnectionInfo } from '../../../api'
 import type { UiSession } from '../../../types/session'
 import { getDirectoryName, isSameDirectory, normalizeToForwardSlash } from '../../../utils'
 import { uiErrorHandler } from '../../../utils'
@@ -59,46 +61,6 @@ interface SidePanelProps {
   onOpenSettings?: () => void
 }
 
-interface ProjectItem {
-  id: string
-  path: string
-  name: string
-  canReorder?: boolean
-  memberDirectories?: string[]
-  reorderPath?: string
-  workspaceDirectories?: string[]
-  sectionKind?: 'project' | 'workspace'
-}
-
-function getSelectionRange(visibleIds: string[], anchorId: string, targetId: string) {
-  const startIndex = visibleIds.indexOf(anchorId)
-  const endIndex = visibleIds.indexOf(targetId)
-
-  if (startIndex === -1 || endIndex === -1) return null
-
-  const from = Math.min(startIndex, endIndex)
-  const to = Math.max(startIndex, endIndex)
-  return visibleIds.slice(from, to + 1)
-}
-
-function findProjectGroupForDirectory(projects: ProjectItem[], directory: string) {
-  return projects.find(project => {
-    if (isSameDirectory(project.id, directory) || isSameDirectory(project.path, directory)) {
-      return true
-    }
-
-    if (project.workspaceDirectories?.some(workspace => isSameDirectory(workspace, directory))) {
-      return true
-    }
-
-    if (project.memberDirectories?.some(memberDirectory => isSameDirectory(memberDirectory, directory))) {
-      return true
-    }
-
-    return false
-  })
-}
-
 export function SidePanel({
   onNewSession,
   onSelectSession,
@@ -113,6 +75,7 @@ export function SidePanel({
 }: SidePanelProps) {
   const { t } = useTranslation(['chat', 'common'])
   const canDeleteSessions = usePiCapabilities().sessionDelete
+  const multiServer = useMultiServerStore()
   const {
     currentDirectory,
     savedDirectories,
@@ -301,13 +264,21 @@ export function SidePanel({
     return subscribeToConnectionState(setConnectionState)
   }, [])
 
+  const activeServerId = useSyncExternalStore(
+    listener => serverStore.subscribe(listener),
+    () => serverStore.getActiveServerId(),
+  )
   const { sessions, isLoading, isLoadingMore, hasMore, search, setSearch, loadMore, deleteSession, refresh } =
     useSessionContext()
 
-  const pinnedEntries = useSyncExternalStore(
+  const allPinnedEntries = useSyncExternalStore(
     pinnedSessionsStore.subscribe,
-    pinnedSessionsStore.getSnapshot,
-    pinnedSessionsStore.getSnapshot,
+    pinnedSessionsStore.getScopedSnapshot,
+    pinnedSessionsStore.getScopedSnapshot,
+  )
+  const pinnedEntries = useMemo(
+    () => allPinnedEntries.filter(entry => sessionKeyToServerId(entry.sessionId) === activeServerId),
+    [allPinnedEntries, activeServerId],
   )
   const sessionLookup = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions])
 
@@ -315,9 +286,13 @@ export function SidePanel({
   const visibleSessions = useMemo(
     () =>
       currentDirectory
-        ? sessions.filter(session => isSameDirectory(session.directory, currentDirectory))
+        ? sessions.filter(
+            session =>
+              sessionKeyToServerId(session.id) === activeServerId &&
+              isSameDirectory(session.directory, currentDirectory),
+          )
         : sessions,
-    [sessions, currentDirectory],
+    [sessions, currentDirectory, activeServerId],
   )
   const visibleLookup = useMemo(() => new Map(visibleSessions.map(session => [session.id, session])), [visibleSessions])
 
@@ -329,6 +304,11 @@ export function SidePanel({
     const rest = visibleSessions.filter(s => !pinnedSet.has(s.id))
     return [...pinned, ...rest]
   }, [pinnedEntries, visibleLookup, visibleSessions])
+  // 子代理会话从顶层摘出，挂到父行下（置顶的仍留顶层，避免分隔线位置错位）
+  const orderedSessionGroups = useMemo(() => {
+    const pinnedSet = new Set(pinnedEntries.map(entry => entry.sessionId))
+    return groupSubagentSessions(orderedSessions, pinnedSet)
+  }, [orderedSessions, pinnedEntries])
   const pinnedDividerAfterIds = useMemo(() => {
     const lastPinned = pinnedEntries
       .map(entry => visibleLookup.get(entry.sessionId))
@@ -411,7 +391,8 @@ export function SidePanel({
   const folderProjectGroups = useMemo<ProjectItem[]>(() => {
     const reorderablePaths = new Set(savedDirectories.map(directory => normalizeToForwardSlash(directory.path)))
     const directories = [...savedDirectories]
-    const discovered = [...sessions]
+    const ownedSessions = sessions.filter(session => sessionKeyToServerId(session.id) === activeServerId)
+    const discovered = [...ownedSessions]
       .sort((left, right) => right.updatedAt - left.updatedAt)
       .map(session => session.directory)
     for (const directory of discovered) {
@@ -419,11 +400,11 @@ export function SidePanel({
       directories.push({
         path: directory,
         name: getDirectoryName(directory),
-        addedAt: sessions.find(session => isSameDirectory(session.directory, directory))?.updatedAt ?? 0,
+        addedAt: ownedSessions.find(session => isSameDirectory(session.directory, directory))?.updatedAt ?? 0,
       })
     }
     return buildProjectGroups(directories, reorderablePaths)
-  }, [buildProjectGroups, savedDirectories, sessions])
+  }, [buildProjectGroups, savedDirectories, sessions, activeServerId])
 
   const selectorProjectGroups = useMemo<ProjectItem[]>(() => {
     const sortedDirectories = [...savedDirectories].sort((a, b) => {
@@ -639,7 +620,7 @@ export function SidePanel({
     (session: UiSession) => {
       // Global 模式下，点击 session 自动切换到该 session 的工作目录并添加到项目列表
       if (!currentDirectory && session.directory) {
-        addDirectory(session.directory)
+        addDirectory(session.directory, sessionKeyToServerId(session.id))
       }
       onSelectSession(session)
       if (window.innerWidth < 768 && onCloseMobile) {
@@ -654,7 +635,7 @@ export function SidePanel({
   const handleSelectActive = useCallback(
     (session: { id: string; directory?: string }) => {
       if (session.directory) {
-        addDirectory(session.directory)
+        addDirectory(session.directory, sessionKeyToServerId(session.id))
       }
       const selectable: UiSession = {
         id: session.id,
@@ -810,7 +791,11 @@ export function SidePanel({
           <a href="/" className="flex items-center whitespace-nowrap" aria-label="Pi">
             {/* 官方 Pi 标志：16px 固定尺寸，中心点与下方导航按钮图标(X=24px)垂直对齐 */}
             <svg viewBox="0 0 470 470" fill="currentColor" aria-hidden="true" className="h-4 w-auto text-text-100">
-              <path fillRule="evenodd" clipRule="evenodd" d="M0 0H352.07V234.71H234.71V352.07H117.36V469.43H0V0ZM117.36 117.36V234.71H234.71V117.36H117.36Z" />
+              <path
+                fillRule="evenodd"
+                clipRule="evenodd"
+                d="M0 0H352.07V234.71H234.71V352.07H117.36V469.43H0V0ZM117.36 117.36V234.71H234.71V117.36H117.36Z"
+              />
               <path d="M352.07 234.71H469.43V469.43H352.07V234.71Z" />
             </svg>
           </a>
@@ -978,11 +963,7 @@ export function SidePanel({
                         <div
                           className={`text-[length:var(--fs-xxs)] text-text-400 truncate opacity-70 ${isGlobal ? '' : 'font-mono'}`}
                         >
-                          {isGlobal
-                            ? t('sidebar.globalProjectHint')
-                            : project.path
-                              ? getParentPath(project.path)
-                              : ''}
+                          {isGlobal ? t('sidebar.globalProjectHint') : project.path ? getParentPath(project.path) : ''}
                         </div>
                       </div>
                     </button>
@@ -1183,11 +1164,16 @@ export function SidePanel({
 
           {/* Recents Tab */}
           {sidebarTab === 'recents' && (
-            <div
-              ref={recentsSelectionRootRef}
-              className={`flex-1 overflow-hidden ${isEditMode ? 'select-none' : ''}`}
-            >
-              {canShowFolderRecents ? (
+            <div ref={recentsSelectionRootRef} className={`flex-1 overflow-hidden ${isEditMode ? 'select-none' : ''}`}>
+              {multiServer.enabled ? (
+                <MultiServerFolderList
+                  search={search}
+                  selectedSessionId={selectedSessionId}
+                  onSelectSession={handleSelect}
+                  onNewSession={onNewSession}
+                  onAddProject={onAddProject}
+                />
+              ) : canShowFolderRecents ? (
                 <FolderRecentList
                   projects={folderProjects}
                   {...commonFolderRecentListProps}
@@ -1210,7 +1196,7 @@ export function SidePanel({
                 </div>
               ) : (
                 <SessionList
-                  sessions={orderedSessions}
+                  sessions={orderedSessionGroups.roots}
                   selectedId={selectedSessionId}
                   isLoading={isLoading}
                   isLoadingMore={isLoadingMore}
@@ -1232,6 +1218,8 @@ export function SidePanel({
                   isEditMode={isEditMode}
                   selectedSessionIds={selectedSessionIds}
                   onToggleSessionSelection={toggleSessionSelection}
+                  inlineChildSessions={orderedSessionGroups.childrenByParentId}
+                  onSelectChildSession={handleSelect}
                 />
               )}
             </div>

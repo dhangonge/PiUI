@@ -1,0 +1,4 @@
+# 统一换行：索引与工作区都用 LF。
+# Windows runner 的 Git 默认 core.autocrlf=true，会把检出内容写成 CRLF，
+# 导致 `prettier . --check`（endOfLine 默认 lf）在 Windows CI 上整仓失败。
+* text=auto eol=lf

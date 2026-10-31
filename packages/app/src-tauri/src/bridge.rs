@@ -61,6 +61,10 @@ impl BridgeState {
     }
 
     /// 窗口销毁时清理该窗口全部桥接连接（发送 Close 让读循环退出）。
+    /// Disconnect every bridge owned by a window.
+    /// 安卓端为单窗口、进程随窗口退出，生产路径无调用点（仅单测使用）；
+    /// 保留给多窗口场景。
+    #[allow(dead_code)]
     pub fn disconnect_window(&self, window_label: &str) {
         let removed = {
             let mut guard = self.senders.lock().expect("bridge state poisoned");
@@ -198,7 +202,7 @@ pub fn ws_bridge_send(
         .sender(&key)
         .ok_or_else(|| "WebSocket is not connected".to_string())?;
     sender
-        .send(Message::Text(data.into()))
+        .send(Message::Text(data))
         .map_err(|error| error.to_string())
 }
 

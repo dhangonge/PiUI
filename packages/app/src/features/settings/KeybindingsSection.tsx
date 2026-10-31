@@ -327,7 +327,6 @@ export function KeybindingsSection() {
           ))
         )}
       </div>
-
     </SettingsSection>
   )
 }

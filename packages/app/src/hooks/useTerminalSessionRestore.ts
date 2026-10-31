@@ -3,7 +3,8 @@ import { serverStore } from '../store/serverStore'
 import { layoutStore } from '../store/layoutStore'
 import { listHostTerminals } from '../pi/transport/index.js'
 import { resolveWorkspacePath } from '../pi/workspaces'
-import { piEventStream } from '../pi/eventStream'
+import { getPiEventStream } from '../pi/eventStream'
+import { getServerRevision } from '../utils/sessionKey'
 import { useServerStore } from './useServerStore'
 import { usePiBackendState } from '../pi/serverMode'
 import { normalizeToForwardSlash, uiErrorHandler } from '../utils'
@@ -22,6 +23,8 @@ const WORKSPACE_RESOLVE_RETRY_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000, 15_0
 export function useTerminalSessionRestore(directory?: string) {
   const normalizedDirectory = directory ? normalizeToForwardSlash(directory) : undefined
   const { activeServer } = useServerStore()
+  const serverId = activeServer?.id
+  const connectionKey = serverId ? `${serverId}:${getServerRevision(serverId)}` : 'none'
   const [isRestoring, setIsRestoring] = useState(false)
   const [workspacePath, setWorkspacePath] = useState<string | undefined>(undefined)
   const workspacePathRef = useRef<string | undefined>(undefined)
@@ -34,18 +37,20 @@ export function useTerminalSessionRestore(directory?: string) {
   // 同步 workspace：目录/服务端变化时重置路径并逐出事件流（状态与副作用同源）
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
+    if (!serverId) return
+    const stream = getPiEventStream(serverId)
     let active = true
     let retryTimer: number | undefined
     workspacePathRef.current = undefined
     setWorkspacePath(undefined)
     const resolve = async (attempt: number) => {
       try {
-        const resolved = await resolveWorkspacePath(normalizedDirectory)
+        const resolved = await resolveWorkspacePath(normalizedDirectory, serverId)
         if (!active) return
         if (!resolved) return
         workspacePathRef.current = resolved
         setWorkspacePath(resolved)
-        piEventStream.connectWorkspace(resolved)
+        stream.connectWorkspace(resolved)
       } catch {
         if (!active) return
         // 冷启动首次会话的 workspace 解析可能慢/挂（plugin-http 首调、
@@ -62,24 +67,36 @@ export function useTerminalSessionRestore(directory?: string) {
       if (retryTimer !== undefined) clearTimeout(retryTimer)
       const resolved = workspacePathRef.current
       workspacePathRef.current = undefined
-      if (resolved) piEventStream.disconnectWorkspace(resolved)
+      if (resolved) stream.disconnectWorkspace(resolved)
     }
-  }, [activeServer?.id, activeServer?.token, activeServer?.url, normalizedDirectory])
+  }, [serverId, connectionKey, normalizedDirectory])
 
   useEffect(() => {
+    if (!serverId) return
+    const revision = getServerRevision(serverId)
     let retryTimer: number | undefined
     const restoreSessions = async (requestId: number, attempt = 0) => {
       if (!hasRestoredRef.current) setIsRestoring(true)
       try {
-        const workspacePath = await resolveWorkspacePath(normalizedDirectory)
+        const workspacePath = await resolveWorkspacePath(normalizedDirectory, serverId)
+        if (
+          restoreRequestIdRef.current !== requestId ||
+          serverStore.getActiveServerId() !== serverId ||
+          getServerRevision(serverId) !== revision
+        )
+          return
         if (!workspacePath) {
-          if (restoreRequestIdRef.current !== requestId) return
-          layoutStore.syncTerminalSessions(undefined, [])
+          layoutStore.syncTerminalSessions(undefined, [], serverId)
           return
         }
-        const result = await listHostTerminals(workspacePath)
-        if (restoreRequestIdRef.current !== requestId) return
-        layoutStore.syncTerminalSessions(workspacePath, result.terminals)
+        const result = await listHostTerminals(workspacePath, undefined, serverId)
+        if (
+          restoreRequestIdRef.current !== requestId ||
+          serverStore.getActiveServerId() !== serverId ||
+          getServerRevision(serverId) !== revision
+        )
+          return
+        layoutStore.syncTerminalSessions(workspacePath, result.terminals, serverId)
       } catch (error) {
         if (restoreRequestIdRef.current !== requestId) return
         // 终端 tab 不参与面板布局持久化，恢复失败 = 用户的终端在刷新后
@@ -106,21 +123,21 @@ export function useTerminalSessionRestore(directory?: string) {
     restoreTriggerRef.current = () => void restoreSessions(++restoreRequestIdRef.current)
     const onTerminalsChanged = (event: Event) => {
       const workspacePath = (event as CustomEvent<{ workspacePath?: string }>).detail?.workspacePath
-      if (!workspacePath || normalizeToForwardSlash(workspacePath) !== normalizeToForwardSlash(workspacePathRef.current ?? '')) return
+      if (
+        !workspacePath ||
+        normalizeToForwardSlash(workspacePath) !== normalizeToForwardSlash(workspacePathRef.current ?? '')
+      )
+        return
       void restoreSessions(++restoreRequestIdRef.current)
     }
     window.addEventListener('piui:terminals-changed', onTerminalsChanged)
-    const unsubscribe = serverStore.onServerChange(() => {
-      void restoreSessions(++restoreRequestIdRef.current)
-    })
     return () => {
       restoreRequestIdRef.current += 1
       restoreTriggerRef.current = undefined
       if (retryTimer !== undefined) clearTimeout(retryTimer)
       window.removeEventListener('piui:terminals-changed', onTerminalsChanged)
-      unsubscribe()
     }
-  }, [normalizedDirectory])
+  }, [normalizedDirectory, serverId, connectionKey])
 
   // 后端从 booting/offline 恢复 online 时重拉一次：桌面壳刷新后冷启动窗口
   // 内的恢复可能已失败/打到错误 workspace，online 转换是最可靠的再同步时机。
@@ -134,5 +151,5 @@ export function useTerminalSessionRestore(directory?: string) {
     }
   }, [backendStatus])
 
-  return { isRestoring, normalizedDirectory, workspacePath }
+  return { isRestoring, normalizedDirectory, workspacePath, serverId, connectionKey }
 }

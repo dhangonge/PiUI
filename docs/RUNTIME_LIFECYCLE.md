@@ -45,13 +45,13 @@ worker 冷启动耗时（spawn + SDK 加载 + 握手）是首次开会话的主�
 
 ## 调优参数
 
-| 环境变量 | 默认 | 说明 |
-|---|---|---|
-| `PIUI_WARM_RUNTIME_TTL_MS` | 300000 | warm runtime 空置自动回收时间（最小 30s） |
-| `PIUI_SESSION_IDLE_TTL_MS` | 120000 | 已 attach 会话空闲回收时间（最小 30s） |
-| `PIUI_STANDBY_SIZE` | 0 | 常驻 standby worker 池大小（默认不预占；内存充裕时可设 1-2 换更快首开会话） |
-| `PIUI_CATALOG_REQUEST_TIMEOUT_MS` | 30000 | catalog worker 请求超时（最小 5s） |
-| `PIUI_WORKER_HANDSHAKE_TIMEOUT_MS` | 30000 | worker 握手超时（测试并行开多个 worker 时可调大） |
+| 环境变量                           | 默认   | 说明                                                                        |
+| ---------------------------------- | ------ | --------------------------------------------------------------------------- |
+| `PIUI_WARM_RUNTIME_TTL_MS`         | 300000 | warm runtime 空置自动回收时间（最小 30s）                                   |
+| `PIUI_SESSION_IDLE_TTL_MS`         | 120000 | 已 attach 会话空闲回收时间（最小 30s）                                      |
+| `PIUI_STANDBY_SIZE`                | 0      | 常驻 standby worker 池大小（默认不预占；内存充裕时可设 1-2 换更快首开会话） |
+| `PIUI_CATALOG_REQUEST_TIMEOUT_MS`  | 30000  | catalog worker 请求超时（最小 5s）                                          |
+| `PIUI_WORKER_HANDSHAKE_TIMEOUT_MS` | 30000  | worker 握手超时（测试并行开多个 worker 时可调大）                           |
 
 ## 设计取舍
 

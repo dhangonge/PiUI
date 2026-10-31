@@ -1,12 +1,5 @@
 export type GitFileStatus =
-  | "added"
-  | "modified"
-  | "deleted"
-  | "renamed"
-  | "copied"
-  | "conflicted"
-  | "untracked"
-  | "unknown"
+  'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'conflicted' | 'untracked' | 'unknown'
 
 export type GitStatusItem = {
   path: string
@@ -38,12 +31,12 @@ export type GitInfoResponse = {
   behind: number
 }
 
-export type GitDiffMode = "git" | "branch" | "staged" | "unstaged"
+export type GitDiffMode = 'git' | 'branch' | 'staged' | 'unstaged'
 
 export type GitDiffItem = {
   file: string
   oldPath?: string
-  status: Exclude<GitFileStatus, "conflicted" | "unknown">
+  status: Exclude<GitFileStatus, 'conflicted' | 'unknown'>
   additions: number
   deletions: number
   binary: boolean

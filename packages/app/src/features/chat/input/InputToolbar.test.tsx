@@ -28,8 +28,17 @@ vi.mock('../chatViewport', () => ({
   useChatViewportSelect: <S,>(selector: (value: unknown) => S) =>
     selector({
       presentation: { surfaceVariant: 'desktop', isCompact: false },
-      interaction: { mode: 'pointer', touchCapable: false, sidebarBehavior: 'docked', rightPanelBehavior: 'docked', bottomPanelBehavior: 'docked', outlineInteraction: 'pointer', enableCollapsedInputDock: false },
-    }),}))
+      interaction: {
+        mode: 'pointer',
+        touchCapable: false,
+        sidebarBehavior: 'docked',
+        rightPanelBehavior: 'docked',
+        bottomPanelBehavior: 'docked',
+        outlineInteraction: 'pointer',
+        enableCollapsedInputDock: false,
+      },
+    }),
+}))
 
 vi.mock('../../../utils/tauri', () => ({
   isTauri: () => isTauriMock(),

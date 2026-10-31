@@ -7,9 +7,7 @@ import { serverStore, type ServerConfig, type ServerHealth } from '../store/serv
 export type { ServerConfig, ServerHealth }
 
 function getActiveServerGeneration(): number {
-  return typeof serverStore.getActiveServerGeneration === 'function'
-    ? serverStore.getActiveServerGeneration()
-    : 0
+  return typeof serverStore.getActiveServerGeneration === 'function' ? serverStore.getActiveServerGeneration() : 0
 }
 
 /**
@@ -75,6 +73,8 @@ export function useServerStore() {
     servers,
     activeServer,
     activeServerGeneration,
+    defaultServerId: serverStore.getDefaultServerId?.() ?? null,
+    setDefaultServer: (id: string | null) => serverStore.setDefaultServer(id),
     healthMap,
     addServer,
     updateServer,

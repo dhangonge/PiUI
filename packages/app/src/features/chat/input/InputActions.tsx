@@ -86,7 +86,9 @@ export const FloatingActions = memo(function FloatingActions({
             <PermissionListIcon size={14} className="shrink-0" />
             <span className="truncate min-w-0">{collapsedPermission.label}</span>
             {collapsedPermission.queueLength > 1 && (
-              <span className="shrink-0 text-[length:var(--fs-xxs)] opacity-70">+{collapsedPermission.queueLength - 1}</span>
+              <span className="shrink-0 text-[length:var(--fs-xxs)] opacity-70">
+                +{collapsedPermission.queueLength - 1}
+              </span>
             )}
           </button>
         )}
@@ -103,7 +105,9 @@ export const FloatingActions = memo(function FloatingActions({
             <QuestionIcon size={14} className="shrink-0" />
             <span className="truncate min-w-0">{collapsedQuestion.label}</span>
             {collapsedQuestion.queueLength > 1 && (
-              <span className="shrink-0 text-[length:var(--fs-xxs)] opacity-70">+{collapsedQuestion.queueLength - 1}</span>
+              <span className="shrink-0 text-[length:var(--fs-xxs)] opacity-70">
+                +{collapsedQuestion.queueLength - 1}
+              </span>
             )}
           </button>
         )}

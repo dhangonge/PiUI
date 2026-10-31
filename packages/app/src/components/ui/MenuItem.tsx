@@ -1,4 +1,5 @@
 import { CheckIcon } from '../Icons'
+import { PRESS_TRANSITION_CLASS } from '../../constants/animation'
 
 interface MenuItemProps {
   label: string
@@ -34,8 +35,8 @@ export function MenuItem({
       {...selectionProps}
       className={`
         w-full px-2 py-2 rounded-lg flex items-start gap-2 text-left bg-transparent border-none
-        transition-all duration-150 select-none
-        ${disabled ? 'text-text-500 cursor-not-allowed' : 'cursor-pointer hover:bg-bg-200 active:scale-[0.98]'}
+        ${PRESS_TRANSITION_CLASS} select-none
+        ${disabled ? 'text-text-500 cursor-not-allowed' : 'cursor-pointer hover:bg-bg-200 motion-safe:active:scale-[0.98]'}
         ${selected && !disabled ? 'text-text-100' : ''}
       `}
     >
@@ -43,7 +44,9 @@ export function MenuItem({
         <span className="w-4 h-4 flex items-center justify-center flex-shrink-0 mt-0.5 text-text-400">{icon}</span>
       )}
       <div className="flex-1 min-w-0">
-        <div className={`text-[length:var(--fs-base)] ${disabled ? 'text-text-500' : selected ? 'text-text-100' : 'text-text-200'}`}>
+        <div
+          className={`text-[length:var(--fs-base)] ${disabled ? 'text-text-500' : selected ? 'text-text-100' : 'text-text-200'}`}
+        >
           {label}
         </div>
         {description && (

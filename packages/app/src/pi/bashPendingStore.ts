@@ -70,8 +70,7 @@ export const bashPendingStore = {
     for (let i = pendings.length - 1; i >= 0; i -= 1) {
       const pending = pendings[i]!
       if (pending.sessionId !== sessionId) continue
-      const matched = real.some(entry =>
-        entry.command === pending.command && entry.timestamp > pending.createdAt)
+      const matched = real.some(entry => entry.command === pending.command && entry.timestamp > pending.createdAt)
       if (matched) {
         pendings.splice(i, 1)
         changed = true
@@ -85,37 +84,39 @@ export const bashPendingStore = {
     const real = collectRealBashEntries(items)
     return pendings
       .filter(pending => pending.sessionId === sessionId)
-      .filter(pending => !real.some(entry =>
-        entry.command === pending.command && entry.timestamp > pending.createdAt))
-      .map(pending => ({
-        kind: 'bash_execution',
-        entryId: pending.clientId,
-        timestamp: pending.createdAt,
-        rawEntry: {
-          type: 'message',
-          id: pending.clientId,
-          parentId: null,
-          timestamp: new Date(pending.createdAt).toISOString(),
-          message: {
-            role: 'bashExecution',
-            command: pending.command,
-            output: '',
-            exitCode: undefined,
-            cancelled: false,
-            truncated: false,
+      .filter(pending => !real.some(entry => entry.command === pending.command && entry.timestamp > pending.createdAt))
+      .map(
+        pending =>
+          ({
+            kind: 'bash_execution',
+            entryId: pending.clientId,
             timestamp: pending.createdAt,
-          },
-        },
-        message: {
-          role: 'bashExecution',
-          command: pending.command,
-          output: '',
-          exitCode: undefined,
-          cancelled: false,
-          truncated: false,
-          timestamp: pending.createdAt,
-        },
-      }) satisfies PiBashExecutionItem)
+            rawEntry: {
+              type: 'message',
+              id: pending.clientId,
+              parentId: null,
+              timestamp: new Date(pending.createdAt).toISOString(),
+              message: {
+                role: 'bashExecution',
+                command: pending.command,
+                output: '',
+                exitCode: undefined,
+                cancelled: false,
+                truncated: false,
+                timestamp: pending.createdAt,
+              },
+            },
+            message: {
+              role: 'bashExecution',
+              command: pending.command,
+              output: '',
+              exitCode: undefined,
+              cancelled: false,
+              truncated: false,
+              timestamp: pending.createdAt,
+            },
+          }) satisfies PiBashExecutionItem,
+      )
   },
 
   subscribe(listener: () => void): () => void {

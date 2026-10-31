@@ -24,26 +24,26 @@ describe('LayoutStore panel layout', () => {
     expect(persisted).toMatchObject({
       version: 1,
       rightPanelOpen: true,
-      bottomPanelOpen: true
+      bottomPanelOpen: true,
     })
     expect(persisted.panelTabs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: 'files',
           type: 'files',
-          position: 'right'
+          position: 'right',
         }),
         expect.objectContaining({
           id: 'changes',
           type: 'changes',
-          position: 'right'
+          position: 'right',
         }),
         expect.objectContaining({
           id: 'skill',
           type: 'skill',
-          position: 'bottom'
-        })
-      ])
+          position: 'bottom',
+        }),
+      ]),
     )
 
     const restored = new LayoutStore().getState()
@@ -76,7 +76,7 @@ describe('LayoutStore panel layout', () => {
     const restored = new LayoutStore().getState()
     expect(restored.panelTabs.find(tab => tab.id === firstId)).toMatchObject({
       type: 'session-controls',
-      position: 'right'
+      position: 'right',
     })
   })
 
@@ -89,8 +89,8 @@ describe('LayoutStore panel layout', () => {
         cwd: 'C:/project',
         status: 'running' as const,
         pid: 1,
-        cursor: 0
-      }
+        cursor: 0,
+      },
     ]
     const store = new LayoutStore()
 
@@ -102,15 +102,15 @@ describe('LayoutStore panel layout', () => {
       scrollY: 4,
       cursor: 7,
       rows: 20,
-      cols: 90
+      cols: 90,
     })
 
     const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY_TERMINAL_LAYOUT) ?? 'null')
     expect(persisted.directories['C:/project']).toMatchObject({
       order: {
-        right: ['files', 'changes', 'session-tree', 'extensions', 'term-1']
+        right: ['files', 'changes', 'session-tree', 'extensions', 'term-1'],
       },
-      activeTabId: { right: 'term-1' }
+      activeTabId: { right: 'term-1' },
     })
 
     const restored = new LayoutStore()
@@ -123,7 +123,7 @@ describe('LayoutStore panel layout', () => {
       scrollY: 4,
       cursor: 7,
       rows: 20,
-      cols: 90
+      cols: 90,
     })
     expect(restored.getState().activeTabId.right).toBe('term-1')
   })
@@ -138,15 +138,15 @@ describe('LayoutStore panel layout', () => {
         cwd: 'C:/project',
         status: 'running',
         pid: 1,
-        cursor: 0
-      }
+        cursor: 0,
+      },
     ])
 
     store.updateTerminalShellTitle('term-1', 'frontend', false)
     store.syncTerminalTitleMode(true)
     expect(store.getState().panelTabs.find(tab => tab.id === 'term-1')).toMatchObject({
       title: 'frontend',
-      shellTitle: 'frontend'
+      shellTitle: 'frontend',
     })
 
     store.updateTerminalCustomTitle('term-1', 'Build')
@@ -154,14 +154,14 @@ describe('LayoutStore panel layout', () => {
     expect(store.getState().panelTabs.find(tab => tab.id === 'term-1')).toMatchObject({
       title: 'Build',
       customTitle: 'Build',
-      shellTitle: 'backend'
+      shellTitle: 'backend',
     })
 
     store.syncTerminalTitleMode(false)
     expect(store.getState().panelTabs.find(tab => tab.id === 'term-1')).toMatchObject({
       title: 'backend',
       shellTitle: 'backend',
-      customTitle: 'Build'
+      customTitle: 'Build',
     })
   })
 })

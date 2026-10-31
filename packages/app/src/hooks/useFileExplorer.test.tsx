@@ -3,7 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useFileExplorer } from './useFileExplorer'
 import { changeScopeStore } from '../store/changeScopeStore'
 
-const { listDirectory, getFileContent, getFileStatus, getHostGitDiff, invalidateWorkspaceFileCaches, saveFile, resolveWorkspacePath } = vi.hoisted(() => ({
+const {
+  listDirectory,
+  getFileContent,
+  getFileStatus,
+  getHostGitDiff,
+  invalidateWorkspaceFileCaches,
+  saveFile,
+  resolveWorkspacePath,
+} = vi.hoisted(() => ({
   listDirectory: vi.fn(),
   getFileContent: vi.fn(),
   getFileStatus: vi.fn(),
@@ -23,7 +31,11 @@ vi.mock('../pi/files', () => ({
   invalidateWorkspaceFileCaches,
   saveFile,
   simplifyGitStatus: (status: string) =>
-    status === 'added' || status === 'untracked' || status === 'copied' ? 'added' : status === 'deleted' ? 'deleted' : 'modified',
+    status === 'added' || status === 'untracked' || status === 'copied'
+      ? 'added'
+      : status === 'deleted'
+        ? 'deleted'
+        : 'modified',
   toAbsoluteEntryPath: (root: string | undefined, p: string) => (root ? `${root}/${p}` : p),
 }))
 
@@ -41,7 +53,15 @@ describe('useFileExplorer change scope', () => {
     getFileStatus.mockResolvedValue([])
     getHostGitDiff.mockImplementation(async (_workspace, mode) => ({
       mode,
-      files: [{ file: mode === 'branch' ? 'src/branch.ts' : 'src/git.ts', status: 'added', additions: 1, deletions: 0, binary: false }],
+      files: [
+        {
+          file: mode === 'branch' ? 'src/branch.ts' : 'src/git.ts',
+          status: 'added',
+          additions: 1,
+          deletions: 0,
+          binary: false,
+        },
+      ],
     }))
   })
 
@@ -85,10 +105,9 @@ describe('useFileExplorer change scope', () => {
       return []
     })
 
-    const { result, rerender } = renderHook(
-      ({ directory }) => useFileExplorer({ directory, autoLoad: true }),
-      { initialProps: { directory: '/repo-a' } },
-    )
+    const { result, rerender } = renderHook(({ directory }) => useFileExplorer({ directory, autoLoad: true }), {
+      initialProps: { directory: '/repo-a' },
+    })
 
     await waitFor(() => {
       expect(result.current.tree).toHaveLength(1)
@@ -125,7 +144,9 @@ describe('useFileExplorer change scope', () => {
 
     listDirectory.mockImplementation((parentPath: string, directory: string) => {
       if (parentPath === '') {
-        return Promise.resolve([{ name: 'src', path: 'src', absolute: `${directory}/src`, type: 'directory', ignored: false }])
+        return Promise.resolve([
+          { name: 'src', path: 'src', absolute: `${directory}/src`, type: 'directory', ignored: false },
+        ])
       }
 
       if (parentPath === 'src' && directory === '/repo-a') {
@@ -135,18 +156,15 @@ describe('useFileExplorer change scope', () => {
       }
 
       if (parentPath === 'src' && directory === '/repo-b') {
-        return Promise.resolve([
-          { name: 'b.ts', path: 'src/b.ts', type: 'file' },
-        ])
+        return Promise.resolve([{ name: 'b.ts', path: 'src/b.ts', type: 'file' }])
       }
 
       return Promise.resolve([])
     })
 
-    const { result, rerender } = renderHook(
-      ({ directory }) => useFileExplorer({ directory, autoLoad: true }),
-      { initialProps: { directory: '/repo-a' } },
-    )
+    const { result, rerender } = renderHook(({ directory }) => useFileExplorer({ directory, autoLoad: true }), {
+      initialProps: { directory: '/repo-a' },
+    })
 
     await waitFor(() => {
       expect(result.current.tree[0]?.absolute).toBe('/repo-a/src')
@@ -171,9 +189,7 @@ describe('useFileExplorer change scope', () => {
     })
 
     await act(async () => {
-      resolveRepoAChildren!([
-        { name: 'a.ts', path: 'src/a.ts', type: 'file' },
-      ])
+      resolveRepoAChildren!([{ name: 'a.ts', path: 'src/a.ts', type: 'file' }])
     })
 
     expect(result.current.tree[0]?.absolute).toBe('/repo-b/src')
@@ -181,10 +197,13 @@ describe('useFileExplorer change scope', () => {
   })
 
   it('refreshes an expanded parent and open preview after a workspace event', async () => {
-    listDirectory.mockImplementation(async (parentPath: string) => parentPath === ''
-      ? [{ name: 'src', path: 'src', absolute: '/repo/src', type: 'directory', ignored: false }]
-      : [{ name: 'a.ts', path: 'src/a.ts', absolute: '/repo/src/a.ts', type: 'file', ignored: false }])
-    getFileContent.mockResolvedValueOnce({ type: 'text', content: 'before' })
+    listDirectory.mockImplementation(async (parentPath: string) =>
+      parentPath === ''
+        ? [{ name: 'src', path: 'src', absolute: '/repo/src', type: 'directory', ignored: false }]
+        : [{ name: 'a.ts', path: 'src/a.ts', absolute: '/repo/src/a.ts', type: 'file', ignored: false }],
+    )
+    getFileContent
+      .mockResolvedValueOnce({ type: 'text', content: 'before' })
       .mockResolvedValueOnce({ type: 'text', content: 'after' })
     const { result } = renderHook(() => useFileExplorer({ directory: '/repo', autoLoad: true }))
     await waitFor(() => expect(result.current.tree[0]?.path).toBe('src'))
@@ -193,12 +212,18 @@ describe('useFileExplorer change scope', () => {
     await act(() => result.current.loadPreview('src/a.ts'))
     expect(result.current.previewContent?.content).toBe('before')
 
-    act(() => window.dispatchEvent(new CustomEvent('piui:workspace-files-changed', {
-      detail: {
-        workspacePath: '/repo', revision: 1,
-        changes: [{ path: 'src/a.ts', kind: 'changed', type: 'file' }], rescan: false,
-      },
-    })))
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent('piui:workspace-files-changed', {
+          detail: {
+            workspacePath: '/repo',
+            revision: 1,
+            changes: [{ path: 'src/a.ts', kind: 'changed', type: 'file' }],
+            rescan: false,
+          },
+        }),
+      ),
+    )
     await waitFor(() => expect(result.current.previewContent?.content).toBe('after'))
     expect(invalidateWorkspaceFileCaches).toHaveBeenCalledWith('/repo')
     expect(listDirectory.mock.calls.filter(call => call[0] === 'src').length).toBeGreaterThanOrEqual(2)

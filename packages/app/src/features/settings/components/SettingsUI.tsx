@@ -3,14 +3,17 @@ import type React from 'react'
 import { DropdownMenu } from '../../../components/ui/DropdownMenu'
 import { MenuItem } from '../../../components/ui/MenuItem'
 import { ChevronDownIcon } from '../../../components/Icons'
+import {
+  SETTINGS_COLOR_TRANSITION_CLASS,
+  SETTINGS_DISCLOSURE_PANEL_CLASS,
+  SETTINGS_MOVE_TRANSITION_CLASS,
+} from '../settingsMotion'
 
 const SettingLabelContext = createContext<string | undefined>(undefined)
 
-export const settingsFieldClass =
-  'min-w-0 w-full h-8 px-2.5 text-[length:var(--fs-sm)] rounded-md bg-transparent text-text-100 placeholder:text-text-400 outline-none border border-border-200 transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30'
+export const settingsFieldClass = `min-w-0 w-full h-8 px-2.5 text-[length:var(--fs-sm)] rounded-md bg-transparent text-text-100 placeholder:text-text-400 outline-none border border-border-200 ${SETTINGS_COLOR_TRANSITION_CLASS} hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30`
 
-export const settingsFieldAreaClass =
-  'min-w-0 w-full px-2.5 py-2 text-[length:var(--fs-sm)] rounded-md bg-transparent text-text-100 placeholder:text-text-400 outline-none border border-border-200 transition-colors hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30 resize-y leading-relaxed custom-scrollbar'
+export const settingsFieldAreaClass = `min-w-0 w-full px-2.5 py-2 text-[length:var(--fs-sm)] rounded-md bg-transparent text-text-100 placeholder:text-text-400 outline-none border border-border-200 ${SETTINGS_COLOR_TRANSITION_CLASS} hover:border-border-300 focus-visible:border-accent-main-100 focus-visible:ring-1 focus-visible:ring-accent-main-100/30 resize-y leading-relaxed custom-scrollbar`
 
 /**
  * Settings select — 设计系统下拉框（非原生 <select>）。
@@ -90,9 +93,19 @@ export function SettingsSelect<T extends string>({
         className={`${settingsFieldClass} flex items-center justify-between gap-2 text-left ${disabled ? 'opacity-55 cursor-not-allowed' : ''} ${className ?? ''}`}
       >
         <span className={`truncate ${selected ? '' : 'text-text-400'}`}>{selected?.label ?? value ?? ''}</span>
-        <ChevronDownIcon size={14} className={`shrink-0 text-text-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDownIcon
+          size={14}
+          className={`shrink-0 text-text-400 ${SETTINGS_MOVE_TRANSITION_CLASS} ${isOpen ? 'rotate-180' : ''}`}
+        />
       </button>
-      <DropdownMenu triggerRef={triggerRef} isOpen={isOpen} position="bottom" align="left" width={menuWidth} zIndex={400}>
+      <DropdownMenu
+        triggerRef={triggerRef}
+        isOpen={isOpen}
+        position="bottom"
+        align="left"
+        width={menuWidth}
+        zIndex={400}
+      >
         <div
           id={listboxId}
           ref={menuRef}
@@ -168,19 +181,20 @@ export function SettingsDisclosure({
         aria-expanded={isOpen}
         aria-controls={panelId}
         onClick={toggle}
-        className="group flex items-center gap-1.5 text-[length:var(--fs-xs)] text-text-300 transition-colors hover:text-text-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent-main-100 rounded"
+        className={`group flex items-center gap-1.5 text-[length:var(--fs-xs)] text-text-300 ${SETTINGS_COLOR_TRANSITION_CLASS} hover:text-text-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent-main-100 rounded`}
       >
-        <ChevronDownIcon size={13} className={`shrink-0 text-text-400 transition-transform duration-200 ${isOpen ? '' : '-rotate-90'}`} />
+        <ChevronDownIcon
+          size={13}
+          className={`shrink-0 text-text-400 ${SETTINGS_MOVE_TRANSITION_CLASS} ${isOpen ? '' : '-rotate-90'}`}
+        />
         <span>{title}</span>
         {count !== undefined && <span className="text-text-500">({count})</span>}
       </button>
       <div
         id={panelId}
-        className={`grid transition-[grid-template-rows] duration-200 ease-out ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
+        className={`${SETTINGS_DISCLOSURE_PANEL_CLASS} ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
       >
-        <div className="overflow-hidden">
-          {hasOpened ? <div className="pt-2">{children}</div> : null}
-        </div>
+        <div className="overflow-hidden">{hasOpened ? <div className="pt-2">{children}</div> : null}</div>
       </div>
     </div>
   )
@@ -225,7 +239,7 @@ export function Toggle({
         if (disabled) return
         onChange()
       }}
-      className={`group/switch relative select-none rounded-full transition-colors touch-manipulation
+      className={`group/switch relative select-none rounded-full ${SETTINGS_COLOR_TRANSITION_CLASS} touch-manipulation
         ring-[0.5px] ring-border-200 hover:ring-[1px]
         focus-visible:outline focus-visible:outline-[1px] focus-visible:outline-accent-main-100 focus-visible:outline-offset-2
         ${disabled ? 'opacity-45 cursor-not-allowed' : 'cursor-pointer'}
@@ -233,7 +247,7 @@ export function Toggle({
       style={{ width: 36, height: 20 }}
     >
       <div
-        className={`absolute flex items-center justify-center top-[2px] left-[2px] rounded-full transition-transform
+        className={`absolute flex items-center justify-center top-[2px] left-[2px] rounded-full ${SETTINGS_MOVE_TRANSITION_CLASS}
           bg-white ring-[0.5px] ring-inset ring-border-200
           ${enabled ? '!ring-[0px]' : ''}`}
         style={{
@@ -256,7 +270,10 @@ export interface SegmentedControlProps<T extends string> {
 }
 
 export function SegmentedControl<T extends string>({ value, options, onChange }: SegmentedControlProps<T>) {
-  const activeIndex = Math.max(0, options.findIndex(o => o.value === value))
+  const activeIndex = Math.max(
+    0,
+    options.findIndex(o => o.value === value),
+  )
 
   return (
     <div
@@ -268,12 +285,14 @@ export function SegmentedControl<T extends string>({ value, options, onChange }:
           const dir = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1
           const next = (activeIndex + dir + options.length) % options.length
           const accepted = onChange(options[next].value)
-          e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')[accepted === false ? activeIndex : next]?.focus()
+          e.currentTarget
+            .querySelectorAll<HTMLElement>('[role="tab"]')
+            [accepted === false ? activeIndex : next]?.focus()
         }
       }}
     >
       <div
-        className="absolute top-1 bottom-1 left-1 bg-bg-000 rounded-md shadow-sm transition-transform duration-300 ease-out -z-10"
+        className={`absolute top-1 bottom-1 left-1 bg-bg-000 rounded-md shadow-sm ${SETTINGS_MOVE_TRANSITION_CLASS} -z-10`}
         style={{
           width: `calc((100% - 8px) / ${options.length})`,
           transform: `translateX(${activeIndex * 100}%)`,
@@ -293,7 +312,7 @@ export function SegmentedControl<T extends string>({ value, options, onChange }:
               e.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="tab"]')[activeIndex]?.focus()
             }
           }}
-          className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[length:var(--fs-md)] font-medium transition-colors duration-200
+          className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[length:var(--fs-md)] font-medium ${SETTINGS_COLOR_TRANSITION_CLASS}
             ${opt.value === value ? 'text-text-100' : 'text-text-400 hover:text-text-200'}`}
         >
           {opt.icon}
@@ -412,9 +431,7 @@ export function SettingsSection({ title, description, actions, children, classNa
           {actions && <div className="shrink-0 flex items-center gap-1.5">{actions}</div>}
         </div>
         {description && (
-          <p className="text-[length:var(--fs-xs)] text-text-300 mt-1 leading-relaxed max-w-[52ch]">
-            {description}
-          </p>
+          <p className="text-[length:var(--fs-xs)] text-text-300 mt-1 leading-relaxed max-w-[52ch]">{description}</p>
         )}
       </div>
       <div className="flex flex-col gap-3">{children}</div>
@@ -442,7 +459,9 @@ export function SettingsSubgroup({
       {title && (
         <div className="mb-2.5 px-0.5">
           <div className="text-[length:var(--fs-sm)] font-medium text-text-100">{title}</div>
-          {description && <div className="text-[length:var(--fs-xs)] text-text-400 mt-0.5 leading-relaxed">{description}</div>}
+          {description && (
+            <div className="text-[length:var(--fs-xs)] text-text-400 mt-0.5 leading-relaxed">{description}</div>
+          )}
         </div>
       )}
       <div className="space-y-2.5">{children}</div>

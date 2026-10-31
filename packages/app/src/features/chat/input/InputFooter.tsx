@@ -18,18 +18,17 @@ interface InputFooterProps {
   inputContainerRef?: RefObject<HTMLDivElement | null>
 }
 
-export const InputFooter = memo(function InputFooter({
-  sessionId,
-  onNewChat,
-  inputContainerRef,
-}: InputFooterProps) {
+export const InputFooter = memo(function InputFooter({ sessionId, onNewChat, inputContainerRef }: InputFooterProps) {
   const { t } = useTranslation(['chat', 'common'])
   const todos = usePiSessionTodos(sessionId ?? null)
-  const stats = useMemo(() => ({
-    total: todos.length,
-    completed: todos.filter(todo => todo.status === 'completed').length,
-    inProgress: todos.filter(todo => todo.status === 'in_progress').length,
-  }), [todos])
+  const stats = useMemo(
+    () => ({
+      total: todos.length,
+      completed: todos.filter(todo => todo.status === 'completed').length,
+      inProgress: todos.filter(todo => todo.status === 'in_progress').length,
+    }),
+    [todos],
+  )
   const currentTask = useMemo(
     () => todos.find(todo => todo.status === 'in_progress') ?? todos.find(todo => todo.status === 'pending') ?? null,
     [todos],

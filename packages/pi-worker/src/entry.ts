@@ -1,19 +1,19 @@
-import { randomUUID } from "node:crypto"
-import { appendFileSync, mkdirSync } from "node:fs"
-import { homedir } from "node:os"
-import { join, resolve } from "node:path"
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent"
+import { randomUUID } from 'node:crypto'
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
+import type { ModelRuntime } from '@earendil-works/pi-coding-agent'
 
 // worker 的 stderr 是 inherit 到 server 的：桌面壳（Tauri）只保留最近 24
 // 行内存缓冲，进程退出后全丢。这里把 worker 自己的 stderr 也追加写到
 // 和 server 相同的日志目录，崩溃后可回溯（server 侧的 handleExit 日志在
 // server 进程里写，worker 进程内的 uncaughtException 等在这里写）。
 function wireWorkerStderrFileLog(): void {
-  if (process.env.PIUI_FILE_LOG === "0") return
+  if (process.env.PIUI_FILE_LOG === '0') return
   let logDir: string | undefined
   const day = () => new Date().toISOString().slice(0, 10)
   let file: string | undefined
-  let currentDay = ""
+  let currentDay = ''
   const write = (chunk: string) => {
     try {
       if (!file || currentDay !== day()) {
@@ -22,10 +22,10 @@ function wireWorkerStderrFileLog(): void {
           const env = process.env.PIUI_DATA_DIR?.trim()
           logDir = env
             ? resolve(env)
-            : process.platform === "win32" && process.env.APPDATA
-              ? join(process.env.APPDATA, "com.piui.desktop")
-              : join(homedir(), ".piui")
-          logDir = join(logDir, "logs")
+            : process.platform === 'win32' && process.env.APPDATA
+              ? join(process.env.APPDATA, 'com.piui.desktop')
+              : join(homedir(), '.piui')
+          logDir = join(logDir, 'logs')
           mkdirSync(logDir, { recursive: true })
         }
         file = join(logDir!, `piui-server-${currentDay}.log`)
@@ -37,23 +37,30 @@ function wireWorkerStderrFileLog(): void {
   }
   const orig = process.stderr.write.bind(process.stderr)
   process.stderr.write = ((chunk: unknown, ...rest: unknown[]) => {
-    if (typeof chunk === "string") write(chunk)
+    if (typeof chunk === 'string') write(chunk)
     return orig(chunk as never, ...(rest as never[]))
   }) as typeof process.stderr.write
 }
 wireWorkerStderrFileLog()
 
-import type { JsonObject, JsonValue, PiRegistrySnapshot } from "@piui/protocol"
-import { isJsonObject, problemFromError, PROTOCOL_VERSION, validateParams } from "@piui/protocol"
-import { loadPiSdk, shouldRequireVerifiedSdk, defaultSdkResolution, getLoadedSdk, type LoadedSdk } from "./sdk-host.js"
-import { RealPiSession, type ExtensionHostActions } from "./runtime/real-session.js"
-import { MockPiSession, MockCatalog } from "./runtime/mock-session.js"
-import { PiCatalog } from "./runtime/catalog.js"
-import { ProviderAuthHost } from "./runtime/provider-auth-host.js"
-import { COMMAND_HANDLERS, createRegistryDescribeCapability, listCommandCapabilities, resolveExtensionTarget, type CommandContext } from "./command-table.js"
-import { assertRuntimeTargetBindings } from "./runtime-contract.js"
-import { createWorkerCommandScheduler } from "./worker-command-scheduler.js"
-import { getDriverMode } from "./driver.js"
+import type { JsonObject, JsonValue, PiRegistrySnapshot } from '@piui/protocol'
+import { isJsonObject, problemFromError, PROTOCOL_VERSION, validateParams } from '@piui/protocol'
+import { loadPiSdk, shouldRequireVerifiedSdk, defaultSdkResolution, getLoadedSdk, type LoadedSdk } from './sdk-host.js'
+import { RealPiSession, type ExtensionHostActions } from './runtime/real-session.js'
+import { createPiEventCoalescer } from './runtime/event-coalescer.js'
+import { MockPiSession, MockCatalog } from './runtime/mock-session.js'
+import { PiCatalog } from './runtime/catalog.js'
+import { ProviderAuthHost } from './runtime/provider-auth-host.js'
+import {
+  COMMAND_HANDLERS,
+  createRegistryDescribeCapability,
+  listCommandCapabilities,
+  resolveExtensionTarget,
+  type CommandContext,
+} from './command-table.js'
+import { assertRuntimeTargetBindings } from './runtime-contract.js'
+import { createWorkerCommandScheduler } from './worker-command-scheduler.js'
+import { getDriverMode } from './driver.js'
 import {
   PI_WORKER_HEARTBEAT_INTERVAL_MS,
   PI_WORKER_PROTOCOL_VERSION,
@@ -62,9 +69,9 @@ import {
   type WorkerMessage,
   type WorkerParentMessage,
   type WorkerRequest,
-} from "./ipc.js"
-import type { SessionRuntime } from "./runtime.js"
-import * as P from "./params.js"
+} from './ipc.js'
+import type { SessionRuntime } from './runtime.js'
+import * as P from './params.js'
 
 const workerGeneration = randomUUID()
 /**
@@ -107,9 +114,12 @@ function sendWithCallback(message: WorkerMessage, callback: () => void): void {
   callback()
 }
 
-const catalog = driver === "pi"
-  ? new PiCatalog(undefined, event => send({ kind: "event", generation: workerGeneration, channel: "packages.progress", event }))
-  : new MockCatalog()
+const catalog =
+  driver === 'pi'
+    ? new PiCatalog(undefined, event =>
+        send({ kind: 'event', generation: workerGeneration, channel: 'packages.progress', event }),
+      )
+    : new MockCatalog()
 const providerAuth = new ProviderAuthHost(async () => {
   // 共享 ModelRuntime：所有会话 runtime + provider 认证共用同一个实例
   // （SDK 的 createAgentSessionServices 接受注入的 modelRuntime）。
@@ -117,22 +127,25 @@ const providerAuth = new ProviderAuthHost(async () => {
   return sharedModelRuntime
 })
 
-const pendingHostCalls = new Map<string, {
-  resolve: () => void
-  reject: (error: Error) => void
-  timer: NodeJS.Timeout
-}>()
+const pendingHostCalls = new Map<
+  string,
+  {
+    resolve: () => void
+    reject: (error: Error) => void
+    timer: NodeJS.Timeout
+  }
+>()
 
 function callHost(call: WorkerHostCall): Promise<void> {
   const id = randomUUID()
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingHostCalls.delete(id)
-      reject(Object.assign(new Error("PiUI host call timed out"), { code: "HOST_CALL_TIMEOUT" }))
+      reject(Object.assign(new Error('PiUI host call timed out'), { code: 'HOST_CALL_TIMEOUT' }))
     }, 15_000)
     timer.unref()
     pendingHostCalls.set(id, { resolve, reject, timer })
-    process.send?.({ kind: "hostCall", id, generation: workerGeneration, call }, error => {
+    process.send?.({ kind: 'hostCall', id, generation: workerGeneration, call }, error => {
       if (!error) return
       const pending = pendingHostCalls.get(id)
       if (pending) clearTimeout(pending.timer)
@@ -143,64 +156,110 @@ function callHost(call: WorkerHostCall): Promise<void> {
 }
 
 const hostActions: ExtensionHostActions = {
-  reserveReplacement: request => callHost({ type: "extensionReplacement.reserve", ...request }),
+  reserveReplacement: request => callHost({ type: 'extensionReplacement.reserve', ...request }),
   commitReplacement: (reservationId, replacement) => {
     providerAuth.resetRuntime()
-    return callHost({ type: "extensionReplacement.commit", reservationId, replacement })
+    return callHost({ type: 'extensionReplacement.commit', reservationId, replacement })
   },
-  abortReplacement: reservationId => callHost({ type: "extensionReplacement.abort", reservationId }),
+  abortReplacement: reservationId => callHost({ type: 'extensionReplacement.abort', reservationId }),
   requestShutdown: sessionId => {
-    void callHost({ type: "extensionShutdown", sessionId }).catch(error => {
-      console.error(`[piui-worker] extension shutdown request failed: ${error instanceof Error ? error.message : String(error)}`)
+    void callHost({ type: 'extensionShutdown', sessionId }).catch(error => {
+      console.error(
+        `[piui-worker] extension shutdown request failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
     })
   },
 }
 
+/**
+ * 每个 runtime 的出站订阅器：关闭/替换时按 runtime 实例回收，key 不受
+ * sessionId 迁移影响。
+ */
+const runtimeUnsubs = new WeakMap<SessionRuntime, Array<() => void>>()
+
 function subscribeRuntimeEvents(current: SessionRuntime): Array<() => void> {
   const unsubs: Array<() => void> = []
-  unsubs.push(current.onPiEvent((event, meta) => send({
-    kind: "event",
-    generation: workerGeneration,
-    sessionId: current.getSessionId(),
-    channel: "pi.event",
-    event,
-    meta,
-  })))
-  unsubs.push(current.onHead(head => send({
-    kind: "event",
-    generation: workerGeneration,
-    sessionId: current.getSessionId(),
-    channel: "session.head",
-    head: head as unknown as JsonObject,
-  })))
-  if (current.onActivity) {
-    unsubs.push(current.onActivity(status => send({
-      kind: "event",
+  // delta 间隔 10-20ms，逐帧转发等于把整条回复重发 N 次；message_update 合流
+  // 成 80ms 一帧，其他事件发前先 flush，顺序不变（见 event-coalescer.ts）。
+  const piEvents = createPiEventCoalescer(frame =>
+    send({
+      kind: 'event',
       generation: workerGeneration,
-      sessionId: current.getSessionId(),
-      channel: "session.activity",
-      event: { status: status as unknown as JsonValue },
-    })))
+      sessionId: frame.sessionId,
+      channel: 'pi.event',
+      event: frame.event,
+      meta: frame.meta,
+    }),
+  )
+  unsubs.push(current.onPiEvent((event, meta) => piEvents.push({ event, meta, sessionId: current.getSessionId() })))
+  // dispose 会先 flush 挂起帧再清定时器：关闭路径不能留下悬挂 timer
+  unsubs.push(() => piEvents.dispose())
+  unsubs.push(
+    current.onHead(head =>
+      send({
+        kind: 'event',
+        generation: workerGeneration,
+        sessionId: current.getSessionId(),
+        channel: 'session.head',
+        head: head as unknown as JsonObject,
+      }),
+    ),
+  )
+  if (current.onActivity) {
+    unsubs.push(
+      current.onActivity(status =>
+        send({
+          kind: 'event',
+          generation: workerGeneration,
+          sessionId: current.getSessionId(),
+          channel: 'session.activity',
+          event: { status: status as unknown as JsonValue },
+        }),
+      ),
+    )
   }
   if (current.onExtensionUi) {
-    unsubs.push(current.onExtensionUi(event => send({
-      kind: "event",
-      generation: workerGeneration,
-      sessionId: current.getSessionId(),
-      channel: "extension.ui",
-      event: toJsonObject(event),
-    })))
+    unsubs.push(
+      current.onExtensionUi(event =>
+        send({
+          kind: 'event',
+          generation: workerGeneration,
+          sessionId: current.getSessionId(),
+          channel: 'extension.ui',
+          event: toJsonObject(event),
+        }),
+      ),
+    )
+  }
+  if (current.onChildSession) {
+    unsubs.push(
+      current.onChildSession(event =>
+        send({
+          kind: 'event',
+          generation: workerGeneration,
+          sessionId: current.getSessionId(),
+          channel: 'subagent.child',
+          event,
+        }),
+      ),
+    )
   }
   if (current.onResourcesChanged) {
-    unsubs.push(current.onResourcesChanged(() => send({
-      kind: "event",
-      generation: workerGeneration,
-      channel: "resources.updated",
-      workspacePath: current.getCwd(),
-    })))
-    unsubs.push(current.onResourcesChanged(() => {
-      void queueRegistryChangeCheck(current, "resources.updated")
-    }))
+    unsubs.push(
+      current.onResourcesChanged(() =>
+        send({
+          kind: 'event',
+          generation: workerGeneration,
+          channel: 'resources.updated',
+          workspacePath: current.getCwd(),
+        }),
+      ),
+    )
+    unsubs.push(
+      current.onResourcesChanged(() => {
+        void queueRegistryChangeCheck(current, 'resources.updated')
+      }),
+    )
   }
   return unsubs
 }
@@ -210,7 +269,10 @@ async function setRuntimeRegistryBaseline(sessionId: string, current: SessionRun
 }
 
 function queueRegistryChangeCheck(current: SessionRuntime, reason: string): Promise<void> {
-  registryCheck = registryCheck.then(() => detectRegistryChange(current, reason), () => detectRegistryChange(current, reason))
+  registryCheck = registryCheck.then(
+    () => detectRegistryChange(current, reason),
+    () => detectRegistryChange(current, reason),
+  )
   return registryCheck
 }
 
@@ -227,10 +289,10 @@ async function detectRegistryChange(current: SessionRuntime, reason: string): Pr
   registryDigests.set(sessionId, next)
   registryRevision += 1
   send({
-    kind: "event",
+    kind: 'event',
     generation: workerGeneration,
     sessionId,
-    channel: "registry.updated",
+    channel: 'registry.updated',
     event: { revision: registryRevision, sessionId, reason },
   })
 }
@@ -241,23 +303,27 @@ function stableStringify(value: JsonValue): string {
 
 function sortJson(value: JsonValue): JsonValue {
   if (Array.isArray(value)) return value.map(sortJson)
-  if (!value || typeof value !== "object") return value
+  if (!value || typeof value !== 'object') return value
   return Object.fromEntries(
-    Object.keys(value).sort().map(key => [key, sortJson(value[key] ?? null)]),
+    Object.keys(value)
+      .sort()
+      .map(key => [key, sortJson(value[key] ?? null)]),
   )
 }
 
 async function openRuntime(params: JsonObject): Promise<JsonValue> {
-  const cwd = P.reqString(params, "cwd")
-  const sessionFile = P.optString(params, "sessionFile")
-  const opened = driver === "pi"
-    ? await RealPiSession.open(cwd, sessionFile, {
-      hostActions,
-      modelRuntime: sharedModelRuntime,
-    })
-    : await MockPiSession.open(cwd, sessionFile)
+  const cwd = P.reqString(params, 'cwd')
+  const sessionFile = P.optString(params, 'sessionFile')
+  const opened =
+    driver === 'pi'
+      ? await RealPiSession.open(cwd, sessionFile, {
+          hostActions,
+          modelRuntime: sharedModelRuntime,
+        })
+      : await MockPiSession.open(cwd, sessionFile)
   const sessionId = opened.getSessionId()
   const unsubs = subscribeRuntimeEvents(opened)
+  runtimeUnsubs.set(opened, unsubs)
   runtimes.set(sessionId, opened)
   try {
     if (opened instanceof RealPiSession) await opened.initializeExtensions()
@@ -265,7 +331,7 @@ async function openRuntime(params: JsonObject): Promise<JsonValue> {
   } catch (error) {
     runtimes.delete(sessionId)
     registryDigests.delete(sessionId)
-    unsubs.forEach(unsub => unsub())
+    detachRuntimeEvents(opened)
     await opened.dispose()
     throw error
   }
@@ -283,27 +349,27 @@ async function closeRuntime(sessionId: string | undefined): Promise<void> {
   if (!current) return
   runtimes.delete(sessionId)
   registryDigests.delete(sessionId)
+  detachRuntimeEvents(current)
   await current.dispose()
 }
 
-const ctx: CommandContext = {
-  get runtime() {
-    return undefined
-  },
-  driver,
-  catalog,
-  auth: providerAuth,
-  packages: catalog,
-  requireRuntime(): SessionRuntime {
-    throw Object.assign(new Error("Pi runtime is not open"), { code: "RUNTIME_NOT_OPEN" })
-  },
+/** 关掉 runtime 的所有出站订阅（含 flush 合流缓冲），可从关闭/退出路径重入 */
+function detachRuntimeEvents(current: SessionRuntime): void {
+  const unsubs = runtimeUnsubs.get(current)
+  if (!unsubs) return
+  runtimeUnsubs.delete(current)
+  for (const unsub of unsubs) unsub()
 }
 
-async function execute(command: { type: string; params?: JsonObject; sessionId?: string }): Promise<JsonValue | undefined | void> {
+async function execute(command: {
+  type: string
+  params?: JsonObject
+  sessionId?: string
+}): Promise<JsonValue | undefined | void> {
   const params = command.params ?? {}
-  if (command.type === "registry.describe") return describeRegistry()
-  if (command.type === "session.open") return openRuntime(params)
-  if (command.type === "session.close") {
+  if (command.type === 'registry.describe') return describeRegistry()
+  if (command.type === 'session.open') return openRuntime(params)
+  if (command.type === 'session.close') {
     await closeRuntime(command.sessionId)
     return undefined
   }
@@ -311,7 +377,7 @@ async function execute(command: { type: string; params?: JsonObject; sessionId?:
   // （替换后 server 尚未同步新身份，或 runtime 已关闭）。
   const current = command.sessionId ? runtimes.get(command.sessionId) : undefined
   if (command.sessionId && !current) {
-    throw Object.assign(new Error("Pi runtime no longer owns the requested session"), { code: "RUNTIME_REPLACED" })
+    throw Object.assign(new Error('Pi runtime no longer owns the requested session'), { code: 'RUNTIME_REPLACED' })
   }
   const commandCtx: CommandContext = {
     get runtime() {
@@ -322,7 +388,7 @@ async function execute(command: { type: string; params?: JsonObject; sessionId?:
     auth: providerAuth,
     packages: catalog,
     requireRuntime(): SessionRuntime {
-      if (!current) throw Object.assign(new Error("Pi runtime is not open"), { code: "RUNTIME_NOT_OPEN" })
+      if (!current) throw Object.assign(new Error('Pi runtime is not open'), { code: 'RUNTIME_NOT_OPEN' })
       return current
     },
   }
@@ -332,19 +398,19 @@ async function execute(command: { type: string; params?: JsonObject; sessionId?:
     if (current) {
       const registry = await current.getRegistry()
       const target = resolveExtensionTarget(registry, command.type)
-      if (target === "tool") {
+      if (target === 'tool') {
         // 工具参数 schema 来自 Pi 自己的工具定义（typebox 序列化后的 JSON
         // Schema）——在分发边界校验，畸形入参响亮 INVALID_REQUEST。
         const tool = registry.tools.find(item => item.name === command.type)
         if (tool?.parameters) validateParams(tool.parameters, params ?? {})
         return current.invokeTool(command.type, params)
       }
-      if (target === "command") {
-        const args = typeof params?.args === "string" ? params.args : undefined
+      if (target === 'command') {
+        const args = typeof params?.args === 'string' ? params.args : undefined
         return current.invokeCommand(command.type, args)
       }
     }
-    throw Object.assign(new Error(`unknown command: ${command.type}`), { code: "UNKNOWN_COMMAND" })
+    throw Object.assign(new Error(`unknown command: ${command.type}`), { code: 'UNKNOWN_COMMAND' })
   }
   const result = await handler(commandCtx, params)
   // Runtime replacement (newSession/switchSession/fork/import) changes the
@@ -366,12 +432,27 @@ async function execute(command: { type: string; params?: JsonObject; sessionId?:
   return result
 }
 
-const REGISTRY_READ_COMMANDS = new Set(["state.get", "entries.get", "branch.get", "tree.get", "registry.get", "attachment.get", "waitForIdle"])
+const REGISTRY_READ_COMMANDS = new Set([
+  'state.get',
+  'entries.get',
+  'branch.get',
+  'tree.get',
+  'registry.get',
+  'attachment.get',
+  'waitForIdle',
+])
 
 function shouldCheckRegistryAfter(type: string): boolean {
-  if (type.startsWith("session.") || type.startsWith("models.") || type.startsWith("settings.") ||
-    type.startsWith("trust.") || type.startsWith("providers.") || type.startsWith("modelRuntime.") ||
-    type.startsWith("packages.")) return false
+  if (
+    type.startsWith('session.') ||
+    type.startsWith('models.') ||
+    type.startsWith('settings.') ||
+    type.startsWith('trust.') ||
+    type.startsWith('providers.') ||
+    type.startsWith('modelRuntime.') ||
+    type.startsWith('packages.')
+  )
+    return false
   return !REGISTRY_READ_COMMANDS.has(type)
 }
 
@@ -379,10 +460,10 @@ function describeRegistry(): PiRegistrySnapshot {
   return {
     protocolVersion: PROTOCOL_VERSION,
     revision: registryRevision,
-    sdkVersion: loadedSdkInfo?.version ?? "unknown",
+    sdkVersion: loadedSdkInfo?.version ?? 'unknown',
     driver,
-    globalCommands: [createRegistryDescribeCapability(), ...listCommandCapabilities("global")],
-    sessionCommands: listCommandCapabilities("session"),
+    globalCommands: [createRegistryDescribeCapability(), ...listCommandCapabilities('global')],
+    sessionCommands: listCommandCapabilities('session'),
   }
 }
 
@@ -391,7 +472,7 @@ const schedule = createWorkerCommandScheduler(async command => execute(command))
 function toJsonObject(value: unknown): JsonObject {
   const json = JSON.parse(JSON.stringify(value)) as unknown
   if (!isJsonObject(json)) {
-    throw Object.assign(new Error("value is not a JSON object"), { code: "NATIVE_DATA_NOT_JSON" })
+    throw Object.assign(new Error('value is not a JSON object'), { code: 'NATIVE_DATA_NOT_JSON' })
   }
   return json
 }
@@ -403,30 +484,35 @@ async function cleanupWorker(): Promise<void> {
   // 并发清理所有 runtime，且每个 dispose 有界（SDK 清理可能卡在 provider
   // 连接/流式响应上，串行会让关闭随会话数线性变慢）。超时的会话直接放弃
   // 等它——进程马上退出，锁由 server 侧兜底释放。
-  await Promise.allSettled([...runtimes.keys()].map(async sessionId => {
-    const current = runtimes.get(sessionId)
-    if (!current) return
-    runtimes.delete(sessionId)
-    registryDigests.delete(sessionId)
-    await Promise.race([
-      current.dispose(),
-      new Promise<void>(resolve => {
-        const timer = setTimeout(resolve, 3_000)
-        timer.unref()
-      }),
-    ])
-  }))
+  await Promise.allSettled(
+    [...runtimes.keys()].map(async sessionId => {
+      const current = runtimes.get(sessionId)
+      if (!current) return
+      runtimes.delete(sessionId)
+      registryDigests.delete(sessionId)
+      detachRuntimeEvents(current)
+      await Promise.race([
+        current.dispose(),
+        new Promise<void>(resolve => {
+          const timer = setTimeout(resolve, 3_000)
+          timer.unref()
+        }),
+      ])
+    }),
+  )
 }
 
-const unsubscribeProviderAuth = providerAuth.onEvent(event => send({
-  kind: "event",
-  generation: workerGeneration,
-  channel: "provider.auth",
-  event: toJsonObject(event),
-}))
+const unsubscribeProviderAuth = providerAuth.onEvent(event =>
+  send({
+    kind: 'event',
+    generation: workerGeneration,
+    channel: 'provider.auth',
+    event: toJsonObject(event),
+  }),
+)
 
 const heartbeatTimer = setInterval(() => {
-  send({ kind: "heartbeat", generation: workerGeneration, timestamp: Date.now() })
+  send({ kind: 'heartbeat', generation: workerGeneration, timestamp: Date.now() })
 }, PI_WORKER_HEARTBEAT_INTERVAL_MS)
 heartbeatTimer.unref()
 
@@ -435,8 +521,10 @@ heartbeatTimer.unref()
 // 但 uncaughtException = 进程级错误，事件循环状态已不可信——硬撑只会让
 // worker 变成心跳照发、命令全挂的僵尸，还废掉 server 侧 supervisor 的
 // 自愈重建。记录后走有界清理并非零退出，把重建交还给 supervisor。
-process.on("unhandledRejection", (reason) => {
-  console.error(`[piui-worker] unhandled rejection: ${reason instanceof Error ? reason.stack ?? reason.message : String(reason)}`)
+process.on('unhandledRejection', reason => {
+  console.error(
+    `[piui-worker] unhandled rejection: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}`,
+  )
 })
 
 let fatalExitStarted = false
@@ -453,7 +541,7 @@ async function fatalExit(code: number): Promise<void> {
   process.exit(code)
 }
 
-process.on("uncaughtException", (error) => {
+process.on('uncaughtException', error => {
   console.error(`[piui-worker] uncaught exception: ${error?.stack ?? error}`)
   if (fatalExitStarted) return
   fatalExitStarted = true
@@ -461,12 +549,12 @@ process.on("uncaughtException", (error) => {
 })
 
 function toResponseData(data: JsonValue | undefined | void): JsonValue | undefined {
-  return data === undefined ? undefined : data as JsonValue
+  return data === undefined ? undefined : (data as JsonValue)
 }
 
-process.on("message", (value: unknown) => {
+process.on('message', (value: unknown) => {
   const message = value as WorkerParentMessage
-  if (message?.kind === "hostReply") {
+  if (message?.kind === 'hostReply') {
     const reply = message as WorkerHostReply
     const pending = pendingHostCalls.get(reply.id)
     if (!pending || reply.generation !== workerGeneration) return
@@ -477,59 +565,64 @@ process.on("message", (value: unknown) => {
     return
   }
   const request = message as WorkerRequest
-  if (!request || request.kind !== "request" || typeof request.id !== "string") return
+  if (!request || request.kind !== 'request' || typeof request.id !== 'string') return
   if (request.generation !== workerGeneration) {
     send({
-      kind: "response",
+      kind: 'response',
       id: request.id,
       generation: workerGeneration,
       ok: false,
-      error: { code: "WORKER_PROTOCOL_MISMATCH", message: "Pi worker generation mismatch" },
+      error: { code: 'WORKER_PROTOCOL_MISMATCH', message: 'Pi worker generation mismatch' },
     })
     return
   }
-  if (!request.command || typeof request.command.type !== "string") {
+  if (!request.command || typeof request.command.type !== 'string') {
     send({
-      kind: "response",
+      kind: 'response',
       id: request.id,
       generation: workerGeneration,
       ok: false,
-      error: { code: "INVALID_REQUEST", message: "malformed worker request" },
+      error: { code: 'INVALID_REQUEST', message: 'malformed worker request' },
     })
     return
   }
-  if (request.command.type === "dispose") {
+  if (request.command.type === 'dispose') {
     // ACK 必须等 IPC flush 完再退出——立刻 process.exit 会砍掉还没发出去
     // 的响应，parent 无法区分「干净关闭」和「清理中途崩溃」（对齐 opencode
     // disposeMiddleware「先回响应再清理」的顺序）。回调不触发时 1s 兜底退出。
     void schedule.close(cleanupWorker).then(
       () => {
-        sendWithCallback({ kind: "response", id: request.id, generation: workerGeneration, ok: true }, () => process.exit(0))
+        sendWithCallback({ kind: 'response', id: request.id, generation: workerGeneration, ok: true }, () =>
+          process.exit(0),
+        )
         setTimeout(() => process.exit(0), 1_000).unref()
       },
       error => {
-        sendWithCallback({
-          kind: "response",
-          id: request.id,
-          generation: workerGeneration,
-          ok: false,
-          error: problemFromError(error),
-        }, () => process.exit(1))
+        sendWithCallback(
+          {
+            kind: 'response',
+            id: request.id,
+            generation: workerGeneration,
+            ok: false,
+            error: problemFromError(error),
+          },
+          () => process.exit(1),
+        )
         setTimeout(() => process.exit(1), 1_000).unref()
       },
     )
     return
   }
-  if (request.command.type === "session.close") {
+  if (request.command.type === 'session.close') {
     // 多 runtime 共享调度器：session.close 只是普通命令（关一个 runtime），
     // 不能 closing 整个调度器；只有 dispose（进程退出）才排空调度器。
     void schedule({ ...request.command, sessionId: request.sessionId }).then(
       () => {
-        send({ kind: "response", id: request.id, generation: workerGeneration, ok: true })
+        send({ kind: 'response', id: request.id, generation: workerGeneration, ok: true })
       },
       error => {
         send({
-          kind: "response",
+          kind: 'response',
           id: request.id,
           generation: workerGeneration,
           ok: false,
@@ -541,11 +634,11 @@ process.on("message", (value: unknown) => {
   }
   void schedule({ ...request.command, sessionId: request.sessionId }).then(
     data => {
-      send({ kind: "response", id: request.id, generation: workerGeneration, ok: true, data: toResponseData(data) })
+      send({ kind: 'response', id: request.id, generation: workerGeneration, ok: true, data: toResponseData(data) })
     },
     error => {
       send({
-        kind: "response",
+        kind: 'response',
         id: request.id,
         generation: workerGeneration,
         ok: false,
@@ -555,11 +648,11 @@ process.on("message", (value: unknown) => {
   )
 })
 
-process.on("disconnect", () => {
+process.on('disconnect', () => {
   clearInterval(heartbeatTimer)
   for (const pending of pendingHostCalls.values()) {
     clearTimeout(pending.timer)
-    pending.reject(new Error("PiUI host disconnected"))
+    pending.reject(new Error('PiUI host disconnected'))
   }
   pendingHostCalls.clear()
   // parent 已消失，没有任何东西会再来杀这个进程：清理必须在有界时间内
@@ -571,7 +664,9 @@ process.on("disconnect", () => {
     try {
       await schedule.close(cleanupWorker)
     } catch (error) {
-      console.error(`[piui-worker] disconnect cleanup failed: ${error instanceof Error ? error.message : String(error)}`)
+      console.error(
+        `[piui-worker] disconnect cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
       exitCode = 1
     }
     process.exit(exitCode)
@@ -579,20 +674,20 @@ process.on("disconnect", () => {
 })
 
 const resolution = defaultSdkResolution()
-if (resolution.source !== "bundled") {
+if (resolution.source !== 'bundled') {
   console.info(`[piui-worker] pi sdk source=${resolution.source} path=${resolution.sdkPath}`)
 }
 // 严格模式（PIUI_SDK_STRICT=1）要求外部 SDK 与验证版本一致；缺省为 advisory，
 // 外部 SDK 加载失败时回退到内置 SDK 并上报详情。
-const strict = resolution.source !== "bundled" && shouldRequireVerifiedSdk()
+const strict = resolution.source !== 'bundled' && shouldRequireVerifiedSdk()
 let loaded: LoadedSdk
-if (resolution.source === "bundled") {
+if (resolution.source === 'bundled') {
   loaded = await loadPiSdk()
 } else {
   try {
     loaded = await loadPiSdk({ sdkPath: resolution.sdkPath, strict })
   } catch (error) {
-    const code = error && typeof error === "object" && "code" in error ? String(error.code) : "PI_SDK_INCOMPATIBLE"
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'PI_SDK_INCOMPATIBLE'
     const message = error instanceof Error ? error.message : String(error)
     console.warn(`[piui-worker] external Pi SDK failed to load (${code}): ${message}; falling back to the bundled SDK`)
     loaded = await loadPiSdk()
@@ -602,7 +697,7 @@ if (resolution.source === "bundled") {
 loadedSdkInfo = loaded
 
 send({
-  kind: "hello",
+  kind: 'hello',
   workerProtocolVersion: PI_WORKER_PROTOCOL_VERSION,
   piSdkVersion: loaded.version,
   piSdkVerified: loaded.verified,

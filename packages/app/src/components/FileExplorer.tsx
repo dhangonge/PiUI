@@ -27,6 +27,7 @@ import {
   TrashIcon,
 } from './Icons'
 import { CodePreview } from './CodePreview'
+import { ImagePreview, MediaPreview } from './MediaPreview'
 import { HtmlFilePreviewFrame } from './HtmlFilePreviewFrame'
 import { PreviewTabsBar, type PreviewTabsBarItem } from './PreviewTabsBar'
 import { MarkdownRenderer } from './MarkdownRenderer'
@@ -41,9 +42,8 @@ import {
   buildTextDataUrl,
   decodeBase64Text,
   formatMimeType,
-  type PreviewCategory,
 } from '../utils/mimeUtils'
-import { downloadFileContent } from '../utils/downloadUtils'
+import { downloadFileContent, downloadWorkspaceFile } from '../utils/downloadUtils'
 import { createDirectory, createFile, deleteEntry, moveEntry, searchText, searchFiles } from '../pi/files'
 import type { FileReadResponse, WorkspaceTextSearchMatch } from '@piui/protocol'
 import { startInternalDrag } from '../lib/internalDragCore'
@@ -72,6 +72,20 @@ function getRevealInSystemExplorerLabel(t: (key: string) => string): string {
 async function revealPathInSystemExplorer(absolutePath: string) {
   const { revealItemInDir } = await import('@tauri-apps/plugin-opener')
   await revealItemInDir(absolutePath)
+}
+
+// files.read 超限时服务端回 413 + FILE_TOO_LARGE，previewError 只是错误字符串
+function isFileTooLargeError(error: string | null | undefined): boolean {
+  if (!error) return false
+  return error.includes('FILE_TOO_LARGE') || /\b413\b/.test(error)
+}
+
+// 下载接口要求工作区相对路径；预览里的 path 可能是绝对路径
+function toWorkspaceRelativePath(path: string, workspacePath?: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  const root = workspacePath?.replace(/\\/g, '/').replace(/\/+$/, '')
+  if (root && (normalized === root || normalized.startsWith(`${root}/`))) return normalized.slice(root.length + 1)
+  return normalized.replace(/^\/+/, '')
 }
 
 // 常量
@@ -205,7 +219,12 @@ export const FileExplorer = memo(function FileExplorer({
     savePreview,
     fileStatus,
     refresh,
-  } = useFileExplorer({ directory, autoLoad: true, sessionId: sessionId || undefined, consumerId: `file-explorer-${panelTabId}` })
+  } = useFileExplorer({
+    directory,
+    autoLoad: true,
+    sessionId: sessionId || undefined,
+    consumerId: `file-explorer-${panelTabId}`,
+  })
 
   // 当 previewFile 改变时加载预览
   useEffect(() => {
@@ -266,7 +285,7 @@ export const FileExplorer = memo(function FileExplorer({
     setFileContextMenu(null)
     setFileOperation(operation)
     setFileOperationError(null)
-    setFileOperationValue(operation.kind === 'rename' ? operation.path.split('/').pop() ?? operation.path : '')
+    setFileOperationValue(operation.kind === 'rename' ? (operation.path.split('/').pop() ?? operation.path) : '')
   }, [])
 
   const submitFileOperation = useCallback(async () => {
@@ -299,11 +318,23 @@ export const FileExplorer = memo(function FileExplorer({
       setFileOperation(null)
       await refresh()
     } catch (operationError) {
-      setFileOperationError(operationError instanceof Error ? operationError.message : t('fileExplorer.operationFailed'))
+      setFileOperationError(
+        operationError instanceof Error ? operationError.message : t('fileExplorer.operationFailed'),
+      )
     } finally {
       setFileOperationBusy(false)
     }
-  }, [directory, fileOperation, fileOperationBusy, fileOperationValue, panelTabId, position, previewFile?.path, refresh, t])
+  }, [
+    directory,
+    fileOperation,
+    fileOperationBusy,
+    fileOperationValue,
+    panelTabId,
+    position,
+    previewFile?.path,
+    refresh,
+    t,
+  ])
 
   useEffect(() => {
     if (!fileContextMenu) return
@@ -597,19 +628,50 @@ export const FileExplorer = memo(function FileExplorer({
             style={{ left: fileContextMenu.x, top: fileContextMenu.y }}
           >
             {canRevealFiles ? (
-              <button type="button" onClick={handleRevealInSystemExplorer} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors">
+              <button
+                type="button"
+                onClick={handleRevealInSystemExplorer}
+                className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 hover:text-text-100 rounded-md transition-colors"
+              >
                 {revealInSystemExplorerLabel}
               </button>
             ) : null}
             {fileContextMenu.type === 'directory' ? (
               <>
-                <button type="button" onClick={() => openFileOperation({ kind: 'create-file', parent: fileContextMenu.path })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md">{t('fileExplorer.newFile')}</button>
-                <button type="button" onClick={() => openFileOperation({ kind: 'create-directory', parent: fileContextMenu.path })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md">{t('fileExplorer.newDirectory')}</button>
+                <button
+                  type="button"
+                  onClick={() => openFileOperation({ kind: 'create-file', parent: fileContextMenu.path })}
+                  className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md"
+                >
+                  {t('fileExplorer.newFile')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openFileOperation({ kind: 'create-directory', parent: fileContextMenu.path })}
+                  className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md"
+                >
+                  {t('fileExplorer.newDirectory')}
+                </button>
               </>
             ) : null}
-            <button type="button" onClick={() => openFileOperation({ kind: 'rename', path: fileContextMenu.path, type: fileContextMenu.type })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md">{t('fileExplorer.rename')}</button>
-            <button type="button" onClick={() => openFileOperation({ kind: 'delete', path: fileContextMenu.path, type: fileContextMenu.type })} className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-danger-100 hover:bg-danger-100/10 rounded-md flex items-center gap-2">
-              <TrashIcon size={12} />{t('common:delete')}
+            <button
+              type="button"
+              onClick={() =>
+                openFileOperation({ kind: 'rename', path: fileContextMenu.path, type: fileContextMenu.type })
+              }
+              className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-text-200 hover:bg-bg-200/60 rounded-md"
+            >
+              {t('fileExplorer.rename')}
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                openFileOperation({ kind: 'delete', path: fileContextMenu.path, type: fileContextMenu.type })
+              }
+              className="w-full px-2.5 py-1.5 text-left text-[length:var(--fs-sm)] text-danger-100 hover:bg-danger-100/10 rounded-md flex items-center gap-2"
+            >
+              <TrashIcon size={12} />
+              {t('common:delete')}
             </button>
           </div>,
           document.body,
@@ -617,27 +679,54 @@ export const FileExplorer = memo(function FileExplorer({
 
       <Dialog
         isOpen={fileOperation !== null}
-        onClose={() => { if (!fileOperationBusy) setFileOperation(null) }}
-        title={fileOperation?.kind === 'delete' ? t('fileExplorer.deleteEntry') : fileOperation?.kind === 'rename' ? t('fileExplorer.renameEntry') : fileOperation?.kind === 'create-directory' ? t('fileExplorer.newDirectory') : t('fileExplorer.newFile')}
+        onClose={() => {
+          if (!fileOperationBusy) setFileOperation(null)
+        }}
+        title={
+          fileOperation?.kind === 'delete'
+            ? t('fileExplorer.deleteEntry')
+            : fileOperation?.kind === 'rename'
+              ? t('fileExplorer.renameEntry')
+              : fileOperation?.kind === 'create-directory'
+                ? t('fileExplorer.newDirectory')
+                : t('fileExplorer.newFile')
+        }
         width={420}
       >
         <div className="space-y-3">
           {fileOperation?.kind === 'delete' ? (
-            <p className="text-[length:var(--fs-sm)] text-text-200 break-all">{fileOperation.type === 'directory' ? t('fileExplorer.deleteConfirmDir', { path: fileOperation.path }) : t('fileExplorer.deleteConfirm', { path: fileOperation.path })}</p>
+            <p className="text-[length:var(--fs-sm)] text-text-200 break-all">
+              {fileOperation.type === 'directory'
+                ? t('fileExplorer.deleteConfirmDir', { path: fileOperation.path })
+                : t('fileExplorer.deleteConfirm', { path: fileOperation.path })}
+            </p>
           ) : (
             <input
               autoFocus
               value={fileOperationValue}
               onChange={event => setFileOperationValue(event.target.value)}
-              onKeyDown={event => { if (event.key === 'Enter') void submitFileOperation() }}
+              onKeyDown={event => {
+                if (event.key === 'Enter') void submitFileOperation()
+              }}
               className="w-full h-8 rounded-md border border-border-200 bg-bg-100 px-2 text-[length:var(--fs-sm)] text-text-100"
               aria-label={t('fileExplorer.fileName')}
             />
           )}
-          {fileOperationError ? <p className="text-[length:var(--fs-xs)] text-danger-100">{fileOperationError}</p> : null}
+          {fileOperationError ? (
+            <p className="text-[length:var(--fs-xs)] text-danger-100">{fileOperationError}</p>
+          ) : null}
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" size="sm" onClick={() => setFileOperation(null)} disabled={fileOperationBusy}>{t('common:cancel')}</Button>
-            <Button variant={fileOperation?.kind === 'delete' ? 'danger' : 'primary'} size="sm" isLoading={fileOperationBusy} onClick={() => void submitFileOperation()}>{fileOperation?.kind === 'delete' ? t('common:delete') : t('fileExplorer.apply')}</Button>
+            <Button variant="secondary" size="sm" onClick={() => setFileOperation(null)} disabled={fileOperationBusy}>
+              {t('common:cancel')}
+            </Button>
+            <Button
+              variant={fileOperation?.kind === 'delete' ? 'danger' : 'primary'}
+              size="sm"
+              isLoading={fileOperationBusy}
+              onClick={() => void submitFileOperation()}
+            >
+              {fileOperation?.kind === 'delete' ? t('common:delete') : t('fileExplorer.apply')}
+            </Button>
           </div>
         </div>
       </Dialog>
@@ -729,7 +818,11 @@ const TextSearchResults = memo(function TextSearchResults({
   )
 
   if (isLoading && !hasFiles && !hasText) {
-    return <div className="flex items-center justify-center h-20 text-text-400 text-[length:var(--fs-sm)]">{t('common:loading')}</div>
+    return (
+      <div className="flex items-center justify-center h-20 text-text-400 text-[length:var(--fs-sm)]">
+        {t('common:loading')}
+      </div>
+    )
   }
 
   if (error && !hasFiles && !hasText) {
@@ -827,7 +920,9 @@ const TextSearchResults = memo(function TextSearchResults({
                   <span className="truncate text-[length:var(--fs-sm)] text-text-200">{name}</span>
                   <span className="shrink-0 text-[length:var(--fs-xxs)] text-text-500">:{match.line_number}</span>
                 </div>
-                <div className="mt-0.5 truncate pl-[22px] font-mono text-[length:var(--fs-xxs)] text-text-400">{line}</div>
+                <div className="mt-0.5 truncate pl-[22px] font-mono text-[length:var(--fs-xxs)] text-text-400">
+                  {line}
+                </div>
                 <div className="mt-0.5 truncate pl-[22px] text-[length:var(--fs-xxs)] text-text-500">{path}</div>
               </button>
             )
@@ -902,7 +997,9 @@ const FileTreeItem = memo(function FileTreeItem({
         type="button"
         onPointerDown={handlePointerDragStart}
         onClick={() => onClick(node)}
-        onContextMenu={event => onContextMenu?.(event, node.path, node.absolute, node.type === 'directory' ? 'directory' : 'file')}
+        onContextMenu={event =>
+          onContextMenu?.(event, node.path, node.absolute, node.type === 'directory' ? 'directory' : 'file')
+        }
         className={`
           w-full flex items-center gap-1 px-2 py-0.5 text-left cursor-default
           select-none hover:bg-bg-200/50 transition-colors text-[length:var(--fs-sm)]
@@ -1014,10 +1111,14 @@ function FilePreview({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [editEtag, setEditEtag] = useState<string | undefined>()
   const [saveConflict, setSaveConflict] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
 
   // 获取文件名
   const fileName = path?.split(/[/\\]/).pop() || 'Untitled'
   const language = path ? detectLanguage(path) : 'text'
+  // files.read 超限（413 / FILE_TOO_LARGE）：内容拿不到，但仍可直接下载
+  const fileTooLarge = !content && isFileTooLargeError(error)
 
   const beginEditing = useCallback(() => {
     if (!content || content.type !== 'text') return
@@ -1033,27 +1134,38 @@ function FilePreview({
     setSaveError(null)
   }, [])
 
-  const saveEditing = useCallback(async (force = false) => {
-    if (!path || isSaving) return
-    setIsSaving(true)
-    setSaveError(null)
-    try {
-      if (force) await onSave(path, draft, editEtag, true)
-      else await onSave(path, draft, editEtag)
-      setIsEditing(false)
-      setSaveConflict(false)
-    } catch (saveFailure) {
-      setSaveError(saveFailure instanceof Error ? saveFailure.message : t('fileExplorer.saveFailed'))
-      setSaveConflict(Boolean(
-        saveFailure && typeof saveFailure === 'object' && 'code' in saveFailure && saveFailure.code === 'STALE_REVISION',
-      ))
-    } finally {
-      setIsSaving(false)
-    }
-  }, [draft, editEtag, isSaving, onSave, path, t])
-  const originalText = content?.type === 'text'
-    ? (content.encoding === 'base64' ? decodeBase64Text(content.content) : content.content)
-    : ''
+  const saveEditing = useCallback(
+    async (force = false) => {
+      if (!path || isSaving) return
+      setIsSaving(true)
+      setSaveError(null)
+      try {
+        if (force) await onSave(path, draft, editEtag, true)
+        else await onSave(path, draft, editEtag)
+        setIsEditing(false)
+        setSaveConflict(false)
+      } catch (saveFailure) {
+        setSaveError(saveFailure instanceof Error ? saveFailure.message : t('fileExplorer.saveFailed'))
+        setSaveConflict(
+          Boolean(
+            saveFailure &&
+            typeof saveFailure === 'object' &&
+            'code' in saveFailure &&
+            saveFailure.code === 'STALE_REVISION',
+          ),
+        )
+      } finally {
+        setIsSaving(false)
+      }
+    },
+    [draft, editEtag, isSaving, onSave, path, t],
+  )
+  const originalText =
+    content?.type === 'text'
+      ? content.encoding === 'base64'
+        ? decodeBase64Text(content.content)
+        : content.content
+      : ''
   const isDirty = isEditing && draft !== originalText
   const confirmDiscard = useCallback(() => !isDirty || window.confirm(t('fileExplorer.discardUnsaved')), [isDirty, t])
 
@@ -1064,7 +1176,9 @@ function FilePreview({
 
   useEffect(() => {
     if (!isDirty) return
-    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault() }
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+    }
     window.addEventListener('beforeunload', beforeUnload)
     return () => window.removeEventListener('beforeunload', beforeUnload)
   }, [isDirty])
@@ -1081,12 +1195,33 @@ function FilePreview({
     return () => window.removeEventListener('keydown', saveShortcut)
   }, [isEditing, saveEditing])
 
-  // 下载当前文件
-  const handleDownload = useCallback(() => {
-    if (content) {
-      downloadFileContent(content, fileName)
+  // 下载当前文件：优先走服务端流式下载（不受 files.read 的 2MB/8MB 限制），
+  // 失败且已有预览内容时回退到内存下载。
+  const handleDownload = useCallback(async () => {
+    if (!path) return
+    setDownloadError(null)
+    if (!directory) {
+      // 没有工作区路径就无从拼下载 URL，只能用预览内容
+      if (content) downloadFileContent(content, fileName)
+      return
     }
-  }, [content, fileName])
+    setIsDownloading(true)
+    try {
+      await downloadWorkspaceFile({
+        workspacePath: directory,
+        path: toWorkspaceRelativePath(path, directory),
+        fileName,
+      })
+    } catch (err) {
+      if (content) {
+        downloadFileContent(content, fileName)
+        return
+      }
+      setDownloadError(err instanceof Error ? err.message : t('fileExplorer.downloadFailed'))
+    } finally {
+      setIsDownloading(false)
+    }
+  }, [content, directory, fileName, path, t])
 
   const previewTabItems = useMemo<PreviewTabsBarItem[]>(
     () =>
@@ -1242,16 +1377,16 @@ function FilePreview({
 
   const fullscreenHeaderRight = useMemo(
     () =>
-      content ? (
+      content || fileTooLarge ? (
         <button
-          onClick={handleDownload}
+          onClick={() => void handleDownload()}
           className="p-1.5 text-text-400 hover:text-text-100 hover:bg-bg-200/60 rounded-lg transition-colors"
-          title={`${t('common:save')} ${fileName}`}
+          title={`${t('common:download')} ${fileName}`}
         >
           <DownloadIcon size={14} />
         </button>
       ) : null,
-    [content, fileName, handleDownload, t],
+    [content, fileTooLarge, fileName, handleDownload, t],
   )
 
   const fullscreenLayer = useMemo(
@@ -1275,42 +1410,49 @@ function FilePreview({
         items={previewTabItems}
         activeId={path}
         closeAllTitle={t('common:closeAllTabs')}
-        onActivate={nextPath => { if (confirmDiscard()) onActivatePreview(nextPath) }}
-        onClose={closePath => { if (confirmDiscard()) onClosePreview(closePath) }}
-        onCloseAll={() => { if (confirmDiscard()) onClose() }}
+        onActivate={nextPath => {
+          if (confirmDiscard()) onActivatePreview(nextPath)
+        }}
+        onClose={closePath => {
+          if (confirmDiscard()) onClosePreview(closePath)
+        }}
+        onCloseAll={() => {
+          if (confirmDiscard()) onClose()
+        }}
         onReorder={onReorderPreview}
         tabWidthClassName="w-auto max-w-none min-w-max"
         rightActions={
-          content ? (
+          content || fileTooLarge ? (
             <>
-              {content.type === 'text' && (isEditing ? (
-                <>
+              {content?.type === 'text' &&
+                (isEditing ? (
+                  <>
+                    <button
+                      onClick={() => void saveEditing(false)}
+                      disabled={isSaving}
+                      className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors disabled:opacity-50"
+                      title={t('common:save')}
+                    >
+                      <CheckIcon size={12} />
+                    </button>
+                    <button
+                      onClick={cancelEditing}
+                      disabled={isSaving}
+                      className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors disabled:opacity-50"
+                      title={t('common:cancel')}
+                    >
+                      <CloseIcon size={12} />
+                    </button>
+                  </>
+                ) : (
                   <button
-                    onClick={() => void saveEditing(false)}
-                    disabled={isSaving}
-                    className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors disabled:opacity-50"
-                    title={t('common:save')}
+                    onClick={beginEditing}
+                    className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors"
+                    title={t('common:edit')}
                   >
-                    <CheckIcon size={12} />
+                    <PencilIcon size={12} />
                   </button>
-                  <button
-                    onClick={cancelEditing}
-                    disabled={isSaving}
-                    className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors disabled:opacity-50"
-                    title={t('common:cancel')}
-                  >
-                    <CloseIcon size={12} />
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={beginEditing}
-                  className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors"
-                  title={t('common:edit')}
-                >
-                  <PencilIcon size={12} />
-                </button>
-              ))}
+                ))}
               <button
                 onClick={openFullscreen}
                 className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors"
@@ -1319,9 +1461,10 @@ function FilePreview({
                 <MaximizeIcon size={12} />
               </button>
               <button
-                onClick={handleDownload}
-                className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors"
-                title={`${t('common:save')} ${fileName}`}
+                onClick={() => void handleDownload()}
+                disabled={isDownloading}
+                className="p-1 text-text-400 hover:text-text-100 hover:bg-bg-300/50 rounded transition-colors disabled:opacity-50"
+                title={`${t('common:download')} ${fileName}`}
               >
                 <DownloadIcon size={12} />
               </button>
@@ -1337,10 +1480,19 @@ function FilePreview({
             {t('common:loading')}
           </div>
         ) : error ? (
-          <div className="flex flex-col items-center justify-center h-full text-danger-100 text-[length:var(--fs-sm)] gap-1 px-4">
-            <AlertCircleIcon size={16} />
-            <span className="text-center">{error}</span>
-          </div>
+          fileTooLarge ? (
+            <FileTooLargePlaceholder
+              fileName={fileName}
+              isDownloading={isDownloading}
+              downloadError={downloadError}
+              onDownload={handleDownload}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-danger-100 text-[length:var(--fs-sm)] gap-1 px-4">
+              <AlertCircleIcon size={16} />
+              <span className="text-center">{error}</span>
+            </div>
+          )
         ) : isEditing ? (
           <div className="min-h-full flex flex-col">
             {saveError && (
@@ -1348,8 +1500,20 @@ function FilePreview({
                 <span>{saveError}</span>
                 {saveConflict ? (
                   <span className="flex gap-2 shrink-0">
-                    <button className="text-text-200 hover:text-text-100" onClick={() => { if (path) { setIsEditing(false); void onReload(path) } }}>{t('fileExplorer.reload')}</button>
-                    <button className="text-danger-100 hover:text-danger-200" onClick={() => void saveEditing(true)}>{t('fileExplorer.overwrite')}</button>
+                    <button
+                      className="text-text-200 hover:text-text-100"
+                      onClick={() => {
+                        if (path) {
+                          setIsEditing(false)
+                          void onReload(path)
+                        }
+                      }}
+                    >
+                      {t('fileExplorer.reload')}
+                    </button>
+                    <button className="text-danger-100 hover:text-danger-200" onClick={() => void saveEditing(true)}>
+                      {t('fileExplorer.overwrite')}
+                    </button>
                   </span>
                 ) : null}
               </div>
@@ -1423,240 +1587,6 @@ function FilePreview({
             {t('common:noContent')}
           </div>
         )}
-      </div>
-    </div>
-  )
-}
-
-// ============================================
-// Media Preview - 路由到具体渲染器
-// ============================================
-
-interface MediaPreviewProps {
-  category: PreviewCategory
-  dataUrl: string
-  mimeType: string
-  fileName: string
-}
-
-function MediaPreview({ category, dataUrl, mimeType, fileName }: MediaPreviewProps) {
-  switch (category) {
-    case 'image':
-      return <ImagePreview dataUrl={dataUrl} fileName={fileName} />
-    case 'audio':
-      return (
-        <div className="flex flex-col items-center justify-center h-full gap-3 p-4">
-          <div className="text-text-400 text-[length:var(--fs-sm)]">{formatMimeType(mimeType)}</div>
-          <audio controls src={dataUrl} className="w-full max-w-xs" />
-        </div>
-      )
-    case 'video':
-      return (
-        <div className="flex items-center justify-center h-full p-4">
-          <video controls src={dataUrl} className="max-w-full max-h-full rounded" />
-        </div>
-      )
-    case 'pdf':
-      return <iframe src={dataUrl} title={fileName} className="w-full h-full border-0" />
-  }
-}
-
-// ============================================
-// Image Preview - 缩放 + 拖拽平移
-// 直接滚轮缩放（以鼠标为锚点），左键拖拽平移
-// ============================================
-
-const MIN_ZOOM = 0.05
-const MAX_ZOOM = 20
-const ZOOM_FACTOR = 1.15 // 每次滚轮的缩放倍率
-
-interface ImagePreviewProps {
-  dataUrl: string
-  fileName: string
-}
-
-function ImagePreview({ dataUrl, fileName }: ImagePreviewProps) {
-  const { t } = useTranslation(['components', 'common'])
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [naturalSize, setNaturalSize] = useState({ w: 0, h: 0 })
-  const scaleRef = useRef(1) // 同步访问，避免 stale closure
-  const [scale, setScale] = useState(1)
-  const [fitScale, setFitScale] = useState(1)
-  const [translate, setTranslate] = useState({ x: 0, y: 0 })
-  const [initialized, setInitialized] = useState(false)
-  const dragRef = useRef({ active: false, startX: 0, startY: 0 })
-
-  // fit-to-container scale
-  const computeFitScale = useCallback(
-    (el: HTMLDivElement | null) => {
-      if (!el || !naturalSize.w || !naturalSize.h) return 1
-      const rect = el.getBoundingClientRect()
-      return Math.min(rect.width / naturalSize.w, rect.height / naturalSize.h, 1)
-    },
-    [naturalSize],
-  )
-
-  // 图片加载后初始化
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container || !naturalSize.w || !naturalSize.h) return
-
-    const updateFitScale = () => {
-      const nextFitScale = computeFitScale(container)
-      setFitScale(nextFitScale)
-
-      if (!initialized) {
-        scaleRef.current = nextFitScale
-        setScale(nextFitScale)
-        setTranslate({ x: 0, y: 0 })
-        setInitialized(true)
-      }
-    }
-
-    updateFitScale()
-
-    const resizeObserver = new ResizeObserver(updateFitScale)
-    resizeObserver.observe(container)
-
-    return () => {
-      resizeObserver.disconnect()
-    }
-  }, [naturalSize, initialized, computeFitScale])
-
-  // 滚轮缩放 — 以鼠标位置为锚点
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const handler = (e: WheelEvent) => {
-      e.preventDefault()
-      const rect = el.getBoundingClientRect()
-      // 鼠标相对容器中心
-      const cx = e.clientX - rect.left - rect.width / 2
-      const cy = e.clientY - rect.top - rect.height / 2
-      const factor = e.deltaY > 0 ? 1 / ZOOM_FACTOR : ZOOM_FACTOR
-      const oldScale = scaleRef.current
-      const newScale = Math.min(Math.max(oldScale * factor, MIN_ZOOM), MAX_ZOOM)
-      const ratio = newScale / oldScale
-      scaleRef.current = newScale
-      setScale(newScale)
-      setTranslate(t => ({
-        x: cx - ratio * (cx - t.x),
-        y: cy - ratio * (cy - t.y),
-      }))
-    }
-    el.addEventListener('wheel', handler, { passive: false })
-    return () => el.removeEventListener('wheel', handler)
-  }, [])
-
-  // 拖拽平移
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (!dragRef.current.active) return
-      const dx = e.clientX - dragRef.current.startX
-      const dy = e.clientY - dragRef.current.startY
-      dragRef.current.startX = e.clientX
-      dragRef.current.startY = e.clientY
-      setTranslate(t => ({ x: t.x + dx, y: t.y + dy }))
-    }
-    const onUp = () => {
-      if (dragRef.current.active) {
-        dragRef.current.active = false
-        document.body.style.cursor = ''
-        document.body.style.userSelect = ''
-      }
-    }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
-    return () => {
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-    }
-  }, [])
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    dragRef.current = { active: true, startX: e.clientX, startY: e.clientY }
-    document.body.style.cursor = 'grabbing'
-    document.body.style.userSelect = 'none'
-  }, [])
-
-  const zoomIn = useCallback(() => {
-    const s = Math.min(scaleRef.current * 1.25, MAX_ZOOM)
-    scaleRef.current = s
-    setScale(s)
-  }, [])
-
-  const zoomOut = useCallback(() => {
-    const s = Math.max(scaleRef.current / 1.25, MIN_ZOOM)
-    scaleRef.current = s
-    setScale(s)
-  }, [])
-
-  const zoomFit = useCallback(() => {
-    scaleRef.current = fitScale
-    setScale(fitScale)
-    setTranslate({ x: 0, y: 0 })
-  }, [fitScale])
-
-  const zoomActual = useCallback(() => {
-    scaleRef.current = 1
-    setScale(1)
-    setTranslate({ x: 0, y: 0 })
-  }, [])
-
-  const isFit = Math.abs(scale - fitScale) < 0.001 && translate.x === 0 && translate.y === 0
-  const isActual = Math.abs(scale - 1) < 0.001 && translate.x === 0 && translate.y === 0
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Zoom toolbar */}
-      <div className="shrink-0 flex items-center justify-center gap-1.5 px-2 py-1 border-b border-border-100/30 bg-bg-100/50 text-[length:var(--fs-xxs)]">
-        <button
-          onClick={zoomOut}
-          className="px-1.5 py-0.5 rounded hover:bg-bg-200 text-text-300 hover:text-text-100 transition-colors"
-        >
-          −
-        </button>
-        <span className="w-10 text-center text-text-400 tabular-nums">{Math.round(scale * 100)}%</span>
-        <button
-          onClick={zoomIn}
-          className="px-1.5 py-0.5 rounded hover:bg-bg-200 text-text-300 hover:text-text-100 transition-colors"
-        >
-          +
-        </button>
-        <span className="w-px h-3 bg-border-200 mx-1" />
-        <button
-          onClick={zoomFit}
-          className={`px-1.5 py-0.5 rounded transition-colors ${isFit ? 'bg-bg-200 text-text-100' : 'text-text-400 hover:bg-bg-200 hover:text-text-100'}`}
-        >
-          {t('fileExplorer.fit')}
-        </button>
-        <button
-          onClick={zoomActual}
-          className={`px-1.5 py-0.5 rounded transition-colors ${isActual ? 'bg-bg-200 text-text-100' : 'text-text-400 hover:bg-bg-200 hover:text-text-100'}`}
-        >
-          {t('fileExplorer.oneToOne')}
-        </button>
-      </div>
-      {/* Image area */}
-      <div
-        ref={containerRef}
-        className="flex-1 overflow-hidden relative cursor-grab active:cursor-grabbing"
-        onMouseDown={handleMouseDown}
-      >
-        <img
-          src={dataUrl}
-          alt={fileName}
-          draggable={false}
-          className="absolute left-1/2 top-1/2 select-none"
-          style={{
-            transform: `translate(-50%, -50%) translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
-            transformOrigin: 'center center',
-          }}
-          onLoad={e => {
-            setNaturalSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
-          }}
-        />
       </div>
     </div>
   )
@@ -1803,7 +1733,13 @@ interface MarkdownFilePreviewProps {
   targetRanges?: readonly TargetLineRange[]
 }
 
-function MarkdownFilePreview({ text, isResizing = false, targetLine, targetKey, targetRanges }: MarkdownFilePreviewProps) {
+function MarkdownFilePreview({
+  text,
+  isResizing = false,
+  targetLine,
+  targetKey,
+  targetRanges,
+}: MarkdownFilePreviewProps) {
   const { t } = useTranslation(['components', 'common'])
   const [mode, setMode] = useState<'preview' | 'code'>(targetLine ? 'code' : 'preview')
 
@@ -1881,6 +1817,52 @@ function BinaryPlaceholder({ mimeType, fileName, onDownload }: BinaryPlaceholder
           {t('common:download')}
         </button>
       )}
+    </div>
+  )
+}
+
+// ============================================
+// File Too Large - 超过 files.read 限制，无法预览但可直接下载
+// ============================================
+
+interface FileTooLargePlaceholderProps {
+  fileName: string
+  isDownloading: boolean
+  downloadError: string | null
+  onDownload: () => void | Promise<void>
+}
+
+function FileTooLargePlaceholder({ fileName, isDownloading, downloadError, onDownload }: FileTooLargePlaceholderProps) {
+  const { t } = useTranslation(['components', 'common'])
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)] gap-2 p-4">
+      <img
+        src={getMaterialIconUrl(fileName, 'file')}
+        alt=""
+        width={32}
+        height={32}
+        className="opacity-50"
+        onError={e => {
+          e.currentTarget.style.visibility = 'hidden'
+        }}
+      />
+      <span className="font-medium text-text-300">{fileName}</span>
+      <span>{t('fileExplorer.fileTooLarge')}</span>
+      <span className="text-text-500 text-[length:var(--fs-xxs)] text-center">
+        {t('fileExplorer.fileTooLargeHint')}
+      </span>
+      <button
+        onClick={() => void onDownload()}
+        disabled={isDownloading}
+        className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-bg-200 hover:bg-bg-300 text-text-200 rounded transition-colors text-[length:var(--fs-xs)] disabled:opacity-50"
+      >
+        <DownloadIcon size={12} />
+        {isDownloading ? t('common:loading') : t('fileExplorer.fileTooLargeDownload')}
+      </button>
+      {downloadError ? (
+        <span className="text-danger-100 text-[length:var(--fs-xxs)] text-center">{downloadError}</span>
+      ) : null}
     </div>
   )
 }

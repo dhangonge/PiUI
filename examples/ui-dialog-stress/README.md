@@ -16,15 +16,15 @@ pi -e ./examples/ui-dialog-stress
 
 ## 用法
 
-| 命令 | 场景 |
-| --- | --- |
-| `/ui-dialog-stress` | 全部 6 个场景顺序弹出（上一个处理完才弹下一个） |
-| `/ui-dialog-stress select` | 30+ 混合类型选项（超长中文 / 代码 / JSON / 无空格长串 / 终端输出 / 日志 / Markdown / emoji / 空白 / 多行） |
-| `/ui-dialog-stress huge` | 3 个巨型选项（每个 4KB+） |
-| `/ui-dialog-stress confirm` | 超长 title（2KB 工具输出）+ 超长 message 确认框 |
-| `/ui-dialog-stress input` | 超长 placeholder 输入框 |
-| `/ui-dialog-stress editor` | 220+ 行 prefill 编辑器 |
-| `/ui-dialog-stress queue` | 5 个混合类型弹窗同时排队（验证分页器） |
+| 命令                        | 场景                                                                                                       |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `/ui-dialog-stress`         | 全部 6 个场景顺序弹出（上一个处理完才弹下一个）                                                            |
+| `/ui-dialog-stress select`  | 30+ 混合类型选项（超长中文 / 代码 / JSON / 无空格长串 / 终端输出 / 日志 / Markdown / emoji / 空白 / 多行） |
+| `/ui-dialog-stress huge`    | 3 个巨型选项（每个 4KB+）                                                                                  |
+| `/ui-dialog-stress confirm` | 超长 title（2KB 工具输出）+ 超长 message 确认框                                                            |
+| `/ui-dialog-stress input`   | 超长 placeholder 输入框                                                                                    |
+| `/ui-dialog-stress editor`  | 220+ 行 prefill 编辑器                                                                                     |
+| `/ui-dialog-stress queue`   | 5 个混合类型弹窗同时排队（验证分页器）                                                                     |
 
 ## 验证要点
 

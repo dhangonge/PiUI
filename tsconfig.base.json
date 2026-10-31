@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "//": "PiUI 各包的共享编译基线。只放所有包都同意的选项；module / moduleResolution / lib / jsx / types 由各包自己决定（app 用 bundler，Node 包用 NodeNext）。",
+  "compilerOptions": {
+    "target": "ES2022",
+    "strict": true,
+    "skipLibCheck": true,
+    "moduleDetection": "force",
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  }
+}

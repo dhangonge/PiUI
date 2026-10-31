@@ -2,32 +2,29 @@ import { lazy, memo, Suspense, useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PanelContainer } from './PanelContainer'
 import { layoutStore, useLayoutStore, type PanelTab } from '../store/layoutStore'
-import { notificationStore } from '../store/notificationStore'
 import { useFocusedSessionId } from '../pi/hooks/index.js'
 import { ResizablePanel } from './ui/ResizablePanel'
 import { useChatViewport } from '../features/chat/chatViewport'
-import { createHostTerminal, listHostTerminals, removeHostTerminal, updateHostTerminal } from '../pi/transport/index.js'
 import { useTerminalSessionRestore } from '../hooks/useTerminalSessionRestore'
-import { resolveWorkspacePath } from '../pi/workspaces'
-import { serverStorage, uiErrorHandler } from '../utils'
+import { useTerminalActions } from '../hooks/useTerminalActions'
 import { TerminalIcon } from './Icons'
 
 const SessionChangesPanel = lazy(() =>
   import('./SessionChangesPanel').then(module => ({
-    default: module.SessionChangesPanel
-  }))
+    default: module.SessionChangesPanel,
+  })),
 )
 const FileExplorer = lazy(() => import('./FileExplorer').then(module => ({ default: module.FileExplorer })))
 const SkillPanel = lazy(() => import('./SkillPanel').then(module => ({ default: module.SkillPanel })))
 const ExtensionsPanel = lazy(() =>
   import('./ExtensionsPanel').then(module => ({
-    default: module.ExtensionsPanel
-  }))
+    default: module.ExtensionsPanel,
+  })),
 )
 const SessionTreePanel = lazy(() =>
   import('./SessionTreePanel').then(module => ({
-    default: module.SessionTreePanel
-  }))
+    default: module.SessionTreePanel,
+  })),
 )
 const Terminal = lazy(() => import('./Terminal').then(module => ({ default: module.Terminal })))
 
@@ -40,7 +37,9 @@ interface BottomPanelProps {
 function PanelFallback() {
   const { t } = useTranslation(['components', 'common'])
   return (
-    <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">{t('bottomPanel.loadingPanel')}</div>
+    <div className="flex items-center justify-center h-full text-text-400 text-[length:var(--fs-sm)]">
+      {t('bottomPanel.loadingPanel')}
+    </div>
   )
 }
 
@@ -49,7 +48,13 @@ export const BottomPanel = memo(function BottomPanel({ directory, onNavigateSess
   const { bottomPanelOpen, bottomPanelHeight } = useLayoutStore()
   const sessionId = useFocusedSessionId()
   const { interaction, layout } = useChatViewport()
-  const { isRestoring, normalizedDirectory, workspacePath } = useTerminalSessionRestore(directory)
+  const { isRestoring, normalizedDirectory, workspacePath, serverId, connectionKey } =
+    useTerminalSessionRestore(directory)
+  const { handleNewTerminal, handleCloseTerminal, handleRenameTerminal } = useTerminalActions(
+    normalizedDirectory,
+    serverId,
+    'bottom',
+  )
 
   // 追踪面板 resize 状态
   const [isPanelResizing, setIsPanelResizing] = useState(false)
@@ -64,69 +69,11 @@ export const BottomPanel = memo(function BottomPanel({ directory, onNavigateSess
     }
   }, [])
 
-  const handleNewTerminal = useCallback(async () => {
-    try {
-      const workspacePath = await resolveWorkspacePath(normalizedDirectory)
-      if (!workspacePath) throw new Error('no workspace available')
-      const shell = serverStorage.get('piui-terminal-shell') || undefined
-      const terminal = await createHostTerminal(workspacePath, { shell })
-      layoutStore.addTerminalTab({
-        id: terminal.id,
-        title: terminal.title,
-        shell: terminal.shell,
-        cwd: terminal.cwd,
-        status: 'connecting'
-      })
-    } catch (error) {
-      uiErrorHandler('create terminal', error)
-      notificationStore.push(
-        'error',
-        t('terminal.createTerminalFailed'),
-        error instanceof Error ? error.message : String(error),
-        ''
-      )
-    }
-  }, [normalizedDirectory, t])
-
   useEffect(() => {
     const handler = () => void handleNewTerminal()
     window.addEventListener('piui:new-terminal', handler)
     return () => window.removeEventListener('piui:new-terminal', handler)
   }, [handleNewTerminal])
-
-  const handleCloseTerminal = useCallback(
-    async (terminalId: string) => {
-      if (!normalizedDirectory) return
-      try {
-        const workspacePath = await resolveWorkspacePath(normalizedDirectory)
-        if (!workspacePath) return
-        await removeHostTerminal(workspacePath, terminalId)
-      } catch (error) {
-        uiErrorHandler('close terminal', error)
-        // 服务端可能仍持有该终端，重新拉取列表把 tab 恢复回来
-        try {
-          const workspacePath = await resolveWorkspacePath(normalizedDirectory)
-          if (!workspacePath) return
-          const result = await listHostTerminals(workspacePath)
-          layoutStore.syncTerminalSessions(workspacePath, result.terminals)
-        } catch {
-          // 列表也失败时保持现状，tab 由下次恢复流程修正
-        }
-      }
-    },
-    [normalizedDirectory]
-  )
-
-  const handleRenameTerminal = useCallback(
-    async (terminalId: string, title: string) => {
-      if (!normalizedDirectory) return
-      const workspacePath = await resolveWorkspacePath(normalizedDirectory)
-      if (!workspacePath) return
-      const terminal = await updateHostTerminal(workspacePath, terminalId, { title })
-      layoutStore.updateTerminalCustomTitle(terminalId, terminal.title)
-    },
-    [normalizedDirectory]
-  )
 
   // 渲染内容
   const renderContent = useCallback(
@@ -160,14 +107,26 @@ export const BottomPanel = memo(function BottomPanel({ directory, onNavigateSess
           {/* Keep files mounted so expanded folders and previews survive tab switches. */}
           <div className={activeTab.type === 'files' ? 'h-full' : 'hidden'}>
             <Suspense fallback={<PanelFallback />}>
-              <FilesContent activeTab={activeTab} directory={directory ?? ''} isPanelResizing={isPanelResizing} sessionId={sessionId} />
+              <FilesContent
+                key={connectionKey}
+                activeTab={activeTab}
+                directory={directory ?? ''}
+                isPanelResizing={isPanelResizing}
+                sessionId={sessionId}
+              />
             </Suspense>
           </div>
 
           {sessionId ? (
             <div className={activeTab.type === 'changes' ? 'h-full' : 'hidden'}>
               <Suspense fallback={<PanelFallback />}>
-                <ChangesContent activeTab={activeTab} directory={directory} sessionId={sessionId} isPanelResizing={isPanelResizing} />
+                <ChangesContent
+                  key={connectionKey}
+                  activeTab={activeTab}
+                  directory={directory}
+                  sessionId={sessionId}
+                  isPanelResizing={isPanelResizing}
+                />
               </Suspense>
             </div>
           ) : activeTab.type === 'changes' ? (
@@ -213,7 +172,18 @@ export const BottomPanel = memo(function BottomPanel({ directory, onNavigateSess
         </>
       )
     },
-    [directory, workspacePath, sessionId, isPanelResizing, isRestoring, t, handleNewTerminal, onNavigateSession, onNewChat]
+    [
+      directory,
+      workspacePath,
+      connectionKey,
+      sessionId,
+      isPanelResizing,
+      isRestoring,
+      t,
+      handleNewTerminal,
+      onNavigateSession,
+      onNewChat,
+    ],
   )
 
   return (
@@ -251,7 +221,12 @@ const TerminalContent = memo(function TerminalContent({ activeTab, workspacePath
   return (
     <>
       {tabs.map(tab => (
-        <Terminal key={tab.id} terminalId={tab.terminalId ?? tab.id} workspacePath={workspacePath} isActive={tab.id === activeTab.id} />
+        <Terminal
+          key={tab.id}
+          terminalId={tab.terminalId ?? tab.id}
+          workspacePath={tab.workspacePath ?? workspacePath}
+          isActive={tab.id === activeTab.id}
+        />
       ))}
     </>
   )
@@ -264,7 +239,12 @@ interface FilesContentProps {
   sessionId?: string | null
 }
 
-const FilesContent = memo(function FilesContent({ activeTab, directory, isPanelResizing = false, sessionId }: FilesContentProps) {
+const FilesContent = memo(function FilesContent({
+  activeTab,
+  directory,
+  isPanelResizing = false,
+  sessionId,
+}: FilesContentProps) {
   const { panelTabs } = useLayoutStore()
   const fileTabs = panelTabs.filter(t => t.position === 'bottom' && t.type === 'files')
 
@@ -294,7 +274,12 @@ interface ChangesContentProps {
   isPanelResizing?: boolean
 }
 
-const ChangesContent = memo(function ChangesContent({ activeTab, directory, sessionId, isPanelResizing = false }: ChangesContentProps) {
+const ChangesContent = memo(function ChangesContent({
+  activeTab,
+  directory,
+  sessionId,
+  isPanelResizing = false,
+}: ChangesContentProps) {
   const { panelTabs } = useLayoutStore()
   const changeTabs = panelTabs.filter(t => t.position === 'bottom' && t.type === 'changes')
 
@@ -302,7 +287,12 @@ const ChangesContent = memo(function ChangesContent({ activeTab, directory, sess
     <>
       {changeTabs.map(tab => (
         <div key={tab.id} className={tab.id === activeTab.id ? 'h-full' : 'hidden'}>
-          <SessionChangesPanel sessionId={sessionId} directory={directory} position="bottom" isResizing={isPanelResizing} />
+          <SessionChangesPanel
+            sessionId={sessionId}
+            directory={directory}
+            position="bottom"
+            isResizing={isPanelResizing}
+          />
         </div>
       ))}
     </>

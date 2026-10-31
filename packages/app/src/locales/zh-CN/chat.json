@@ -3,7 +3,9 @@
     "newChat": "新对话",
     "openSidebar": "打开侧边栏",
     "clickToRename": "点击重命名",
-    "shareSession": "分享会话",
+    "moreActions": "会话操作",
+    "renameSession": "重命名会话",
+    "copySessionId": "复制会话 ID",
     "closeBottomPanel": "关闭底部面板",
     "openBottomPanel": "打开底部面板",
     "closePanel": "关闭面板",
@@ -133,6 +135,9 @@
     "deleteChatConfirm": "确定要删除此对话？此操作无法撤销。",
     "noChatsInFolder": "此文件夹中没有对话",
     "showMoreChats": "展开更多会话",
+    "subagentsExpand": "展开子代理",
+    "subagentsCollapse": "收起子代理",
+    "subagentsCount": "{{count}} 个子代理",
     "selectedSessions": "已选 {{count}}",
     "selectedProjects": "已选 {{count}} 个项目",
     "selectedMixed": "{{sessions}} 会话 · {{projects}} 项目",
@@ -145,7 +150,10 @@
     "batchDeleteSessionsConfirm": "确定要删除 {{count}} 个会话？此操作无法撤销。",
     "batchDeleteIncludesCurrent": "包含当前打开的会话，删除后将切换到新会话。",
     "batchRemoveProjects": "移除 {{count}} 个项目",
-    "batchRemoveProjectsConfirm": "确定从列表中移除 {{count}} 个项目？这只会从侧边栏中移除，不会删除任何会话，也不会删除磁盘上的文件。"
+    "batchRemoveProjectsConfirm": "确定从列表中移除 {{count}} 个项目？这只会从侧边栏中移除，不会删除任何会话，也不会删除磁盘上的文件。",
+    "loadFailed": "加载失败，点击重试",
+    "moveFolderUp": "上移文件夹",
+    "moveFolderDown": "下移文件夹"
   },
   "activeSession": {
     "awaitingPermission": "等待权限",

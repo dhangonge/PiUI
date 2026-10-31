@@ -1,8 +1,17 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ExtensionUiDialogRequest, ExtensionUiDialogResponse } from '@piui/protocol'
-import { QuestionIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon } from '../../components/Icons'
-import { CodePreview } from '../../components/CodePreview'
+import {
+  QuestionIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  MaximizeIcon,
+  MinimizeIcon,
+} from '../../components/Icons'
+import { Dialog } from '../../components/ui/Dialog'
 import { extensionUiStore } from '../../pi/extensionUiStore'
 import { respondPiExtensionUi } from '../../pi/controllers/index.js'
 
@@ -11,13 +20,8 @@ import { respondPiExtensionUi } from '../../pi/controllers/index.js'
  * (select/confirm/input/editor). Shared by the floating host above the
  * composer and the inline list in the right-sidebar extension panel.
  *
- * 设计原则（对齐 TUI / OpenCodeUI 对复杂内容的消费方式——默认只给决策
- * 所需的最小信息，长内容按需展开）：
- * - 头部永远一行摘要：标题最多 1 行，超出省略号（hover 看完整文本）
- * - 超长标题（如权限确认把工具输出塞进 title）的完整内容直接内嵌为
- *   CodePreview（固定高度内部滚动），底色与行号/卡片一致，无折叠交互
- * - 选项为紧凑单选行；操作区为一行轻量按钮
- * - 支持 Enter 提交（textarea 内除外）/ Esc 取消
+ * Title and options appear once in the scrollable body. Fullscreen changes
+ * presentation only: answers and response IDs remain owned by this request.
  */
 export function ExtensionUiDialogCard({
   request,
@@ -39,13 +43,11 @@ export function ExtensionUiDialogCard({
 }) {
   const { t } = useTranslation(['common', 'components'])
   const [value, setValue] = useState(() =>
-    request.kind === 'select'
-      ? request.options[0] ?? ''
-      : request.kind === 'editor'
-        ? request.prefill ?? ''
-        : '',
+    request.kind === 'select' ? (request.options[0] ?? '') : request.kind === 'editor' ? (request.prefill ?? '') : '',
   )
   const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false)
+  const [fullscreen, setFullscreen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [responseId] = useState(() => globalThis.crypto?.randomUUID?.() ?? `${request.requestId}-${Date.now()}`)
 
@@ -56,21 +58,7 @@ export function ExtensionUiDialogCard({
     if (!el) return
     el.style.height = '0px'
     el.style.height = `${Math.min(Math.max(el.scrollHeight, 64), compact ? 140 : 180)}px`
-  }, [value, compact])
-
-  // 标题是否被 line-clamp 截断：超长标题在头部只显示摘要行，完整内容
-  // 直接内嵌 CodePreview（固定高度内部滚动，对齐 TUI 的消费方式）
-  const titleRef = useRef<HTMLHeadingElement | null>(null)
-  const [titleOverflow, setTitleOverflow] = useState(false)
-  useEffect(() => {
-    const el = titleRef.current
-    if (!el) return
-    const check = () => setTitleOverflow(el.scrollHeight > el.clientHeight + 1)
-    check()
-    const ro = new ResizeObserver(check)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
+  }, [value, compact, fullscreen])
 
   useEffect(() => {
     if (!request.expiresAt) return
@@ -87,6 +75,8 @@ export function ExtensionUiDialogCard({
   }, [request])
 
   const send = async (response: ExtensionUiDialogResponse) => {
+    if (submittingRef.current) return
+    submittingRef.current = true
     setSubmitting(true)
     setError(null)
     try {
@@ -97,6 +87,7 @@ export function ExtensionUiDialogCard({
       extensionUiStore.requestSettled(request.sessionId, request.requestId)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
+      submittingRef.current = false
       setSubmitting(false)
     }
   }
@@ -105,8 +96,7 @@ export function ExtensionUiDialogCard({
     if (request.kind === 'confirm') return send({ confirmed: true })
     return send({ value })
   }
-  const cancel = () =>
-    request.kind === 'confirm' ? send({ confirmed: false }) : send({ cancelled: true })
+  const cancel = () => (request.kind === 'confirm' ? send({ confirmed: false }) : send({ cancelled: true }))
 
   // Enter 提交（Shift+Enter 换行）；editor 里 Enter 换行、Ctrl/Cmd+Enter 提交；Esc 取消。
   // 中文输入法组合中（选词）的 Enter 不触发提交。
@@ -116,6 +106,7 @@ export function ExtensionUiDialogCard({
     const target = event.target as HTMLElement
     const isTextarea = target.tagName === 'TEXTAREA'
     if (event.key === 'Enter') {
+      if (target.closest('button')) return
       // editor：Enter 换行，仅 Ctrl/Cmd+Enter 提交
       if (isTextarea && request.kind === 'editor' && !(event.metaKey || event.ctrlKey)) return
       // input（多行）：Shift+Enter 换行，Enter 提交
@@ -123,8 +114,11 @@ export function ExtensionUiDialogCard({
       if (submitting || (request.kind !== 'confirm' && !value)) return
       event.preventDefault()
       void submit()
-    } else if (event.key === 'Escape' && !submitting) {
-      void cancel()
+    } else if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      if (fullscreen) setFullscreen(false)
+      else if (!submitting) void cancel()
     }
   }
 
@@ -132,23 +126,23 @@ export function ExtensionUiDialogCard({
   const gap = compact ? 'gap-2' : 'gap-2.5'
   const canSubmit = request.kind === 'confirm' || !!value
 
-  return (
+  const card = (
     <div
       onKeyDown={handleKeyDown}
       className={`overflow-hidden rounded-xl border border-border-200/60 bg-bg-100 shadow-float flex flex-col ${
-        compact ? 'max-h-[min(440px,55vh)]' : 'max-h-[min(540px,62vh)]'
+        fullscreen
+          ? 'h-full min-h-0 !rounded-none !border-0 shadow-none'
+          : compact
+            ? 'max-h-[min(440px,55vh)]'
+            : 'max-h-[min(540px,62vh)]'
       }`}
     >
       {/* Header —— 一行摘要，永远紧凑 */}
       <div className="flex items-center justify-between gap-2 px-4 py-2.5 shrink-0">
         <div className="flex min-w-0 items-center gap-2">
           <QuestionIcon size={16} className="shrink-0 text-text-400" />
-          <h3
-            ref={titleRef}
-            title={request.title}
-            className="min-w-0 line-clamp-1 whitespace-pre-wrap break-words text-[length:var(--fs-sm)] font-medium text-text-100"
-          >
-            {request.title}
+          <h3 className="text-[length:var(--fs-sm)] font-medium text-text-100">
+            {t('components:dialog.extensionRequest')}
           </h3>
           {!onQueueNav && queueLength > 1 && (
             <span className="shrink-0 rounded-md bg-bg-200 px-1.5 py-0.5 text-[length:var(--fs-xs)] text-text-400">
@@ -156,6 +150,15 @@ export function ExtensionUiDialogCard({
             </span>
           )}
         </div>
+        <button
+          type="button"
+          onClick={() => setFullscreen(value => !value)}
+          title={t(fullscreen ? 'components:contentBlock.exitFullscreen' : 'components:contentBlock.fullscreen')}
+          aria-label={t(fullscreen ? 'components:contentBlock.exitFullscreen' : 'components:contentBlock.fullscreen')}
+          className="ml-auto shrink-0 rounded-md p-2 text-text-400 hover:bg-bg-200 hover:text-text-200"
+        >
+          {fullscreen ? <MinimizeIcon size={16} /> : <MaximizeIcon size={16} />}
+        </button>
         {onCollapse && (
           <button
             type="button"
@@ -169,18 +172,12 @@ export function ExtensionUiDialogCard({
       </div>
 
       {/* Body —— 内容区：卡片总高受限时收缩并内部滚动；无内部分隔线 */}
-      <div className={`${pad} flex flex-col ${gap} min-h-0 overflow-y-auto custom-scrollbar`}>
-        {/* 超长标题：完整内容直接内嵌 CodePreview（固定高度内部滚动，
-            底色与行号/卡片一致，无折叠交互） */}
-        {titleOverflow && (
-          <div className="overflow-hidden rounded-md border border-border-200/40 bg-bg-100">
-            <CodePreview
-              code={request.title}
-              language="text"
-              maxHeight={compact ? 100 : 140}
-            />
-          </div>
-        )}
+      <div
+        className={`${pad} flex flex-col ${gap} min-h-0 overflow-y-auto custom-scrollbar ${fullscreen ? 'flex-1' : ''}`}
+      >
+        <p className="whitespace-pre-wrap break-words text-[length:var(--fs-sm)] font-medium leading-relaxed text-text-100">
+          {request.title}
+        </p>
 
         {request.kind === 'confirm' && request.message && (
           <p className="whitespace-pre-wrap break-words text-[length:var(--fs-sm)] leading-relaxed text-text-200">
@@ -196,7 +193,7 @@ export function ExtensionUiDialogCard({
                 option={option}
                 selected={value === option}
                 disabled={submitting}
-                compact={compact}
+                fullscreen={fullscreen}
                 onSelect={() => setValue(option)}
               />
             ))}
@@ -227,7 +224,11 @@ export function ExtensionUiDialogCard({
           />
         )}
 
-        {error && <p role="alert" className="text-[length:var(--fs-sm)] text-danger-100">{error}</p>}
+        {error && (
+          <p role="alert" className="text-[length:var(--fs-sm)] text-danger-100">
+            {error}
+          </p>
+        )}
       </div>
 
       {/* Actions —— 取消/提交在右；队列分页器在左；无内部分隔线 */}
@@ -276,24 +277,29 @@ export function ExtensionUiDialogCard({
       </div>
     </div>
   )
+  return fullscreen ? (
+    <Dialog isOpen onClose={() => setFullscreen(false)} ariaLabel={request.title} fullscreen rawContent>
+      {card}
+    </Dialog>
+  ) : (
+    card
+  )
 }
 
 /**
- * 单选选项行：按钮永远单行（摘要单行截断），内容溢出时提供展开按钮，
- * 展开后内联展示完整文本（CodePreview / CodeMirror，限高内部滚动）。
- * 展开/收起只影响详情，不改变选中状态。
+ * Expand the option text in place; selection still sends the original string.
  */
 function SelectOption({
   option,
   selected,
   disabled,
-  compact,
+  fullscreen,
   onSelect,
 }: {
   option: string
   selected: boolean
   disabled: boolean
-  compact: boolean
+  fullscreen: boolean
   onSelect: () => void
 }) {
   const { t } = useTranslation('components')
@@ -301,16 +307,16 @@ function SelectOption({
   const [overflow, setOverflow] = useState(false)
   const [expanded, setExpanded] = useState(false)
 
-  // 溢出检测：单行（truncate）下长内容水平溢出，需要展开入口
+  // Keep the collapse control when the expanded text no longer overflows.
   useEffect(() => {
     const el = textRef.current
-    if (!el) return
-    const check = () => setOverflow(el.scrollWidth > el.clientWidth + 1)
+    if (!el || expanded || fullscreen) return
+    const check = () => setOverflow(el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)
     check()
     const ro = new ResizeObserver(check)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [option])
+  }, [option, expanded, fullscreen])
 
   return (
     <div
@@ -325,6 +331,7 @@ function SelectOption({
           type="button"
           disabled={disabled}
           onClick={onSelect}
+          aria-pressed={selected}
           className="flex min-w-0 flex-1 items-start gap-2 text-left"
         >
           <span
@@ -337,14 +344,14 @@ function SelectOption({
           <span
             ref={textRef}
             title={option}
-            className={`min-w-0 flex-1 truncate text-[length:var(--fs-sm)] ${
+            className={`min-w-0 flex-1 whitespace-pre-wrap break-words text-[length:var(--fs-sm)] ${expanded || fullscreen ? '' : 'line-clamp-2'} ${
               selected ? 'text-text-100' : 'text-text-300 hover:text-text-100'
             }`}
           >
             {option}
           </span>
         </button>
-        {overflow && (
+        {overflow && !fullscreen && (
           <button
             type="button"
             disabled={disabled}
@@ -357,11 +364,6 @@ function SelectOption({
           </button>
         )}
       </div>
-      {expanded && (
-        <div className="mx-3 mb-2 overflow-hidden rounded-md border border-border-200/40 bg-bg-100">
-          <CodePreview code={option} language="text" maxHeight={compact ? 100 : 180} />
-        </div>
-      )}
     </div>
   )
 }

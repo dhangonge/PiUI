@@ -4,7 +4,11 @@ import { piFetch } from '../../pi/httpClient'
 // hook 与组件同文件导出：保持文件内私有实现内聚，fast refresh 会降级为整页刷新，可接受。
 /* eslint-disable react-refresh/only-export-components */
 
-export function useAuthenticatedObjectUrl(url: string | undefined, requiresAuth = false, enabled = true): string | undefined {
+export function useAuthenticatedObjectUrl(
+  url: string | undefined,
+  requiresAuth = false,
+  enabled = true,
+): string | undefined {
   const [objectUrl, setObjectUrl] = useState<string>()
 
   // 认证图片加载：订阅外部 HTTP 请求，url 无效时需同步清空已缓存的 objectUrl

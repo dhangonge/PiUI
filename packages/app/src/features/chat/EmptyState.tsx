@@ -63,9 +63,7 @@ export function EmptyState({ currentProject, projects, onStartChat }: EmptyState
   }
 
   // 其他可选目录（排除当前的）
-  const otherDirectories = projects
-    .filter(p => p.id !== 'global' && p.path !== currentDirectory)
-    .map(p => p.path)
+  const otherDirectories = projects.filter(p => p.id !== 'global' && p.path !== currentDirectory).map(p => p.path)
 
   return (
     <div className="flex-1 flex items-center justify-center p-8">

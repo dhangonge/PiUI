@@ -23,7 +23,7 @@ export type WorkspaceCreateResponse = {
 export type FileNodeDto = {
   name: string
   path: string
-  type: "file" | "directory" | "symlink" | "other"
+  type: 'file' | 'directory' | 'symlink' | 'other'
   size?: number
   mtimeMs?: number
   restricted?: boolean
@@ -40,8 +40,8 @@ export type FileListResponse = {
 export type FileReadResponse = {
   path: string
   content: string
-  encoding: "utf-8" | "base64"
-  type: "text" | "binary"
+  encoding: 'utf-8' | 'base64'
+  type: 'text' | 'binary'
   mimeType: string
   size: number
   etag: string
@@ -49,15 +49,15 @@ export type FileReadResponse = {
 
 export type FileWriteRequest = {
   content: string
-  encoding?: "utf-8" | "base64"
+  encoding?: 'utf-8' | 'base64'
   ifMatch?: string
 }
 
 export type FileCreateRequest = {
   path: string
-  type: "file" | "directory"
+  type: 'file' | 'directory'
   content?: string
-  encoding?: "utf-8" | "base64"
+  encoding?: 'utf-8' | 'base64'
   overwrite?: boolean
 }
 
@@ -69,7 +69,7 @@ export type FileMoveRequest = {
 
 export type FileOperationResponse = {
   path: string
-  type: "file" | "directory"
+  type: 'file' | 'directory'
 }
 
 export type FileSearchStats = {
@@ -78,7 +78,7 @@ export type FileSearchStats = {
   scannedBytes: number
   durationMs: number
   truncated: boolean
-  limitReason?: "results" | "entries" | "bytes" | "cancelled"
+  limitReason?: 'results' | 'entries' | 'bytes' | 'cancelled'
 }
 
 export type FileNameSearchResponse = {

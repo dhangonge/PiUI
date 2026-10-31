@@ -1,23 +1,29 @@
-import assert from "node:assert/strict"
-import test from "node:test"
-import { randomUUID } from "node:crypto"
-import { rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { EventHub } from "../event-hub.ts"
-import { getDriverMode } from "@piui/pi-worker"
-import type { WorkerSession } from "./worker-client.ts"
-import type { RuntimeSupervisor } from "./supervisor.ts"
-import { SessionHost } from "./session-host.ts"
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { randomUUID } from 'node:crypto'
+import { rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { EventHub } from '../event-hub.ts'
+import { getDriverMode } from '@piui/pi-worker'
+import type { WorkerSession } from './worker-client.ts'
+import type { RuntimeSupervisor } from './supervisor.ts'
+import {
+  DEFAULT_IDLE_RUNTIME_MAX,
+  DEFAULT_IDLE_RUNTIME_TTL_MS,
+  idleRuntimeMax,
+  idleRuntimeTtlMs,
+  SessionHost,
+} from './session-host.ts'
 
-test("SessionHost notifies the session list when the session file materializes on disk", async () => {
+test('SessionHost notifies the session list when the session file materializes on disk', async () => {
   const sessionFile = join(tmpdir(), `piui-session-host-${randomUUID()}.jsonl`)
   let emitEvent!: (event: { channel: string; head?: unknown }) => void
   const worker = {
     command: async () => ({}),
-    getSessionId: () => "session-1",
+    getSessionId: () => 'session-1',
     getSessionFile: () => sessionFile,
-    getCwd: () => ".",
+    getCwd: () => '.',
     updateSessionIdentity: () => {},
     onEvent: (listener: (event: { channel: string; head?: unknown }) => void) => {
       emitEvent = listener
@@ -36,31 +42,31 @@ test("SessionHost notifies the session list when the session file materializes o
 
   const updated: unknown[] = []
   const off = hub.subscribe(event => {
-    if (event.channel === "sessions.updated") updated.push(event.payload)
+    if (event.channel === 'sessions.updated') updated.push(event.payload)
   })
 
-  await host.openSession(".", sessionFile)
+  await host.openSession('.', sessionFile)
   // attach 会发一条 attached；清掉，只观察 head 推进的通知
   updated.length = 0
   // head 但文件未落盘（setSessionName 等只改内存）：不是 materialized，
   // 列表磁盘扫描看不到它——不能广播，否则前端重拉后列表永远不出现。
-  emitEvent({ channel: "session.head", head: { revision: 1, entryCount: 1 } })
+  emitEvent({ channel: 'session.head', head: { revision: 1, entryCount: 1 } })
   assert.equal(updated.length, 0)
 
   // 文件首次落盘 + head：materialized 必发（列表可扫到）
   writeFileSync(sessionFile, '{"type":"session","version":1}\n')
-  emitEvent({ channel: "session.head", head: { revision: 2, entryCount: 2 } })
+  emitEvent({ channel: 'session.head', head: { revision: 2, entryCount: 2 } })
   assert.equal(updated.length, 1)
   assert.deepEqual(updated[0], {
-    sessionId: "session-1",
+    sessionId: 'session-1',
     materialized: true,
   })
 
   // 原生语义：后续 head 推进（新消息）不再广播列表事件——列表 = 磁盘扫描，
   // 文件已存在，重扫结果不会变；排序/消息数由下一次生命周期事件或显式
   // 刷新时更新。
-  emitEvent({ channel: "session.head", head: { revision: 3 } })
-  emitEvent({ channel: "session.head", head: { revision: 4, entryCount: 4 } })
+  emitEvent({ channel: 'session.head', head: { revision: 3 } })
+  emitEvent({ channel: 'session.head', head: { revision: 4, entryCount: 4 } })
   assert.equal(updated.length, 1)
 
   off()
@@ -68,17 +74,20 @@ test("SessionHost notifies the session list when the session file materializes o
   rmSync(sessionFile, { force: true })
 })
 
-test("SessionHost rejects reopening a runtime while it is closing", async () => {
+test('SessionHost rejects reopening a runtime while it is closing', async () => {
   let releaseAbort!: () => void
   let opens = 0
   const worker = {
     command: async (type: string) => {
-      if (type === "abort") return new Promise<void>(resolve => { releaseAbort = resolve })
+      if (type === 'abort')
+        return new Promise<void>(resolve => {
+          releaseAbort = resolve
+        })
       return {}
     },
-    getSessionId: () => "session-1",
-    getSessionFile: () => "session-1.jsonl",
-    getCwd: () => ".",
+    getSessionId: () => 'session-1',
+    getSessionFile: () => 'session-1.jsonl',
+    getCwd: () => '.',
     updateSessionIdentity: () => {},
     onEvent: () => () => {},
     onCrash: () => () => {},
@@ -94,23 +103,23 @@ test("SessionHost rejects reopening a runtime while it is closing", async () => 
   } as unknown as RuntimeSupervisor
   const host = new SessionHost(supervisor, new EventHub())
 
-  await host.openSession(".", "session-1.jsonl")
-  const closing = host.closeSession("session-1")
-  await assert.rejects(host.openSession(".", "session-1.jsonl"), { code: "RUNTIME_CLOSING" })
+  await host.openSession('.', 'session-1.jsonl')
+  const closing = host.closeSession('session-1')
+  await assert.rejects(host.openSession('.', 'session-1.jsonl'), { code: 'RUNTIME_CLOSING' })
 
   releaseAbort()
   await closing
-  await host.openSession(".", "session-1.jsonl")
+  await host.openSession('.', 'session-1.jsonl')
   assert.equal(opens, 2)
 })
 
-test("SessionHost retries a busy self-heal attach", async () => {
+test('SessionHost retries a busy self-heal attach', async () => {
   let opens = 0
   const worker = {
-    command: async (type: string) => type === "tree.get" ? [{ id: "root" }] : {},
-    getSessionId: () => "session-1",
-    getSessionFile: () => "session-1.jsonl",
-    getCwd: () => ".",
+    command: async (type: string) => (type === 'tree.get' ? [{ id: 'root' }] : {}),
+    getSessionId: () => 'session-1',
+    getSessionFile: () => 'session-1.jsonl',
+    getCwd: () => '.',
     updateSessionIdentity: () => {},
     onEvent: () => () => {},
     onCrash: () => () => {},
@@ -119,40 +128,40 @@ test("SessionHost retries a busy self-heal attach", async () => {
   } as unknown as WorkerSession
   const supervisor = {
     onEvent: () => () => {},
-    catalogCommand: async () => [{ id: "session-1", path: "session-1.jsonl", cwd: "." }],
+    catalogCommand: async () => [{ id: 'session-1', path: 'session-1.jsonl', cwd: '.' }],
     open: async () => {
       opens += 1
-      if (opens === 1) throw Object.assign(new Error("lock is busy"), { code: "SESSION_BUSY" })
+      if (opens === 1) throw Object.assign(new Error('lock is busy'), { code: 'SESSION_BUSY' })
       return worker
     },
   } as unknown as RuntimeSupervisor
   const host = new SessionHost(supervisor, new EventHub())
 
-  assert.deepEqual(await host.sessionQuery("session-1", "tree.get"), [{ id: "root" }])
+  assert.deepEqual(await host.sessionQuery('session-1', 'tree.get'), [{ id: 'root' }])
   assert.equal(opens, 2)
   host.dispose()
 })
 
-test("SessionHost reuses an idle runtime for a session switch", async () => {
+test('SessionHost reuses an idle runtime for a session switch', async () => {
   let opens = 0
   const worker = {
     command: async (type: string) => {
-      if (type === "switchSession") {
+      if (type === 'switchSession') {
         return {
-          operation: "switch",
-          sourceSessionId: "session-1",
-          targetSessionId: "session-2",
-          targetSessionFile: "session-2.jsonl",
-          targetCwd: ".",
+          operation: 'switch',
+          sourceSessionId: 'session-1',
+          targetSessionId: 'session-2',
+          targetSessionFile: 'session-2.jsonl',
+          targetCwd: '.',
           cancelled: false,
         }
       }
-      if (type === "state.get") return { sessionId: "session-2" }
+      if (type === 'state.get') return { sessionId: 'session-2' }
       return {}
     },
-    getSessionId: () => "session-1",
-    getSessionFile: () => "session-1.jsonl",
-    getCwd: () => ".",
+    getSessionId: () => 'session-1',
+    getSessionFile: () => 'session-1.jsonl',
+    getCwd: () => '.',
     updateSessionIdentity: () => {},
     onEvent: () => () => {},
     onCrash: () => () => {},
@@ -172,53 +181,53 @@ test("SessionHost reuses an idle runtime for a session switch", async () => {
 
   const updated: unknown[] = []
   const off = hub.subscribe(event => {
-    if (event.channel === "sessions.updated") updated.push(event.payload)
+    if (event.channel === 'sessions.updated') updated.push(event.payload)
   })
 
-  await host.openSession(".", "session-1.jsonl")
-  const opened = await host.openSession(".", "session-2.jsonl", undefined, "session-1")
+  await host.openSession('.', 'session-1.jsonl')
+  const opened = await host.openSession('.', 'session-2.jsonl', undefined, 'session-1')
   off()
 
   assert.equal(opens, 1)
-  assert.equal(opened.sessionId, "session-2")
-  assert.equal(host.getAttached("session-1"), undefined)
-  assert.equal(host.getAttached("session-2")?.sessionFile, "session-2.jsonl")
+  assert.equal(opened.sessionId, 'session-2')
+  assert.equal(host.getAttached('session-1'), undefined)
+  assert.equal(host.getAttached('session-2')?.sessionFile, 'session-2.jsonl')
 
   // runtime 复用必须带 reason 标记——前端据此跳过 pane remap（分屏隔离）
   const replaced = updated.find(p => (p as { replaced?: boolean }).replaced === true)
-  assert.ok(replaced, "expected a sessions.updated replaced event")
+  assert.ok(replaced, 'expected a sessions.updated replaced event')
   assert.deepEqual(replaced, {
     replaced: true,
-    sourceSessionId: "session-1",
-    targetSessionId: "session-2",
-    targetSessionFile: "session-2.jsonl",
-    targetCwd: ".",
-    reason: "runtime-reuse",
+    sourceSessionId: 'session-1',
+    targetSessionId: 'session-2',
+    targetSessionFile: 'session-2.jsonl',
+    targetCwd: '.',
+    reason: 'runtime-reuse',
   })
   host.dispose()
 })
 
-test("SessionHost routes extension commands by name through the runtime registry", async () => {
+test('SessionHost routes extension commands by name through the runtime registry', async () => {
   const executed: Array<{ type: string; params?: unknown }> = []
   const worker = {
     command: async (type: string, params?: unknown) => {
-      if (type === "registry.get") {
+      if (type === 'registry.get') {
         return {
-          sdkVersion: "0.84.0",
+          sdkVersion: '0.84.0',
           tools: [],
           activeTools: [],
-          commands: [{ name: "my-ext-command", description: "extension command" }],
+          commands: [{ name: 'my-ext-command', description: 'extension command' }],
           extensions: [],
           eventHandlers: [],
         }
       }
-      if (type === "state.get") return {}
+      if (type === 'state.get') return {}
       executed.push({ type, params })
       return { ok: true }
     },
-    getSessionId: () => "session-1",
-    getSessionFile: () => "session-1.jsonl",
-    getCwd: () => ".",
+    getSessionId: () => 'session-1',
+    getSessionFile: () => 'session-1.jsonl',
+    getCwd: () => '.',
     updateSessionIdentity: () => {},
     onEvent: () => () => {},
     onCrash: () => () => {},
@@ -230,35 +239,41 @@ test("SessionHost routes extension commands by name through the runtime registry
     open: async () => worker,
   } as unknown as RuntimeSupervisor
   const host = new SessionHost(supervisor, new EventHub())
-  await host.openSession(".", "session-1.jsonl")
+  await host.openSession('.', 'session-1.jsonl')
 
-  const submitted = await host.executeSessionCommand("session-1", "my-ext-command", { args: "hello" }) as { promise: Promise<unknown> }
+  const submitted = (await host.executeSessionCommand('session-1', 'my-ext-command', { args: 'hello' })) as {
+    promise: Promise<unknown>
+  }
   await submitted.promise
-  assert.deepEqual(executed, [{ type: "my-ext-command", params: { args: "hello" } }])
+  assert.deepEqual(executed, [{ type: 'my-ext-command', params: { args: 'hello' } }])
 
   // 注册表里没有的命令仍然响亮 404，不落到 worker。
   await assert.rejects(
-    async () => { await host.executeSessionCommand("session-1", "does.not.exist") },
-    { code: "UNKNOWN_COMMAND" },
+    async () => {
+      await host.executeSessionCommand('session-1', 'does.not.exist')
+    },
+    { code: 'UNKNOWN_COMMAND' },
   )
-  assert.deepEqual(executed, [{ type: "my-ext-command", params: { args: "hello" } }])
+  assert.deepEqual(executed, [{ type: 'my-ext-command', params: { args: 'hello' } }])
   host.dispose()
 })
 
-test("SessionHost rejects unknown session commands on a cold session without spawning a worker", async () => {
+test('SessionHost rejects unknown session commands on a cold session without spawning a worker', async () => {
   let opens = 0
   const supervisor = {
     onEvent: () => () => {},
     open: async () => {
       opens += 1
-      throw new Error("should not spawn")
+      throw new Error('should not spawn')
     },
   } as unknown as RuntimeSupervisor
   const host = new SessionHost(supervisor, new EventHub())
 
   await assert.rejects(
-    async () => { await host.executeSessionCommand("cold-session", "my-ext-command") },
-    { code: "UNKNOWN_COMMAND" },
+    async () => {
+      await host.executeSessionCommand('cold-session', 'my-ext-command')
+    },
+    { code: 'UNKNOWN_COMMAND' },
   )
   assert.equal(opens, 0)
   host.dispose()
@@ -268,32 +283,34 @@ test("SessionHost validates extension tool arguments against Pi's own tool schem
   const executed: Array<{ type: string; params?: unknown }> = []
   const worker = {
     command: async (type: string, params?: unknown) => {
-      if (type === "registry.get") {
+      if (type === 'registry.get') {
         return {
-          sdkVersion: "0.84.0",
-          tools: [{
-            name: "my-tool",
-            description: "extension tool",
-            parameters: {
-              type: "object",
-              properties: { value: { type: "string" } },
-              required: ["value"],
-              additionalProperties: false,
+          sdkVersion: '0.84.0',
+          tools: [
+            {
+              name: 'my-tool',
+              description: 'extension tool',
+              parameters: {
+                type: 'object',
+                properties: { value: { type: 'string' } },
+                required: ['value'],
+                additionalProperties: false,
+              },
             },
-          }],
+          ],
           activeTools: [],
           commands: [],
           extensions: [],
           eventHandlers: [],
         }
       }
-      if (type === "state.get") return {}
+      if (type === 'state.get') return {}
       executed.push({ type, params })
       return { ok: true }
     },
-    getSessionId: () => "session-1",
-    getSessionFile: () => "session-1.jsonl",
-    getCwd: () => ".",
+    getSessionId: () => 'session-1',
+    getSessionFile: () => 'session-1.jsonl',
+    getCwd: () => '.',
     updateSessionIdentity: () => {},
     onEvent: () => () => {},
     onCrash: () => () => {},
@@ -305,28 +322,32 @@ test("SessionHost validates extension tool arguments against Pi's own tool schem
     open: async () => worker,
   } as unknown as RuntimeSupervisor
   const host = new SessionHost(supervisor, new EventHub())
-  await host.openSession(".", "session-1.jsonl")
+  await host.openSession('.', 'session-1.jsonl')
 
   // 畸形入参：schema 来自 Pi 的工具定义，在 HTTP 边界响亮 400。
   await assert.rejects(
-    async () => { await host.executeSessionCommand("session-1", "my-tool", { value: 42 }) },
-    { code: "INVALID_REQUEST" },
+    async () => {
+      await host.executeSessionCommand('session-1', 'my-tool', { value: 42 })
+    },
+    { code: 'INVALID_REQUEST' },
   )
   assert.deepEqual(executed, [])
 
-  const submitted = await host.executeSessionCommand("session-1", "my-tool", { value: "ok" }) as { promise: Promise<unknown> }
+  const submitted = (await host.executeSessionCommand('session-1', 'my-tool', { value: 'ok' })) as {
+    promise: Promise<unknown>
+  }
   await submitted.promise
-  assert.deepEqual(executed, [{ type: "my-tool", params: { value: "ok" } }])
+  assert.deepEqual(executed, [{ type: 'my-tool', params: { value: 'ok' } }])
   host.dispose()
 })
 
-test("SessionHost reaps an idle runtime without prewarming", async () => {
+test('SessionHost reaps an idle runtime without prewarming', async () => {
   let prewarmed = 0
   const worker = {
-    command: async (type: string) => type === "state.get" ? { sessionId: "idle-session" } : {},
-    getSessionId: () => "idle-session",
-    getSessionFile: () => "idle-session.jsonl",
-    getCwd: () => "/workspace",
+    command: async (type: string) => (type === 'state.get' ? { sessionId: 'idle-session' } : {}),
+    getSessionId: () => 'idle-session',
+    getSessionFile: () => 'idle-session.jsonl',
+    getCwd: () => '/workspace',
     updateSessionIdentity: () => {},
     onEvent: () => () => {},
     onCrash: () => () => {},
@@ -343,11 +364,11 @@ test("SessionHost reaps an idle runtime without prewarming", async () => {
     },
   } as unknown as RuntimeSupervisor
   const host = new SessionHost(supervisor, new EventHub())
-  await host.openSession("/workspace", "idle-session.jsonl")
+  await host.openSession('/workspace', 'idle-session.jsonl')
 
-  // 把 lastAccess 改成过去，让 reaper 判定该会话空闲
+  // 把 lastAccess 改成过去，让 reaper 判定该会话空闲（默认 TTL 15 分钟）
   const lastAccess = (host as unknown as { lastAccess: Map<string, number> }).lastAccess
-  lastAccess.set("idle-session", Date.now() - 10 * 60_000)
+  lastAccess.set('idle-session', Date.now() - (DEFAULT_IDLE_RUNTIME_TTL_MS + 60_000))
 
   try {
     // reaper 每 30s 跑一次，直接触发内部回收逻辑
@@ -357,20 +378,163 @@ test("SessionHost reaps an idle runtime without prewarming", async () => {
     delete process.env.PIUI_SESSION_IDLE_TTL_MS
   }
 
-  assert.equal(host.getAttached("idle-session"), undefined)
+  assert.equal(host.getAttached('idle-session'), undefined)
   // 单共享进程架构：回收后不再补预热（worker 常驻，无需预热进程）
   assert.equal(prewarmed, 0)
   host.dispose()
 })
 
-test("SessionHost piRegistry falls back to the static snapshot while the worker is booting", async () => {
+function mockRuntimeHarness() {
+  const disposed: string[] = []
+  const supervisor = {
+    onEvent: () => () => {},
+    open: async (_cwd: string, sessionFile?: string) => {
+      const sessionId = (sessionFile ?? 'session-1.jsonl').replace(/\.jsonl$/, '')
+      return {
+        command: async (type: string) => (type === 'state.get' ? { sessionId } : {}),
+        getSessionId: () => sessionId,
+        getSessionFile: () => sessionFile ?? 'session-1.jsonl',
+        getCwd: () => '/workspace',
+        updateSessionIdentity: () => {},
+        onEvent: () => () => {},
+        onCrash: () => () => {},
+        onClose: () => () => {},
+        dispose: async () => {
+          disposed.push(sessionId)
+        },
+      } as unknown as WorkerSession
+    },
+  } as unknown as RuntimeSupervisor
+  const host = new SessionHost(supervisor, new EventHub())
+  return {
+    host,
+    disposed,
+    lastAccess: (host as unknown as { lastAccess: Map<string, number> }).lastAccess,
+    activity: (host as unknown as { activity: Map<string, unknown> }).activity,
+    reap: () => (host as unknown as { reapIdleRuntimes(): Promise<void> }).reapIdleRuntimes.call(host),
+    open: async (sessionIds: string[]) => {
+      for (const id of sessionIds) await host.openSession('/workspace', `${id}.jsonl`)
+    },
+  }
+}
+
+test('SessionHost idle runtime defaults: 15 minute TTL, 6 resident runtimes', () => {
+  const savedTtl = process.env.PIUI_SESSION_IDLE_TTL_MS
+  const savedMax = process.env.PIUI_SESSION_IDLE_MAX
+  try {
+    delete process.env.PIUI_SESSION_IDLE_TTL_MS
+    delete process.env.PIUI_SESSION_IDLE_MAX
+    assert.equal(DEFAULT_IDLE_RUNTIME_TTL_MS, 15 * 60_000)
+    assert.equal(idleRuntimeTtlMs(), 15 * 60_000)
+    assert.equal(DEFAULT_IDLE_RUNTIME_MAX, 6)
+    assert.equal(idleRuntimeMax(), 6)
+
+    process.env.PIUI_SESSION_IDLE_TTL_MS = '60000'
+    assert.equal(idleRuntimeTtlMs(), 60_000)
+    // 下限仍是 30s：更小的值不生效，回落默认
+    process.env.PIUI_SESSION_IDLE_TTL_MS = '1000'
+    assert.equal(idleRuntimeTtlMs(), DEFAULT_IDLE_RUNTIME_TTL_MS)
+
+    process.env.PIUI_SESSION_IDLE_MAX = '2'
+    assert.equal(idleRuntimeMax(), 2)
+    // 上限 ≥1 才生效
+    process.env.PIUI_SESSION_IDLE_MAX = '0'
+    assert.equal(idleRuntimeMax(), DEFAULT_IDLE_RUNTIME_MAX)
+    process.env.PIUI_SESSION_IDLE_MAX = 'nope'
+    assert.equal(idleRuntimeMax(), DEFAULT_IDLE_RUNTIME_MAX)
+  } finally {
+    if (savedTtl === undefined) delete process.env.PIUI_SESSION_IDLE_TTL_MS
+    else process.env.PIUI_SESSION_IDLE_TTL_MS = savedTtl
+    if (savedMax === undefined) delete process.env.PIUI_SESSION_IDLE_MAX
+    else process.env.PIUI_SESSION_IDLE_MAX = savedMax
+  }
+})
+
+test('SessionHost reaps the oldest idle runtimes when the resident count exceeds the cap', async () => {
+  const harness = mockRuntimeHarness()
+  const savedMax = process.env.PIUI_SESSION_IDLE_MAX
+  await harness.open(['s1', 's2', 's3', 's4'])
+  // 都刚刚用过（远未到 TTL）：证明下面的回收只由数量上限触发
+  const now = Date.now()
+  harness.lastAccess.set('s1', now - 4000)
+  harness.lastAccess.set('s2', now - 3000)
+  harness.lastAccess.set('s3', now - 2000)
+  harness.lastAccess.set('s4', now - 1000)
+
+  try {
+    // 默认上限 6：4 个常驻，不该被驱逐
+    await harness.reap()
+    assert.deepEqual(harness.host.listAttachedIds().sort(), ['s1', 's2', 's3', 's4'])
+
+    process.env.PIUI_SESSION_IDLE_MAX = '2'
+    await harness.reap()
+  } finally {
+    if (savedMax === undefined) delete process.env.PIUI_SESSION_IDLE_MAX
+    else process.env.PIUI_SESSION_IDLE_MAX = savedMax
+  }
+
+  // 最旧的两个被回收，最近的保留
+  assert.deepEqual(harness.host.listAttachedIds().sort(), ['s3', 's4'])
+  assert.deepEqual(harness.disposed.sort(), ['s1', 's2'])
+  harness.host.dispose()
+})
+
+test('SessionHost never evicts a busy runtime to satisfy the resident cap', async () => {
+  const harness = mockRuntimeHarness()
+  const savedMax = process.env.PIUI_SESSION_IDLE_MAX
+  await harness.open(['s1', 's2', 's3'])
+  const now = Date.now()
+  harness.lastAccess.set('s1', now - 3000) // 最旧但正在工作
+  harness.lastAccess.set('s2', now - 2000)
+  harness.lastAccess.set('s3', now - 1000)
+  harness.activity.set('s1', { type: 'busy' })
+
+  try {
+    process.env.PIUI_SESSION_IDLE_MAX = '2'
+    await harness.reap()
+  } finally {
+    if (savedMax === undefined) delete process.env.PIUI_SESSION_IDLE_MAX
+    else process.env.PIUI_SESSION_IDLE_MAX = savedMax
+  }
+
+  // 跳过最旧的忙会话，改驱逐次旧的那个
+  assert.equal(harness.host.getAttached('s1')?.sessionId, 's1')
+  assert.equal(harness.host.getAttached('s2'), undefined)
+  assert.equal(harness.host.getAttached('s3')?.sessionId, 's3')
+  assert.deepEqual(harness.disposed, ['s2'])
+  harness.host.dispose()
+})
+
+test('SessionHost evicts down to a PIUI_SESSION_IDLE_MAX=1 cap, keeping the newest', async () => {
+  const harness = mockRuntimeHarness()
+  const savedMax = process.env.PIUI_SESSION_IDLE_MAX
+  await harness.open(['s1', 's2', 's3'])
+  const now = Date.now()
+  harness.lastAccess.set('s1', now - 3000)
+  harness.lastAccess.set('s2', now - 2000)
+  harness.lastAccess.set('s3', now - 1000)
+
+  try {
+    process.env.PIUI_SESSION_IDLE_MAX = '1'
+    await harness.reap()
+  } finally {
+    if (savedMax === undefined) delete process.env.PIUI_SESSION_IDLE_MAX
+    else process.env.PIUI_SESSION_IDLE_MAX = savedMax
+  }
+
+  assert.deepEqual(harness.host.listAttachedIds(), ['s3'])
+  assert.deepEqual(harness.disposed.sort(), ['s1', 's2'])
+  harness.host.dispose()
+})
+
+test('SessionHost piRegistry falls back to the static snapshot while the worker is booting', async () => {
   let catalogCalled = false
   const supervisor = {
     onEvent: () => () => {},
     peekCatalogHandshake: async () => undefined,
     catalogCommand: async () => {
       catalogCalled = true
-      throw new Error("worker must not be queried before it is ready")
+      throw new Error('worker must not be queried before it is ready')
     },
   } as unknown as RuntimeSupervisor
   const host = new SessionHost(supervisor, new EventHub())
@@ -383,7 +547,16 @@ test("SessionHost piRegistry falls back to the static snapshot while the worker 
       ...registry.sessionCommands.map(command => command.name),
     ])
     // server 注入的能力 + 静态命令表的核心命令必须都在
-    for (const required of ["session.open", "session.attached", "session.listAll", "state.get", "prompt", "abort", "registry.get", "registry.describe"]) {
+    for (const required of [
+      'session.open',
+      'session.attached',
+      'session.listAll',
+      'state.get',
+      'prompt',
+      'abort',
+      'registry.get',
+      'registry.describe',
+    ]) {
       assert.ok(names.has(required), `missing capability: ${required}`)
     }
   } finally {
@@ -391,18 +564,27 @@ test("SessionHost piRegistry falls back to the static snapshot while the worker 
   }
 })
 
-test("SessionHost piRegistry uses the worker snapshot once the handshake is ready", async () => {
+test('SessionHost piRegistry uses the worker snapshot once the handshake is ready', async () => {
   const supervisor = {
     onEvent: () => () => {},
-    peekCatalogHandshake: async () => ({ piSdkVersion: "9.9.9", piSdkVerified: false }),
+    peekCatalogHandshake: async () => ({ piSdkVersion: '9.9.9', piSdkVerified: false }),
     catalogCommand: async (type: string) => {
-      assert.equal(type, "registry.describe")
+      assert.equal(type, 'registry.describe')
       return {
         protocolVersion: 1,
         revision: 7,
-        sdkVersion: "9.9.9",
-        driver: "pi",
-        globalCommands: [{ name: "registry.describe", scope: "global", source: "piui-adapter", description: "", paramsSchema: { type: "object" }, queue: "immediate" }],
+        sdkVersion: '9.9.9',
+        driver: 'pi',
+        globalCommands: [
+          {
+            name: 'registry.describe',
+            scope: 'global',
+            source: 'piui-adapter',
+            description: '',
+            paramsSchema: { type: 'object' },
+            queue: 'immediate',
+          },
+        ],
         sessionCommands: [],
       }
     },
@@ -410,11 +592,11 @@ test("SessionHost piRegistry uses the worker snapshot once the handshake is read
   const host = new SessionHost(supervisor, new EventHub())
   try {
     const registry = await host.piRegistry()
-    assert.equal(registry.sdkVersion, "9.9.9")
+    assert.equal(registry.sdkVersion, '9.9.9')
     assert.equal(registry.revision, 7)
     // server 能力仍合并进来
-    assert.ok(registry.globalCommands.some(command => command.name === "session.open"))
-    assert.ok(registry.sessionCommands.some(command => command.name === "session.close"))
+    assert.ok(registry.globalCommands.some(command => command.name === 'session.open'))
+    assert.ok(registry.sessionCommands.some(command => command.name === 'session.close'))
   } finally {
     host.dispose()
   }

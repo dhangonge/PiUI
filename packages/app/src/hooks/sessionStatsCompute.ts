@@ -31,12 +31,10 @@ function charsFromAssistantPart(part: Part): { assistant: number; tool: number }
 }
 
 function estimateCurrentContext(messages: Message[]): number {
-  const system = [...messages]
-    .reverse()
-    .find((msg): msg is Message & { info: { system?: string } } => {
-      return msg.info.role === 'user' && typeof (msg.info as { system?: string }).system === 'string'
-    })
-  const systemChars = system ? (((system.info as { system?: string }).system ?? '').trim().length || 0) : 0
+  const system = [...messages].reverse().find((msg): msg is Message & { info: { system?: string } } => {
+    return msg.info.role === 'user' && typeof (msg.info as { system?: string }).system === 'string'
+  })
+  const systemChars = system ? ((system.info as { system?: string }).system ?? '').trim().length || 0 : 0
 
   let userChars = 0
   let assistantChars = 0
@@ -57,10 +55,7 @@ function estimateCurrentContext(messages: Message[]): number {
   }
 
   return (
-    estimateTokens(systemChars) +
-    estimateTokens(userChars) +
-    estimateTokens(assistantChars) +
-    estimateTokens(toolChars)
+    estimateTokens(systemChars) + estimateTokens(userChars) + estimateTokens(assistantChars) + estimateTokens(toolChars)
   )
 }
 
@@ -126,11 +121,7 @@ export function computeSessionStats(messages: Message[], contextLimit: number = 
 
   const totalTokens = inputTokens + outputTokens + reasoningTokens + cacheRead + cacheWrite
   const estimatedContextUsed = estimateCurrentContext(messages)
-  const contextEstimated = shouldUseEstimatedContext(
-    messages,
-    lastAssistantWithTokensIndex,
-    lastAssistantWithTokens,
-  )
+  const contextEstimated = shouldUseEstimatedContext(messages, lastAssistantWithTokensIndex, lastAssistantWithTokens)
   const contextUsed = contextEstimated
     ? estimatedContextUsed
     : lastAssistantWithTokens

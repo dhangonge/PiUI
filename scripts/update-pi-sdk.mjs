@@ -103,20 +103,31 @@ function patchText(rel, pattern, replacement) {
   }
 }
 
-patchText('packages/protocol/src/version.ts', /(PI_PARITY_SDK_VERSION = ")\d+\.\d+\.\d+(")/, `$1${version}$2`)
-patchText('packages/pi-worker/src/bundled-sdk-version.ts', /(BUNDLED_PI_SDK_VERSION = ")\d+\.\d+\.\d+(")/, `$1${version}$2`)
-patchText('packages/protocol/src/index.test.ts', /(PI_PARITY_SDK_VERSION, ")\d+\.\d+\.\d+(")/, `$1${version}$2`)
+// 引号由 prettier 统一，这里只吃数字、不碰引号，两种引号风格都能改。
+patchText('packages/protocol/src/version.ts', /(PI_PARITY_SDK_VERSION = ['"])\d+\.\d+\.\d+/, `$1${version}`)
+patchText(
+  'packages/pi-worker/src/bundled-sdk-version.ts',
+  /(BUNDLED_PI_SDK_VERSION = ['"])\d+\.\d+\.\d+/,
+  `$1${version}`,
+)
+patchText('packages/protocol/src/index.test.ts', /(PI_PARITY_SDK_VERSION, ['"])\d+\.\d+\.\d+/, `$1${version}`)
 
 // ---------------------------------------------------------------------------
 // 5. 文档基线
+// PI_SDK_API_MATRIX.md 的 Baseline 行由 scripts/check-doc-consistency.mjs 校验，
+// 必须在这里一起刷新，否则 validate 会失败。
 // ---------------------------------------------------------------------------
-for (const rel of ['docs/PIUI_MASTER_PLAN.md', 'docs/PI_UI_INTEGRATION.md']) {
+for (const rel of ['docs/PIUI_MASTER_PLAN.md', 'docs/PI_UI_INTEGRATION.md', 'docs/PI_SDK_API_MATRIX.md']) {
   const file = join(repoRoot, rel)
   if (!existsSync(file)) continue
   const text = readFileSync(file, 'utf8')
-  const next = text.replace(/@earendil-works\/pi-coding-agent@\d+\.\d+\.\d+/g, `@earendil-works/pi-coding-agent@${version}`)
+  const next = text
+    .replace(/@earendil-works\/pi-coding-agent@\d+\.\d+\.\d+/g, `@earendil-works/pi-coding-agent@${version}`)
     .replace(/# Pi \d+\.\d+\.\d+ Native Parity Matrix/, `# Pi ${version} Native Parity Matrix`)
-    .replace(/基线固定为 `@earendil-works\/pi-coding-agent@\d+\.\d+\.\d+`/, `基线固定为 \`@earendil-works/pi-coding-agent@${version}\``)
+    .replace(
+      /基线固定为 `@earendil-works\/pi-coding-agent@\d+\.\d+\.\d+`/,
+      `基线固定为 \`@earendil-works/pi-coding-agent@${version}\``,
+    )
   if (next !== text) {
     writeFileSync(file, next, 'utf8')
     changed.push(rel)

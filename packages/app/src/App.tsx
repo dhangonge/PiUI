@@ -5,6 +5,7 @@ import { Sidebar } from './features/chat'
 import { PiChatPane } from './features/pi-chat/PiChatPane'
 import { SplitContainer } from './features/chat/SplitContainer'
 import type { CommandItem } from './components/CommandPalette'
+import { buildAppCommandItems } from './components/appCommandItems'
 import { ToastContainer } from './components/ToastContainer'
 import { RightPanel } from './components/RightPanel'
 import { BottomPanel } from './components/BottomPanel'
@@ -13,7 +14,6 @@ import { useDirectory, useGlobalEvents, useGlobalKeybindings, useRouter } from '
 import { useViewportHeight } from './hooks/useViewportHeight'
 import { useWakeLock } from './hooks/useWakeLock'
 import type { KeybindingHandlers } from './hooks/useKeybindings'
-import { keybindingStore } from './store/keybindingStore'
 import {
   layoutStore,
   paneLayoutStore,
@@ -38,7 +38,8 @@ import { InternalDragLayer } from './components/InternalDragLayer'
 import { CloseServiceDialog } from './components/CloseServiceDialog'
 import { ProviderAuthDialogHost } from './features/settings/ProviderAuthDialogHost'
 import { trackPiSession } from './pi/piSessionIndex'
-import { piEventStream } from './pi/eventStream.js'
+import { getPiEventStream } from './pi/eventStream.js'
+import { useServerStore } from './hooks/useServerStore'
 import { useSessionContext } from './contexts/useSessionContext'
 import { useCloseServiceDialog } from './hooks/useCloseServiceDialog'
 
@@ -67,6 +68,7 @@ function App() {
   } = router
   const { currentDirectory, savedDirectories, sidebarExpanded, setSidebarExpanded } = useDirectory()
   const { sessions } = useSessionContext()
+  const { activeServer } = useServerStore()
   const { rightPanelOpen, rightPanelWidth, wakeLock } = useLayoutStore()
   const { surfaceRef, value: chatViewport } = useChatViewportController({
     sidebarExpanded,
@@ -129,16 +131,17 @@ function App() {
   // not have an open pane. Without this subscription background completion
   // notifications have no event source.
   useEffect(() => {
-    for (const directory of activeDirectories) piEventStream.connectWorkspace(directory)
-    return () => {
-      for (const directory of activeDirectories) piEventStream.disconnectWorkspace(directory)
-    }
-  }, [activeDirectories])
+    if (!activeServer || !currentDirectory) return
+    const stream = getPiEventStream(activeServer.id)
+    stream.connectWorkspace(currentDirectory)
+    return () => stream.disconnectWorkspace(currentDirectory)
+  }, [activeServer, currentDirectory])
 
   // Runtime replacement (fork/new/import): panes follow the new session id
   useEffect(() => {
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sourceSessionId?: string; targetSessionId?: string; targetCwd?: string }>).detail
+      const detail = (event as CustomEvent<{ sourceSessionId?: string; targetSessionId?: string; targetCwd?: string }>)
+        .detail
       if (!detail?.sourceSessionId || !detail.targetSessionId) return
       paneLayoutStore.remapSession(detail.sourceSessionId, detail.targetSessionId)
       if (routeSessionId === detail.sourceSessionId) {
@@ -238,6 +241,9 @@ function App() {
   const mobileProgrammaticTargetRef = useRef<MobilePagerPage | null>(null)
   const mobileScrollEndTimerRef = useRef<number | null>(null)
   const mobileRightUnmountTimerRef = useRef<number | null>(null)
+  const mobilePagerFrameRef = useRef<number | null>(null)
+  const mobilePagerMovingRef = useRef(false)
+  const mobilePagerVarsRef = useRef<{ rotateY: string; scale: string; offsetX: string; origin: string } | null>(null)
   const shouldRenderMobileRightPanelRef = useRef(false)
   const [shouldRenderMobileRightPanel, setShouldRenderMobileRightPanel] = useState(false)
 
@@ -318,24 +324,70 @@ function App() {
     if (rightPanelOpen) layoutStore.closeRightPanel()
   }, [ensureMobileRightPanelRendered, getNearestMobilePage, rightPanelOpen, setSidebarExpanded, sidebarExpanded])
 
-  const handleMobilePagerScroll = useCallback(() => {
+  // 把横滑进度写到 DOM。四个变量都是继承型：写一次就会让整棵对话子树样式失效、
+  // 玻璃层重新取背景快照，所以只在真的位移时写，并且值没变就不写。
+  // 静止态直接摘掉 --moving：对话面回到纯 2D，backdrop-filter 不再落在 3D 上下文里。
+  const applyMobilePagerProgress = useCallback(() => {
     const pager = mobilePagerRef.current
     if (!pager) return
 
     const scrollLeft = pager.scrollLeft
 
     // -1 (滑向左栏) 到 0 (对话页) 到 1 (滑向右栏)
-    const rawProgress = (scrollLeft - mobileChatScrollLeft) / (scrollLeft < mobileChatScrollLeft ? mobileLeftPanelWidth : mobilePageWidth)
+    const rawProgress =
+      (scrollLeft - mobileChatScrollLeft) / (scrollLeft < mobileChatScrollLeft ? mobileLeftPanelWidth : mobilePageWidth)
     const progress = Math.max(-1, Math.min(1, rawProgress))
+    const moving = Math.abs(progress) > 0.001
+
+    if (moving !== mobilePagerMovingRef.current) {
+      mobilePagerMovingRef.current = moving
+      if (moving) pager.dataset.mobileChatMoving = ''
+      else delete pager.dataset.mobileChatMoving
+    }
+
+    if (!moving) {
+      mobilePagerVarsRef.current = null
+      return
+    }
+
     const absProgress = Math.abs(progress)
     const rightProgress = Math.max(0, progress)
-    const easedRightProgress = rightProgress * rightProgress
-    const originX = 50 - progress * 50
+    const next = {
+      rotateY: `${progress * 10}deg`,
+      scale: `${1 - absProgress * 0.06}`,
+      offsetX: `${rightProgress * rightProgress * -48}px`,
+      origin: `${50 - progress * 50}% 50%`,
+    }
+    const last = mobilePagerVarsRef.current
+    if (
+      last &&
+      last.rotateY === next.rotateY &&
+      last.scale === next.scale &&
+      last.offsetX === next.offsetX &&
+      last.origin === next.origin
+    ) {
+      return
+    }
+    mobilePagerVarsRef.current = next
+    pager.style.setProperty('--mobile-chat-rotate-y', next.rotateY)
+    pager.style.setProperty('--mobile-chat-scale', next.scale)
+    pager.style.setProperty('--mobile-chat-offset-x', next.offsetX)
+    pager.style.setProperty('--mobile-chat-transform-origin', next.origin)
+  }, [mobileChatScrollLeft, mobileLeftPanelWidth, mobilePageWidth])
 
-    pager.style.setProperty('--mobile-chat-rotate-y', `${progress * 10}deg`)
-    pager.style.setProperty('--mobile-chat-scale', `${1 - absProgress * 0.06}`)
-    pager.style.setProperty('--mobile-chat-offset-x', `${easedRightProgress * -48}px`)
-    pager.style.setProperty('--mobile-chat-transform-origin', `${originX}% 50%`)
+  const handleMobilePagerScroll = useCallback(() => {
+    const pager = mobilePagerRef.current
+    if (!pager) return
+
+    const scrollLeft = pager.scrollLeft
+
+    // 同帧多次 scroll 事件合并成一次写入
+    if (mobilePagerFrameRef.current === null) {
+      mobilePagerFrameRef.current = window.requestAnimationFrame(() => {
+        mobilePagerFrameRef.current = null
+        applyMobilePagerProgress()
+      })
+    }
 
     if (scrollLeft > mobileChatScrollLeft + 24) {
       ensureMobileRightPanelRendered()
@@ -356,13 +408,14 @@ function App() {
       }
 
       syncMobilePagerState()
+      // 滚动停下的最后一帧可能没触发 scroll 事件（吸附到整页时），这里补一次静止态结算
+      applyMobilePagerProgress()
     }, MOBILE_PAGER_SCROLL_END_MS)
   }, [
+    applyMobilePagerProgress,
     ensureMobileRightPanelRendered,
     getMobilePageScrollLeft,
     mobileChatScrollLeft,
-    mobileLeftPanelWidth,
-    mobilePageWidth,
     syncMobilePagerState,
   ])
 
@@ -383,7 +436,6 @@ function App() {
       syncMobilePagerState()
     }, MOBILE_PAGER_SCROLL_END_MS)
   }, [syncMobilePagerState])
-
   useLayoutEffect(() => {
     if (!isMobilePanelLayout) {
       mobilePagerInitializedRef.current = false
@@ -440,6 +492,8 @@ function App() {
     return () => {
       if (mobileScrollEndTimerRef.current !== null) window.clearTimeout(mobileScrollEndTimerRef.current)
       if (mobileRightUnmountTimerRef.current !== null) window.clearTimeout(mobileRightUnmountTimerRef.current)
+      if (mobilePagerFrameRef.current !== null) window.cancelAnimationFrame(mobilePagerFrameRef.current)
+      mobilePagerFrameRef.current = null
       mobileProgrammaticTargetRef.current = null
     }
   }, [])
@@ -485,7 +539,14 @@ function App() {
     if (sidebarExpanded) setSidebarExpanded(false)
     scrollMobilePagerTo('right')
     layoutStore.openRightPanel()
-  }, [ensureMobileRightPanelRendered, isMobilePanelLayout, rightPanelOpen, scrollMobilePagerTo, setSidebarExpanded, sidebarExpanded])
+  }, [
+    ensureMobileRightPanelRendered,
+    isMobilePanelLayout,
+    rightPanelOpen,
+    scrollMobilePagerTo,
+    setSidebarExpanded,
+    sidebarExpanded,
+  ])
 
   // Pi 全局模式：无 currentDirectory 时使用 pane 对应 session 的真实目录
   // 空目录时 resolveWorkspacePath 会落到 server 默认 workspace，FileExplorer 仍可 list
@@ -574,9 +635,7 @@ function App() {
       focusInput: () => {
         // 优先聚焦 focused pane 的输入框（分屏时多个输入框）
         const pid = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
-        const root = pid
-          ? document.querySelector<HTMLElement>(`[data-pane-id="${pid}"]`)
-          : document
+        const root = pid ? document.querySelector<HTMLElement>(`[data-pane-id="${pid}"]`) : document
         const input = (root ?? document).querySelector<HTMLTextAreaElement>('[data-input-box] textarea')
         input?.focus()
       },
@@ -584,12 +643,12 @@ function App() {
       archiveSession: capabilities.sessionArchive ? () => focusedController?.archiveSession() : undefined,
       previousSession: () => focusedController?.previousSession(),
       nextSession: () => focusedController?.nextSession(),
-       toggleTerminal: () => {
-         layoutStore.toggleBottomPanel()
-       },
-       newTerminal: () => {
-         window.dispatchEvent(new Event('piui:new-terminal'))
-       },
+      toggleTerminal: () => {
+        layoutStore.toggleBottomPanel()
+      },
+      newTerminal: () => {
+        window.dispatchEvent(new Event('piui:new-terminal'))
+      },
       selectModel: () => focusedController?.openModelSelector(),
       toggleAgent: () => focusedController?.toggleAgent(),
       cancelMessage: () => focusedController?.cancelMessage(),
@@ -648,222 +707,39 @@ function App() {
 
   useGlobalKeybindings(keybindingHandlers)
 
-  const commands = useMemo<CommandItem[]>(() => {
-    const getShortcut = (action: string) =>
-      keybindingStore.getKey(action as import('./store/keybindingStore').KeybindingAction)
-
-    return [
-      {
-        id: 'openSettings',
-        label: t('commands:openSettings'),
-        description: t('commands:openSettingsDesc'),
-        category: t('commands:categories.general'),
-        shortcut: getShortcut('openSettings'),
-        action: openSettings,
-      },
-      {
-        id: 'openProject',
-        label: t('commands:openProject'),
-        description: t('commands:openProjectDesc'),
-        category: t('commands:categories.general'),
-        shortcut: getShortcut('openProject'),
-        action: openProject,
-      },
-      {
-        id: 'openSettingsShortcuts',
-        label: t('commands:openShortcutsSettings'),
-        description: t('commands:openShortcutsSettingsDesc'),
-        category: t('commands:categories.general'),
-        action: () => {
-          openSettingsTab('keybindings')
+  const commands = useMemo<CommandItem[]>(
+    () =>
+      buildAppCommandItems(() => ({
+        t,
+        openSettings,
+        openProject,
+        openSettingsTab,
+        handleToggleSidebar,
+        handleToggleRightPanel,
+        focusedController,
+        paneLayout: {
+          focusedPaneId: paneLayout.focusedPaneId,
+          isSplit: paneLayout.isSplit,
         },
-      },
-      {
-        id: 'toggleSidebar',
-        label: t('commands:toggleSidebar'),
-        description: t('commands:toggleSidebarDesc'),
-        category: t('commands:categories.general'),
-        shortcut: getShortcut('toggleSidebar'),
-        action: handleToggleSidebar,
-      },
-      {
-        id: 'toggleRightPanel',
-        label: t('commands:toggleRightPanel'),
-        description: t('commands:toggleRightPanelDesc'),
-        category: t('commands:categories.general'),
-        shortcut: getShortcut('toggleRightPanel'),
-        action: handleToggleRightPanel,
-      },
-      {
-        id: 'focusInput',
-        label: t('commands:focusInput'),
-        description: t('commands:focusInputDesc'),
-        category: t('commands:categories.general'),
-        shortcut: getShortcut('focusInput'),
-        action: () => {
-          const input = document.querySelector<HTMLTextAreaElement>('[data-input-box] textarea')
-          input?.focus()
-        },
-      },
-      {
-        id: 'newSession',
-        label: t('commands:newSession'),
-        description: t('commands:newSessionDesc'),
-        category: t('commands:categories.session'),
-        shortcut: getShortcut('newSession'),
-        action: () => focusedController?.newSession(),
-      },
-      ...(capabilities.sessionArchive ? [{
-        id: 'archiveSession',
-        label: t('commands:archiveSession'),
-        description: t('commands:archiveSessionDesc'),
-        category: t('commands:categories.session'),
-        shortcut: getShortcut('archiveSession'),
-        action: () => focusedController?.archiveSession(),
-      }] : []),
-      {
-        id: 'previousSession',
-        label: t('commands:previousSession'),
-        description: t('commands:previousSessionDesc'),
-        category: t('commands:categories.session'),
-        shortcut: getShortcut('previousSession'),
-        action: () => focusedController?.previousSession(),
-      },
-      {
-        id: 'nextSession',
-        label: t('commands:nextSession'),
-        description: t('commands:nextSessionDesc'),
-        category: t('commands:categories.session'),
-        shortcut: getShortcut('nextSession'),
-        action: () => focusedController?.nextSession(),
-      },
-      {
-        id: 'toggleTerminal',
-        label: t('commands:toggleTerminal'),
-        description: t('commands:toggleTerminalDesc'),
-        category: t('commands:categories.terminal'),
-        shortcut: getShortcut('toggleTerminal'),
-        action: () => layoutStore.toggleBottomPanel(),
-      },
-      {
-        id: 'newTerminal',
-        label: t('commands:newTerminal'),
-        description: t('commands:newTerminalDesc'),
-        category: t('commands:categories.terminal'),
-        shortcut: getShortcut('newTerminal'),
-        action: () => window.dispatchEvent(new Event('piui:new-terminal')),
-      },
-      {
-        id: 'selectModel',
-        label: t('commands:selectModel'),
-        description: t('commands:selectModelDesc'),
-        category: t('commands:categories.model'),
-        shortcut: getShortcut('selectModel'),
-        action: () => focusedController?.openModelSelector(),
-      },
-      {
-        id: 'toggleAgent',
-        label: t('commands:toggleAgent'),
-        description: t('commands:toggleAgentDesc'),
-        category: t('commands:categories.model'),
-        shortcut: getShortcut('toggleAgent'),
-        action: () => focusedController?.toggleAgent(),
-      },
-      {
-        id: 'copyLastResponse',
-        label: t('commands:copyLastResponse'),
-        description: t('commands:copyLastResponseDesc'),
-        category: t('commands:categories.message'),
-        shortcut: getShortcut('copyLastResponse'),
-        action: () => focusedController?.copyLastResponse(),
-      },
-      {
-        id: 'cancelMessage',
-        label: t('commands:cancelMessage'),
-        description: t('commands:cancelMessageDesc'),
-        category: t('commands:categories.message'),
-        shortcut: getShortcut('cancelMessage'),
-        action: () => focusedController?.cancelMessage(),
-        when: () => !!focusedController?.isStreaming,
-      },
-      // Pane
-      {
-        id: 'focusNextPane',
-        label: t('commands:focusNextPane'),
-        description: t('commands:focusNextPaneDesc'),
-        category: t('commands:categories.pane'),
-        shortcut: getShortcut('focusNextPane'),
-        action: () => paneLayoutStore.focusNextPane(),
-      },
-      {
-        id: 'focusPrevPane',
-        label: t('commands:focusPrevPane'),
-        description: t('commands:focusPrevPaneDesc'),
-        category: t('commands:categories.pane'),
-        shortcut: getShortcut('focusPrevPane'),
-        action: () => paneLayoutStore.focusPrevPane(),
-      },
-      {
-        id: 'splitRight',
-        label: t('commands:splitRight'),
-        description: t('commands:splitRightDesc'),
-        category: t('commands:categories.pane'),
-        shortcut: getShortcut('splitRight'),
-        action: () => {
-          const pid = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
-          if (pid && splitPaneEnabled) paneLayoutStore.splitPane(pid, 'horizontal')
-        },
-      },
-      {
-        id: 'splitDown',
-        label: t('commands:splitDown'),
-        description: t('commands:splitDownDesc'),
-        category: t('commands:categories.pane'),
-        shortcut: getShortcut('splitDown'),
-        action: () => {
-          const pid = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
-          if (pid && splitPaneEnabled) paneLayoutStore.splitPane(pid, 'vertical')
-        },
-      },
-      {
-        id: 'closePane',
-        label: t('commands:closePane'),
-        description: t('commands:closePaneDesc'),
-        category: t('commands:categories.pane'),
-        shortcut: getShortcut('closePane'),
-        action: () => {
-          const pid = paneLayout.focusedPaneId ?? paneLayoutStore.getFocusedPaneId()
-          if (pid && paneLayout.isSplit) paneLayoutStore.closePane(pid)
-        },
-        when: () => paneLayout.isSplit,
-      },
-      {
-        id: 'togglePaneFullscreen',
-        label: t('commands:togglePaneFullscreen'),
-        description: t('commands:togglePaneFullscreenDesc'),
-        category: t('commands:categories.pane'),
-        shortcut: getShortcut('togglePaneFullscreen'),
-        action: () => {
-          if (paneLayout.isSplit) handleToggleFocusedPaneFullscreen()
-        },
-        when: () => paneLayout.isSplit,
-      },
-    ]
-  }, [
-    t,
-    openSettings,
-    openProject,
-    openSettingsTab,
-    handleToggleSidebar,
-    handleToggleRightPanel,
-    focusedController,
-    paneLayout.focusedPaneId,
-    paneLayout.isSplit,
-    splitPaneEnabled,
-    handleToggleFocusedPaneFullscreen,
-    capabilities.sessionArchive,
-  ])
-
+        splitPaneEnabled,
+        handleToggleFocusedPaneFullscreen,
+        sessionArchive: capabilities.sessionArchive,
+      })),
+    [
+      t,
+      openSettings,
+      openProject,
+      openSettingsTab,
+      handleToggleSidebar,
+      handleToggleRightPanel,
+      focusedController,
+      paneLayout.focusedPaneId,
+      paneLayout.isSplit,
+      splitPaneEnabled,
+      handleToggleFocusedPaneFullscreen,
+      capabilities.sessionArchive,
+    ],
+  )
 
   return (
     <div className="relative flex h-full flex-col bg-bg-100 overflow-hidden">
@@ -881,8 +757,6 @@ function App() {
                   overscrollBehaviorX: 'contain',
                   scrollbarWidth: 'none',
                   WebkitOverflowScrolling: 'touch',
-                  perspective: '1200px',
-                  perspectiveOrigin: '50% 50%',
                 }}
                 onScroll={handleMobilePagerScroll}
                 onTouchStart={handleMobilePagerInteractionStart}
@@ -926,18 +800,13 @@ function App() {
                   }}
                 >
                   <div
-                    className="absolute inset-y-0 -left-4 -right-4 z-10 flex flex-col overflow-hidden bg-bg-100 rounded-xl shadow-[0_0_24px_hsl(var(--always-black)/0.15)] [contain:layout_paint]"
+                    className="mobile-chat-surface absolute inset-y-0 -left-4 -right-4 z-10 flex flex-col overflow-hidden bg-bg-100 rounded-xl shadow-[0_0_24px_hsl(var(--always-black)/0.15)]"
                     aria-hidden={mobileActivePage !== 'chat'}
                     inert={mobileActivePage !== 'chat'}
-                    style={{
-                      transform: 'translate3d(var(--mobile-chat-offset-x, 0px), 0, 0) rotateY(var(--mobile-chat-rotate-y, 0deg)) scale(var(--mobile-chat-scale, 1))',
-                      transformOrigin: 'var(--mobile-chat-transform-origin, 50% 50%)',
-                      transformStyle: 'preserve-3d',
-                      backfaceVisibility: 'hidden',
-                      willChange: 'transform',
-                    }}
                   >
-                    <div className={`flex-1 min-h-0 px-4 ${paneLayout.isSplit && !paneLayout.fullscreenPaneId ? 'py-2' : ''}`}>
+                    <div
+                      className={`flex-1 min-h-0 px-4 ${paneLayout.isSplit && !paneLayout.fullscreenPaneId ? 'py-2' : ''}`}
+                    >
                       <SplitContainer
                         node={paneLayout.root}
                         renderLeaf={renderPaneLeaf}
@@ -983,13 +852,17 @@ function App() {
                 </section>
               </div>
 
-              <BottomPanel directory={focusedDirectory} onNavigateSession={handleSelectSession} onNewChat={handleNewSession} />
+              <BottomPanel
+                directory={focusedDirectory}
+                onNavigateSession={handleSelectSession}
+                onNewChat={handleNewSession}
+              />
             </>
           ) : (
             <>
               <Sidebar
                 isOpen={sidebarExpanded}
-                    selectedSessionId={paneLayout.focusedSessionId}
+                selectedSessionId={paneLayout.focusedSessionId}
                 onSelectSession={handleSelectSession}
                 onNewSession={handleNewSession}
                 onOpen={handleOpenSidebar}
@@ -1006,7 +879,11 @@ function App() {
                   className="flex-1 flex flex-col min-w-0 overflow-hidden"
                   style={{ minWidth: `${CHAT_SURFACE_MIN_WIDTH}px` }}
                 >
-                  <div className={paneLayout.isSplit && !paneLayout.fullscreenPaneId ? 'flex-1 min-h-0 p-2' : 'flex-1 min-h-0'}>
+                  <div
+                    className={
+                      paneLayout.isSplit && !paneLayout.fullscreenPaneId ? 'flex-1 min-h-0 p-2' : 'flex-1 min-h-0'
+                    }
+                  >
                     <SplitContainer
                       node={paneLayout.root}
                       renderLeaf={renderPaneLeaf}
@@ -1014,7 +891,11 @@ function App() {
                     />
                   </div>
 
-                  <BottomPanel directory={focusedDirectory} onNavigateSession={handleSelectSession} onNewChat={handleNewSession} />
+                  <BottomPanel
+                    directory={focusedDirectory}
+                    onNavigateSession={handleSelectSession}
+                    onNewChat={handleNewSession}
+                  />
                 </div>
 
                 <RightPanel

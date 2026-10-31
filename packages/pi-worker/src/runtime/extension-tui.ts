@@ -1,7 +1,16 @@
-import { Container, getKeybindings, TuiMainScreen, type Component, type Terminal } from "@earendil-works/pi-tui"
-import type { KeybindingsManager as SdkKeybindingsManager, Theme } from "@earendil-works/pi-coding-agent"
-import type { ExtensionTuiAttach, ExtensionTuiKind } from "@piui/protocol"
-import { getLoadedSdk } from "../sdk-host.js"
+import {
+  Container,
+  getKeybindings,
+  TuiMainScreen,
+  type Component,
+  type Terminal,
+  type OverlayHandle,
+  type OverlayOptions,
+} from '@earendil-works/pi-tui'
+import type { KeybindingsManager as SdkKeybindingsManager, Theme } from '@earendil-works/pi-coding-agent'
+import type { ExtensionTuiAttach, ExtensionTuiKind } from '@piui/protocol'
+import { getLoadedSdk } from '../sdk-host.js'
+import { GuardedComponent, type ComponentPhase, type DisposableComponent } from './guarded-component.js'
 
 const DEFAULT_COLS = 64
 const DEFAULT_ROWS = 10
@@ -16,7 +25,7 @@ const MAX_FRAME_BYTES = 256 * 1024
 export class VirtualTerminal implements Terminal {
   private inputHandler?: (data: string) => void
   private resizeHandler?: () => void
-  private buffer = ""
+  private buffer = ''
   private flushTimer?: ReturnType<typeof setTimeout>
   private _columns: number
   private _rows: number
@@ -41,12 +50,18 @@ export class VirtualTerminal implements Terminal {
       clearTimeout(this.flushTimer)
       this.flushTimer = undefined
     }
-    this.buffer = ""
+    this.buffer = ''
   }
 
   drainInput(): Promise<void> {
     return Promise.resolve()
   }
+
+  /**
+   * OSC 7501 program status (pi-tui >= 1.1). The offscreen mirror has no real
+   * terminal to report to; the app renders its own working indicator.
+   */
+  setProgramStatus(): void {}
 
   write(data: string): void {
     this.buffer += data
@@ -56,7 +71,7 @@ export class VirtualTerminal implements Terminal {
     this.flushTimer = setTimeout(() => {
       this.flushTimer = undefined
       const frame = this.buffer
-      this.buffer = ""
+      this.buffer = ''
       if (frame && this.onFrame) {
         this.onFrame(frame.length > MAX_FRAME_BYTES ? frame.slice(0, MAX_FRAME_BYTES) : frame)
       }
@@ -80,23 +95,23 @@ export class VirtualTerminal implements Terminal {
   }
 
   hideCursor(): void {
-    this.write("\x1b[?25l")
+    this.write('\x1b[?25l')
   }
 
   showCursor(): void {
-    this.write("\x1b[?25h")
+    this.write('\x1b[?25h')
   }
 
   clearLine(): void {
-    this.write("\x1b[2K")
+    this.write('\x1b[2K')
   }
 
   clearFromCursor(): void {
-    this.write("\x1b[0J")
+    this.write('\x1b[0J')
   }
 
   clearScreen(): void {
-    this.write("\x1b[2J\x1b[H")
+    this.write('\x1b[2J\x1b[H')
   }
 
   setTitle(): void {
@@ -121,14 +136,16 @@ export class VirtualTerminal implements Terminal {
 }
 
 export type ExtensionTuiHostEvent =
-  | { type: "attach"; attach: ExtensionTuiAttach }
-  | { type: "detach"; key: string }
-  | { type: "frame"; data: string }
+  | { type: 'attach'; attach: ExtensionTuiAttach }
+  | { type: 'detach'; key: string }
+  | { type: 'frame'; data: string }
+  | { type: 'widget'; key: string; lines: string[]; placement: 'aboveEditor' | 'belowEditor' }
+  | { type: 'error'; key: string; phase: ComponentPhase }
 
 interface MountedPanel {
   key: string
   kind: ExtensionTuiKind
-  component: Component & { dispose?: () => void }
+  component: GuardedComponent
   container: ContainerLike
 }
 
@@ -156,26 +173,43 @@ export class ExtensionTuiHost {
   private readonly widgetsBelow = new Container()
   private readonly footer = new Container()
   private readonly mounts = new Map<string, MountedPanel>()
-  private customHandle?: { hide(): void }
+  private customHandle?: OverlayHandle
+  private customComponent?: GuardedComponent
+  private generation = 0
   private started = false
+  private fallbackTheme?: Theme
 
-  constructor(private readonly emit: (event: ExtensionTuiHostEvent) => void) {
+  constructor(
+    private readonly emit: (event: ExtensionTuiHostEvent) => void,
+    private readonly themeProvider?: () => Theme,
+  ) {
     this.tui = new TuiMainScreen(this.terminal, false)
     // Keep the same stacking order the interactive TUI uses.
     for (const container of [this.header, this.widgetsAbove, this.widgetsBelow, this.footer]) {
       this.tui.addChild(container)
     }
-    this.terminal.onFrame = data => this.emit({ type: "frame", data })
+    this.terminal.onFrame = data => this.emit({ type: 'frame', data })
   }
 
   getTheme(): Theme {
+    return this.themeProvider?.() ?? this.getFallbackTheme()
+  }
+
+  invalidateTheme(): void {
+    this.tui.invalidate()
+    this.redraw()
+  }
+
+  getFallbackTheme(): Theme {
+    if (this.fallbackTheme) return this.fallbackTheme
     // The pi-coding-agent package index does not re-export the singleton
     // `theme` (only the Theme class), so build a default dark palette. The
     // interactive TUI's components only use theme.fg/bg helpers, so a static
     // palette is sufficient for offscreen rendering.
     try {
       const sdk = getLoadedSdk().sdk
-      return new sdk.Theme(DEFAULT_FG, DEFAULT_BG, "truecolor")
+      this.fallbackTheme = new sdk.Theme(DEFAULT_FG, DEFAULT_BG, 'truecolor', { name: 'piui-fallback' })
+      return this.fallbackTheme
     } catch {
       // SDK not loaded yet (unit tests / early startup): fall back to a
       // structural ANSI theme so factories still receive a working object.
@@ -191,20 +225,46 @@ export class ExtensionTuiHost {
     return this.keybindings
   }
 
-  mount(kind: ExtensionTuiKind, key: string, component: Component & { dispose?: () => void }, placement?: "aboveEditor" | "belowEditor"): void {
+  mount(
+    kind: ExtensionTuiKind,
+    key: string,
+    component: Component & { dispose?: () => void },
+    placement?: 'aboveEditor' | 'belowEditor',
+  ): void {
     this.unmount(key)
-    const container = kind === "header" ? this.header
-      : kind === "footer" ? this.footer
-        : placement === "belowEditor" ? this.widgetsBelow : this.widgetsAbove
-    container.addChild(component)
-    this.mounts.set(key, { key, kind, component, container })
+    const container =
+      kind === 'header'
+        ? this.header
+        : kind === 'footer'
+          ? this.footer
+          : placement === 'belowEditor'
+            ? this.widgetsBelow
+            : this.widgetsAbove
+    let previous = ''
+    const guarded = this.guard(
+      key,
+      component,
+      undefined,
+      kind === 'widget'
+        ? lines => {
+            // Persist a bounded display snapshot even when no terminal view is open.
+            const snapshot = lines.slice(0, 200).map(line => line.slice(0, 2048))
+            const encoded = JSON.stringify(snapshot)
+            if (encoded === previous || this.mounts.get(key)?.component !== guarded) return
+            previous = encoded
+            this.emit({ type: 'widget', key, lines: snapshot, placement: placement ?? 'aboveEditor' })
+          }
+        : undefined,
+    )
+    container.addChild(guarded)
+    this.mounts.set(key, { key, kind, component: guarded, container })
     this.ensureStarted()
     this.emit({
-      type: "attach",
+      type: 'attach',
       attach: {
         key,
         kind,
-        placement: kind === "widget" ? placement : undefined,
+        placement: kind === 'widget' ? placement : undefined,
         width: this.terminal.columns,
         height: this.terminal.rows,
       },
@@ -216,9 +276,9 @@ export class ExtensionTuiHost {
     const mount = this.mounts.get(key)
     if (!mount) return
     mount.container.removeChild(mount.component)
-    mount.component.dispose?.()
     this.mounts.delete(key)
-    this.emit({ type: "detach", key })
+    mount.component.dispose()
+    this.emit({ type: 'detach', key })
     if (this.mounts.size === 0 && !this.customHandle) {
       this.stop()
     } else {
@@ -230,28 +290,58 @@ export class ExtensionTuiHost {
    * Mount a `custom()` component as an overlay. Returns a handle used by the
    * bridge to close it once the extension resolves its promise.
    */
-  mountCustom(component: Component & { dispose?: () => void }): { hide(): void } {
+  mountCustom(component: DisposableComponent, options?: OverlayOptions, onFailure?: () => void): OverlayHandle {
+    this.unmountCustom()
     this.ensureStarted()
-    if (this.customHandle) this.customHandle.hide()
-    const overlay = this.tui.showOverlay(component, { width: "100%", maxHeight: "100%", anchor: "center" })
+    const guarded = this.guard('custom', component, onFailure)
+    const visible = options?.visible
+    const generation = this.generation
+    let layoutFailed = false
+    const overlay = this.tui.showOverlay(guarded, {
+      width: '100%',
+      maxHeight: '100%',
+      anchor: 'center',
+      ...options,
+      visible: visible
+        ? (cols, rows) => {
+            if (layoutFailed) return false
+            try {
+              return visible(cols, rows)
+            } catch {
+              layoutFailed = true
+              queueMicrotask(() => {
+                if (generation !== this.generation) return
+                if (this.customComponent === guarded) {
+                  this.unmountCustom()
+                  onFailure?.()
+                }
+                this.emit({ type: 'error', key: 'custom', phase: 'layout' })
+              })
+              return false
+            }
+          }
+        : undefined,
+    })
     const teardown = () => {
-      if (!this.customHandle) return
+      if (this.customComponent !== guarded) return
       this.customHandle = undefined
-      component.dispose?.()
+      this.customComponent = undefined
       overlay.hide()
-      this.tui.setFocus(null)
-      this.emit({ type: "detach", key: "custom" })
+      guarded.dispose()
+      this.emit({ type: 'detach', key: 'custom' })
       if (this.mounts.size === 0) this.stop()
       else this.tui.requestRender()
     }
-    this.customHandle = { hide: teardown }
-    this.tui.setFocus(component)
+    const handle = { ...overlay, hide: teardown }
+    this.customHandle = handle
+    this.customComponent = guarded
+    if (!options?.nonCapturing) overlay.focus()
     this.tui.requestRender()
     this.emit({
-      type: "attach",
-      attach: { key: "custom", kind: "custom", width: this.terminal.columns, height: this.terminal.rows },
+      type: 'attach',
+      attach: { key: 'custom', kind: 'custom', width: this.terminal.columns, height: this.terminal.rows },
     })
-    return { hide: teardown }
+    return handle
   }
 
   /** Close the active `custom()` overlay (no-op when none is mounted). */
@@ -279,9 +369,36 @@ export class ExtensionTuiHost {
   }
 
   reset(): void {
+    this.generation++
     for (const key of [...this.mounts.keys()]) this.unmount(key)
     if (this.customHandle) this.customHandle.hide()
     this.stop()
+  }
+
+  private guard(
+    key: string,
+    component: DisposableComponent,
+    onFailure?: () => void,
+    onRender?: (lines: string[]) => void,
+  ): GuardedComponent {
+    const generation = this.generation
+    const guarded = new GuardedComponent(
+      component,
+      phase => {
+        // Do not mutate Container children during their current render pass.
+        queueMicrotask(() => {
+          if (generation !== this.generation) return
+          const mounted = this.mounts.get(key)?.component === guarded
+          const custom = this.customComponent === guarded
+          if (mounted) this.unmount(key)
+          if (custom) this.unmountCustom()
+          this.emit({ type: 'error', key, phase })
+          if (custom) onFailure?.()
+        })
+      },
+      onRender,
+    )
+    return guarded
   }
 
   private ensureStarted(): void {
@@ -298,24 +415,63 @@ export class ExtensionTuiHost {
   }
 }
 
-const DEFAULT_FG = {  accent: "#4f9cff", border: "#3a3f4b", borderAccent: "#4f9cff", borderMuted: "#2c313c",
-  success: "#3fb950", error: "#f85149", warning: "#d29922", muted: "#8b949e", dim: "#6e7681",
-  text: "#e6edf3", thinkingText: "#8b949e", userMessageText: "#e6edf3", customMessageText: "#e6edf3",
-  customMessageLabel: "#8b949e", toolTitle: "#e6edf3", toolOutput: "#c9d1d9",
-  mdHeading: "#e6edf3", mdLink: "#58a6ff", mdLinkUrl: "#8b949e", mdCode: "#79c0ff",
-  mdCodeBlock: "#c9d1d9", mdCodeBlockBorder: "#3a3f4b", mdQuote: "#8b949e", mdQuoteBorder: "#3a3f4b",
-  mdHr: "#3a3f4b", mdListBullet: "#8b949e", toolDiffAdded: "#3fb950", toolDiffRemoved: "#f85149",
-  toolDiffContext: "#c9d1d9", syntaxComment: "#8b949e", syntaxKeyword: "#ff7b72", syntaxFunction: "#d2a8ff",
-  syntaxVariable: "#ffa657", syntaxString: "#a5d6ff", syntaxNumber: "#79c0ff", syntaxType: "#ffa657",
-  syntaxOperator: "#ff7b72", syntaxPunctuation: "#c9d1d9", thinkingOff: "#8b949e", thinkingMinimal: "#8b949e",
-  thinkingLow: "#8b949e", thinkingMedium: "#8b949e", thinkingHigh: "#8b949e", thinkingXhigh: "#8b949e",
-  thinkingMax: "#8b949e", bashMode: "#3fb950",
+const DEFAULT_FG = {
+  accent: '#4f9cff',
+  border: '#3a3f4b',
+  borderAccent: '#4f9cff',
+  borderMuted: '#2c313c',
+  success: '#3fb950',
+  error: '#f85149',
+  warning: '#d29922',
+  muted: '#8b949e',
+  dim: '#6e7681',
+  text: '#e6edf3',
+  thinkingText: '#8b949e',
+  userMessageText: '#e6edf3',
+  customMessageText: '#e6edf3',
+  customMessageLabel: '#8b949e',
+  toolTitle: '#e6edf3',
+  toolOutput: '#c9d1d9',
+  mdHeading: '#e6edf3',
+  mdLink: '#58a6ff',
+  mdLinkUrl: '#8b949e',
+  mdCode: '#79c0ff',
+  mdCodeBlock: '#c9d1d9',
+  mdCodeBlockBorder: '#3a3f4b',
+  mdQuote: '#8b949e',
+  mdQuoteBorder: '#3a3f4b',
+  mdHr: '#3a3f4b',
+  mdListBullet: '#8b949e',
+  toolDiffAdded: '#3fb950',
+  toolDiffRemoved: '#f85149',
+  toolDiffContext: '#c9d1d9',
+  syntaxComment: '#8b949e',
+  syntaxKeyword: '#ff7b72',
+  syntaxFunction: '#d2a8ff',
+  syntaxVariable: '#ffa657',
+  syntaxString: '#a5d6ff',
+  syntaxNumber: '#79c0ff',
+  syntaxType: '#ffa657',
+  syntaxOperator: '#ff7b72',
+  syntaxPunctuation: '#c9d1d9',
+  thinkingOff: '#8b949e',
+  thinkingMinimal: '#8b949e',
+  thinkingLow: '#8b949e',
+  thinkingMedium: '#8b949e',
+  thinkingHigh: '#8b949e',
+  thinkingXhigh: '#8b949e',
+  thinkingMax: '#8b949e',
+  bashMode: '#3fb950',
 } as const
 
 const DEFAULT_BG = {
-  selectedBg: "#1f6feb", scrollbarThumb: "#30363d", userMessageBg: "#1f6feb",
-  customMessageBg: "#2d333b", toolPendingBg: "#2d333b", toolSuccessBg: "#238636",
-  toolErrorBg: "#da3633",
+  selectedBg: '#1f6feb',
+  scrollbarThumb: '#30363d',
+  userMessageBg: '#1f6feb',
+  customMessageBg: '#2d333b',
+  toolPendingBg: '#2d333b',
+  toolSuccessBg: '#238636',
+  toolErrorBg: '#da3633',
 } as const
 
 /** Structural ANSI theme used when the SDK is not loaded yet. */
@@ -342,9 +498,9 @@ const themeFallback = {
     return `\x1b[9m${text}\x1b[29m`
   },
   getFgAnsi(_color: string): string {
-    return ""
+    return ''
   },
   getBgAnsi(_color: string): string {
-    return ""
+    return ''
   },
 }

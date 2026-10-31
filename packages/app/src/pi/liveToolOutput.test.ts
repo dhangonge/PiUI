@@ -3,10 +3,14 @@ import { extractToolExecutionText, liveToolOutputStore } from './liveToolOutput'
 
 describe('extractToolExecutionText', () => {
   it('joins text blocks from a Pi partialResult', () => {
-    expect(extractToolExecutionText({ content: [
-      { type: 'text', text: 'total 48\n' },
-      { type: 'text', text: 'drwxr-xr-x src' },
-    ] })).toBe('total 48\ndrwxr-xr-x src')
+    expect(
+      extractToolExecutionText({
+        content: [
+          { type: 'text', text: 'total 48\n' },
+          { type: 'text', text: 'drwxr-xr-x src' },
+        ],
+      }),
+    ).toBe('total 48\ndrwxr-xr-x src')
   })
 
   it('ignores non-text blocks and malformed input', () => {

@@ -1,0 +1,5 @@
+{"type":"session","version":3,"id":"01a10bfd-d725-7b67-a6b0-7f198891d30d","timestamp":"2026-10-05T12:15:47.493Z","cwd":"/tmp/piui-sdk-contract-Vm87Ok/workspace"}
+{"type":"model_change","id":"ebecf528","parentId":null,"timestamp":"2026-10-05T12:15:47.498Z","provider":"piui-probe","modelId":"faux-1"}
+{"type":"thinking_level_change","id":"471dcf52","parentId":"ebecf528","timestamp":"2026-10-05T12:15:47.499Z","thinkingLevel":"off"}
+{"type":"message","id":"3ef68d57","parentId":"471dcf52","timestamp":"2026-10-05T12:15:47.510Z","message":{"role":"user","content":[{"type":"text","text":"offline contract prompt"}],"timestamp":1791202547507}}
+{"type":"message","id":"c3633775","parentId":"3ef68d57","timestamp":"2026-10-05T12:15:47.517Z","message":{"role":"assistant","content":[{"type":"text","text":"offline contract answer"}],"api":"piui-probe","provider":"piui-probe","model":"faux-1","usage":{"input":433,"output":6,"cacheRead":0,"cacheWrite":433,"totalTokens":872,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1791202547448}}

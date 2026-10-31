@@ -13,25 +13,25 @@ This document covers PiUI-owned APIs. Pi SDK parity is documented separately in 
 
 ## Workspace
 
-| Method | Route | Behavior |
-| --- | --- | --- |
-| `GET` | `/api/v1/workspaces` | List workspaces registered in this server process |
-| `GET` | `/api/v1/workspaces/default` | Register and return the default workspace |
-| `POST` | `/api/v1/workspaces` | Register an existing absolute host directory |
-| `GET` | `/api/v1/workspaces/:path` | Return a registered canonical workspace |
+| Method | Route                        | Behavior                                          |
+| ------ | ---------------------------- | ------------------------------------------------- |
+| `GET`  | `/api/v1/workspaces`         | List workspaces registered in this server process |
+| `GET`  | `/api/v1/workspaces/default` | Register and return the default workspace         |
+| `POST` | `/api/v1/workspaces`         | Register an existing absolute host directory      |
+| `GET`  | `/api/v1/workspaces/:path`   | Return a registered canonical workspace           |
 
 The canonical absolute path is the workspace identity and is URL-encoded as one path segment.
 
 ## Files
 
-| Method | Route | Behavior |
-| --- | --- | --- |
-| `GET` | `.../files?path=&limit=&cursor=` | Deterministic paged directory listing |
-| `POST` | `.../files` | Create a file or directory |
-| `GET` | `.../file?path=` | Read UTF-8 text or base64 binary content |
-| `PUT` | `.../file?path=` | Atomically write content with optional `If-Match` ETag |
-| `PATCH` | `.../file` | Move or rename an entry |
-| `DELETE` | `.../file?path=&recursive=` | Delete a file or directory |
+| Method   | Route                            | Behavior                                               |
+| -------- | -------------------------------- | ------------------------------------------------------ |
+| `GET`    | `.../files?path=&limit=&cursor=` | Deterministic paged directory listing                  |
+| `POST`   | `.../files`                      | Create a file or directory                             |
+| `GET`    | `.../file?path=`                 | Read UTF-8 text or base64 binary content               |
+| `PUT`    | `.../file?path=`                 | Atomically write content with optional `If-Match` ETag |
+| `PATCH`  | `.../file`                       | Move or rename an entry                                |
+| `DELETE` | `.../file?path=&recursive=`      | Delete a file or directory                             |
 
 Limits:
 
@@ -44,10 +44,10 @@ Concurrent writes to one path are serialized. If two writers use the same ETag, 
 
 ## Search
 
-| Method | Route | Behavior |
-| --- | --- | --- |
-| `GET` | `.../search/files?q=&type=&limit=` | Case-insensitive relative-path search |
-| `GET` | `.../search/text?q=&limit=` | Case-insensitive fixed-text search with byte offsets |
+| Method | Route                              | Behavior                                             |
+| ------ | ---------------------------------- | ---------------------------------------------------- |
+| `GET`  | `.../search/files?q=&type=&limit=` | Case-insensitive relative-path search                |
+| `GET`  | `.../search/text?q=&limit=`        | Case-insensitive fixed-text search with byte offsets |
 
 Search uses asynchronous filesystem I/O, skips dependency/build metadata directories and symlinks, and stops when a documented bound is reached. Every response includes `stats` with visited entries, scanned files/bytes, elapsed time, truncation, and limit reason. Client disconnect aborts the scan.
 
@@ -60,12 +60,12 @@ Limits:
 
 ## Git
 
-| Method | Route | Behavior |
-| --- | --- | --- |
-| `GET` | `.../git/info` | Root, branch, detached/unborn state, OID, upstream, default branch, ahead/behind |
-| `GET` | `.../git/status` | Rename-aware NUL-delimited index/worktree status |
-| `GET` | `.../git/diff?mode=` | Bounded diff file list and line statistics |
-| `GET` | `.../git/file-diff?mode=&path=` | Lazy unified patch for one listed file |
+| Method | Route                           | Behavior                                                                         |
+| ------ | ------------------------------- | -------------------------------------------------------------------------------- |
+| `GET`  | `.../git/info`                  | Root, branch, detached/unborn state, OID, upstream, default branch, ahead/behind |
+| `GET`  | `.../git/status`                | Rename-aware NUL-delimited index/worktree status                                 |
+| `GET`  | `.../git/diff?mode=`            | Bounded diff file list and line statistics                                       |
+| `GET`  | `.../git/file-diff?mode=&path=` | Lazy unified patch for one listed file                                           |
 
 Diff modes are `git` (`HEAD` to current files), `branch` (merge base to `HEAD`), `staged`, and `unstaged`. Binary changes and rename source paths are explicit. Branch mode returns the actual base ref and merge-base commit.
 
