@@ -14,7 +14,7 @@ import {
 } from './htmlSandbox'
 
 const HTML_SOURCE_BUTTON_CLASS =
-  'absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md bg-bg-300/70 p-2 text-accent-main-100 opacity-0 shadow-sm backdrop-blur-md transition-all hover:bg-bg-300/90 hover:text-accent-main-100 group-hover/html-preview:opacity-100 group-focus-within/html-preview:opacity-100'
+  'absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md bg-bg-300/85 p-2 text-accent-main-100 opacity-0 shadow-sm transition-all hover:bg-bg-300/90 hover:text-accent-main-100 group-hover/html-preview:opacity-100 group-focus-within/html-preview:opacity-100'
 
 function createStreamingHtmlDocument(resizeId: string, theme: 'light' | 'dark'): string {
   const themeHead = `<style id="piui-html-theme">${buildHtmlSandboxThemeCss(theme, 'hidden')}</style>`

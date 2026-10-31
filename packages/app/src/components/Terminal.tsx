@@ -304,7 +304,7 @@ function MobileExtraKeys({ onSend, stickyModifiers, onToggleSticky, onFocusTermi
 
   return (
     <div
-      className="w-full border-t border-border-200/40 bg-bg-100/95 supports-[backdrop-filter]:bg-bg-100/85 supports-[backdrop-filter]:backdrop-blur-sm"
+      className="w-full border-t border-border-200/40 bg-bg-100/95"
       style={{ WebkitTextSizeAdjust: '100%', textSizeAdjust: '100%' }}
     >
       <div className="px-1 py-1">

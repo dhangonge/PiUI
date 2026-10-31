@@ -287,11 +287,7 @@ export const CodeBlock = memo(function CodeBlock({
         <div
           className={`absolute top-2 right-2 z-10 opacity-0 group-hover/code:opacity-100 group-focus-within/code:opacity-100 ${requireTapToRevealCopy ? '[@media(hover:none)]:opacity-0' : '[@media(hover:none)]:opacity-100'} transition-opacity`}
         >
-          <CopyButton
-            text={code}
-            position="static"
-            className="!h-8 !w-8 !p-2 rounded-md bg-bg-300/70 backdrop-blur-md"
-          />
+          <CopyButton text={code} position="static" className="!h-8 !w-8 !p-2 rounded-md bg-bg-300/85" />
         </div>
       )}
 

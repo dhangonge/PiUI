@@ -11,7 +11,7 @@ const MERMAID_MIN_SCALE = 0.5
 const MERMAID_MAX_SCALE = 3
 const MERMAID_SCALE_STEP = 0.15
 const MERMAID_CONTROL_BUTTON_BASE_CLASS =
-  'inline-flex h-8 w-8 items-center justify-center rounded-md bg-bg-300/70 backdrop-blur-md transition-colors duration-150 hover:bg-bg-300/85 disabled:opacity-40 disabled:cursor-not-allowed'
+  'inline-flex h-8 w-8 items-center justify-center rounded-md bg-bg-300/85 transition-colors duration-150 hover:bg-bg-300/85 disabled:opacity-40 disabled:cursor-not-allowed'
 const MERMAID_CONTROL_BUTTON_CLASS = `${MERMAID_CONTROL_BUTTON_BASE_CLASS} text-text-400 hover:text-text-200`
 
 type DiagramPointer = { x: number; y: number }
