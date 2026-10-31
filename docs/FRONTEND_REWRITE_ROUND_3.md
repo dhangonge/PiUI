@@ -5,6 +5,7 @@
 - 用户授权：开始第三轮。起点 `13fa2c74`，工作区干净；大小检查通过（666 文件、13 个既有登记）。
 - 本轮是阶段 3 首包，不等于全部剩余界面或真机验收完成。
 - 上轮完整 validate、1371 测试通过 / 2 跳过及浏览器证据见 `docs/FRONTEND_REWRITE_ROUND_2.md`；不得冒充本轮结果。
+- 本轮结果：A/F/G/H 四个工作包已集成（`d13bc984` → `d3e56350`）；远端 fork CI 的 `validate ubuntu`、`validate windows`、`tauri check` 三个 job 全绿，ubuntu 上 app 178 文件 / 1264 测试、两个原始 smoke 与 9 条安卓 UI 断言全通过；真实 Chromium 采样证明切换反馈只发生一次、160ms、`[0.55, 1]`、可中断续接、`prefers-reduced-motion` 下归零。真机与帧率仍未验，见第 4 节。
 - 保持静态风格、文案、设置路径、快捷键、Pi 协议与原生行为。没有依赖变更、APK 安装或用户数据操作。
 
 ## 工作包与单写者
