@@ -150,7 +150,7 @@ export function SettingsSearch<T extends SearchMenuItem>({
           ref={listboxRef}
           id={listboxId}
           role="listbox"
-          className="absolute left-0 top-[calc(100%+6px)] max-h-72 min-w-full max-w-[calc(100vw-2rem)] overflow-y-auto rounded-md border border-border-200 bg-bg-000/95 p-1 shadow-xl backdrop-blur-xl custom-scrollbar"
+          className="absolute left-0 top-[calc(100%+6px)] max-h-72 min-w-full max-w-[calc(100vw-2rem)] overflow-y-auto rounded-md border border-border-200 bg-bg-000/95 p-1 shadow-xl custom-scrollbar"
         >
           {results.length === 0 ? (
             <div className="px-2.5 py-3 text-[length:var(--fs-xs)] text-text-400" role="status">
