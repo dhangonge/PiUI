@@ -108,8 +108,8 @@ export function usePiComposerBindings({
   }, [dialogCollapsed, collapsedDialogTitle, collapsedDialogQueueLength, expandCollapsedDialog])
 
   // latest-handler ref：渲染期不写 ref，用 layout effect 在本次提交的 paint 前同步。
-  // 用 `useLayoutEffect` + `[onCommand]` 而非 passive effect：passive 在 paint 之后
-  // 才跑，同一次提交里更早的 layout effect / 子组件 passive effect 会读到旧 handler。
+  // 在后续父 layout effect 与子 passive effect 之前同步，避免 passive 同步的延迟窗口。
+  // 不保证早于父组件执行的子 layout effect 能读到本次 handler。
   // 依赖 `onCommand` 即够——它由 PiChatPane 的 useCallback 产出，闭包一变引用就变。
   const commandRef = useRef(onCommand)
   useLayoutEffect(() => {

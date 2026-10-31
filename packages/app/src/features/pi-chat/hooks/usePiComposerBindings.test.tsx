@@ -14,7 +14,7 @@ import { usePiComposerBindings } from './usePiComposerBindings'
  * - 用 `useLayoutEffect` + `[onCommand]` 同步：同一次提交里，排在 hook 之后的
  *   父组件 layout effect 就能读到本次 handler；子组件的 passive effect 更晚，
  *   自然也是本次的。
- * - 若退回 passive `useEffect`：passive 在 paint 之后才跑，同一次提交里更早的
+ * - 若退回 passive `useEffect`：它晚于 layout 阶段，同一次提交里更早的
  *   父 layout effect 读到的还是上一次的 handler。前两条用例就是按这个差异写的
  *   （把 hook 里的 useLayoutEffect 换成 useEffect，它们会红）。
  *
